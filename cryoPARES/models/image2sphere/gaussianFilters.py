@@ -1,40 +1,53 @@
 import os.path
-from math import ceil
-from typing import Optional, List, Tuple
+from typing import Tuple
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from math import ceil
-import numpy as np
 from typing import Optional, List
-
 from einops import einops
 from omegaconf import MISSING
 
 from cryoPARES.configManager.config_searcher import inject_config
+from cryoPARES.datamanager.datamanager import get_number_image_channels
 
 
-@inject_config(classname="GaussianFilterBank")
-class NaiveGaussianFilterBank(nn.Module):
+class BaseGaussianFilterBank(nn.Module):
+    def __init__(self, in_channels: Optional[int], sigma_values: Optional[List[float]],
+                 kernel_sizes: Optional[List[int]], out_dim: Optional[int] = None):
+        super().__init__()
 
-    def __init__(self, in_channels, sigma_values, kernel_sizes: Optional[List[int]], out_dim: Optional[int] = None):
-        super(NaiveGaussianFilterBank, self).__init__()
-        if kernel_sizes is None:
-            kernel_sizes = [ceil(4*sigma +1) for sigma in sigma_values]
-        max_kernel_size = max(kernel_sizes)
-
-        self.in_channels = in_channels
+        self.in_channels = in_channels if in_channels not in (None, MISSING) else get_number_image_channels()
         self.sigma_values = sigma_values
-        self.kernel_sizes = kernel_sizes
-        # Create a list to hold the Gaussian kernels
-        kernels = []
-        for kernel_size, sigma in zip(kernel_sizes, sigma_values):
-            # Create 1D Gaussian kernel
+        self.kernel_sizes = kernel_sizes if kernel_sizes else [ceil(4 * sigma + 1) for sigma in sigma_values]
 
+        self.setup_kernels()
+        self.out_projection = (nn.Conv2d(len(sigma_values) * self.in_channels, out_dim, 1)
+                               if out_dim not in (None, MISSING) else nn.Identity())
+
+    @staticmethod
+    def gaussian_kernel(size: int, sigma: float) -> torch.Tensor:
+        coords = torch.arange(size).float() - (size // 2)
+        g = torch.exp(-(coords ** 2) / (2 * sigma ** 2))
+        return g / g.sum()
+
+    def setup_kernels(self):
+        raise NotImplementedError
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError
+
+
+@inject_config(classname="GaussianFilters")
+class NaiveGaussianFilterBank(BaseGaussianFilterBank):
+    def setup_kernels(self):
+        max_kernel_size = max(self.kernel_sizes)
+        kernels = []
+
+        for kernel_size, sigma in zip(self.kernel_sizes, self.sigma_values):
             if sigma > 0:
                 kernel_1D = self.gaussian_kernel(kernel_size, sigma)
-                # Create 2D Gaussian kernel
                 kernel_2D = kernel_1D[:, None] * kernel_1D[None, :]
             else:
                 kernel_2D = torch.tensor([[0.0, 0.0, 0.0],
@@ -42,58 +55,27 @@ class NaiveGaussianFilterBank(nn.Module):
                                           [0.0, 0.0, 0.0]])
                 kernel_size = 3
 
-            # Pad kernel with zeros to have the same size as max_kernel_size
             padding = max_kernel_size - kernel_size
             pad_left = padding // 2
             pad_right = padding - pad_left
             kernel_2D = F.pad(kernel_2D, (pad_left, pad_right, pad_left, pad_right))
-
-            # Add channel dimension and append to the list
             kernels.append(kernel_2D[None, None, :, :])
 
-        # Stack the Gaussian kernels into a single tensor
         all_kernels = torch.cat(kernels, dim=0)
+        self.register_buffer('all_kernels', all_kernels.repeat(self.in_channels, 1, 1, 1))
 
-        # Repeat the kernels for each channel in the image
-        all_kernels = all_kernels.repeat(self.in_channels, 1, 1, 1)
-
-        # Register as a buffer so PyTorch can recognize it as a model parameter
-        self.register_buffer('all_kernels', all_kernels)
-
-        if out_dim and out_dim != self.all_kernels.shape[0]:
-            self.lastLayer = nn.Conv2d(in_channels=self.all_kernels.shape[0], out_channels=out_dim,
-                                       kernel_size=max(kernel_sizes), padding="same")
-        else:
-            self.lastLayer = nn.Identity()
-    @staticmethod
-    def gaussian_kernel(size, sigma):
-        coords = torch.arange(size).float()
-        coords -= size // 2
-        g = torch.exp(-(coords ** 2) / (2 * sigma ** 2))
-        g /= g.sum()
-        return g
-
-    def forward(self, x):
-        # Perform depthwise convolution
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = F.conv2d(x, self.all_kernels, groups=self.in_channels, padding="same")
-        return self.lastLayer(x)
+        return self.out_projection(x)
 
-@inject_config(classname="GaussianFilterBank")
-class SeparableGaussianFilterBank(nn.Module):
-    def __init__(self, in_channels, sigma_values, kernel_sizes: Optional[List[int]] = None,
-                 out_dim: Optional[int] = None):
-        super().__init__()
-        if kernel_sizes is None:
-            kernel_sizes = [ceil(4 * sigma + 1) for sigma in sigma_values]
 
-        self.in_channels = in_channels
-        self.n_filters = len(sigma_values)
-        self.sigma_values = sigma_values
-        max_kernel_size = max(kernel_sizes)
-
-        # Create base kernels [n_filters, kernel_size]
+@inject_config(classname="GaussianFilters")
+class SeparableGaussianFilterBank(BaseGaussianFilterBank):
+    def setup_kernels(self):
+        max_kernel_size = max(self.kernel_sizes)
         kernels = []
-        for kernel_size, sigma in zip(kernel_sizes, sigma_values):
+
+        for kernel_size, sigma in zip(self.kernel_sizes, self.sigma_values):
             if sigma > 0:
                 kernel = self.gaussian_kernel(kernel_size, sigma)
                 padding = max_kernel_size - kernel_size
@@ -104,86 +86,54 @@ class SeparableGaussianFilterBank(nn.Module):
                 kernel = torch.zeros(max_kernel_size)
                 kernel[max_kernel_size // 2] = 1.0
             kernels.append(kernel)
-        kernels = torch.stack(kernels)  # [n_filters, kernel_size]
 
-        # kernels_h: [(n_filters * in_channels), 1, kernel_size, 1]
-        kernels_h = kernels.unsqueeze(1).unsqueeze(-1).repeat_interleave(in_channels, dim=0)
+        kernels = torch.stack(kernels)
+        self.register_buffer('kernels_h', kernels.unsqueeze(1).unsqueeze(-1).repeat_interleave(self.in_channels, dim=0))
+        self.register_buffer('kernels_v', kernels.unsqueeze(1).unsqueeze(2).repeat_interleave(self.in_channels, dim=0))
 
-        # kernels_v: [(n_filters * in_channels), 1, 1, kernel_size]
-        kernels_v = kernels.unsqueeze(1).unsqueeze(2).repeat_interleave(in_channels, dim=0)
-
-        self.register_buffer('kernels_h', kernels_h)
-        self.register_buffer('kernels_v', kernels_v)
-        self.out_projection = nn.Conv2d(self.n_filters * in_channels, out_dim, 1) if out_dim else nn.Identity()
-
-    @staticmethod
-    def gaussian_kernel(size, sigma):
-        coords = torch.arange(size).float()
-        coords -= size // 2
-        g = torch.exp(-(coords ** 2) / (2 * sigma ** 2))
-        g /= g.sum()
-        return g
-
-    def forward(self, x):
-        # Apply horizontal: [b, (f*c), h, w]
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         h_filtered = F.conv2d(x, self.kernels_h, groups=self.in_channels, padding='same')
-
-        # Apply vertical: [b, (f*c), h, w]
-        v_filtered = F.conv2d(h_filtered, self.kernels_v, groups=self.in_channels * self.n_filters, padding='same')
-
+        v_filtered = F.conv2d(h_filtered, self.kernels_v, groups=self.in_channels * len(self.sigma_values),
+                              padding='same')
         return self.out_projection(v_filtered)
 
-@inject_config(classname="GaussianFilterBank")
-class FFTGaussianFilterBank(nn.Module):
-    def __init__(self, in_channels, sigma_values, kernel_sizes: Optional[List[int]] = None,
-                 out_dim: Optional[int] = None):
-        super().__init__()
-        self.in_channels = in_channels
-        assert kernel_sizes is None or kernel_sizes is MISSING, "Error, kernel sizes not used in FFT-based convolution"
-        self.sigma_values = sigma_values
-        self.out_projection = nn.Conv2d(len(sigma_values) * in_channels, out_dim, 1) if out_dim else nn.Identity()
+
+@inject_config(classname="GaussianFilters")
+class FFTGaussianFilterBank(BaseGaussianFilterBank):
+    def setup_kernels(self):
+        pass
 
     def get_gaussian_freq(self, sigma: torch.Tensor, shape: tuple) -> torch.Tensor:
-        """Create Gaussian filters in frequency domain for all sigmas at once"""
         rows, cols = shape[-2:]
-        center_row, center_col = rows // 2, cols // 2
+        cols_rfft = cols // 2 + 1  # Only need half + 1 frequencies for real input
+        center_row = rows // 2
 
         y = torch.arange(-center_row, rows - center_row, device=sigma.device)
-        x = torch.arange(-center_col, cols - center_col, device=sigma.device)
+        x = torch.arange(cols_rfft, device=sigma.device)  # Only positive frequencies
         Y, X = torch.meshgrid(y, x, indexing='ij')
 
-        # Compute all filters at once: [n_sigma, H, W]
         sigma = sigma.view(-1, 1, 1)
-        freq_resp = torch.where(
+        return torch.where(
             sigma == 0,
-            torch.ones((1, rows, cols), device=sigma.device),
-            torch.exp(-2 * (np.pi ** 2) * sigma ** 2 * (X ** 2 + Y ** 2) / (rows * cols))
+            torch.ones((1, rows, cols_rfft), device=sigma.device),
+            torch.exp(-2 * (torch.pi ** 2) * sigma ** 2 * (X ** 2 + Y ** 2) / (rows * cols))
         )
-        return freq_resp
 
-    def forward(self, x):
-        device = x.device
-        sigma_tensor = torch.tensor(self.sigma_values, device=device)
-
-        # Get frequency response for all filters: [n_sigma, H, W]
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        sigma_tensor = torch.tensor(self.sigma_values, device=x.device)
         H = self.get_gaussian_freq(sigma_tensor, x.shape)
 
-        # FFT of input
-        x_freq = torch.fft.fft2(x)
-        x_freq = torch.fft.fftshift(x_freq, dim=(-2, -1))
+        x_freq = torch.fft.rfft2(x)
+        x_freq = torch.fft.fftshift(x_freq, dim=(-2,))  # Only shift rows
 
-        # Apply all filters at once using broadcasting
-        x_freq = x_freq.unsqueeze(1)  # [B, 1, C, H, W]
-        H = H.unsqueeze(1).unsqueeze(0)  # [1, n_sigma, 1, H, W]
+        filtered_freq = x_freq.unsqueeze(1) * H.unsqueeze(1).unsqueeze(0)
+        filtered_freq = torch.fft.ifftshift(filtered_freq, dim=(-2,))
+        filtered = torch.fft.irfft2(filtered_freq, s=x.shape[-2:]).real
 
-        filtered_freq = x_freq * H
-        filtered_freq = torch.fft.ifftshift(filtered_freq, dim=(-2, -1))
-        filtered = torch.fft.ifft2(filtered_freq).real
+        return self.out_projection(einops.rearrange(filtered, 'b f c h w -> b (f c) h w'))
 
-        # Rearrange to expected output format
-        filtered = einops.rearrange(filtered, 'b f c h w -> b (f c) h w')
-        return self.out_projection(filtered)
 
+# Default implementation
 GaussianFilterBank = SeparableGaussianFilterBank
 
 
@@ -195,7 +145,7 @@ def _getImg():
     image_tensor = torch.tensor(image, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
     return image_tensor
 
-def _getParticle():
+def _getParticle(): #TODO: use a small set of data for test
     from starstack import ParticlesStarSet
     particles = ParticlesStarSet(os.path.expanduser("~/cryo/data/preAlignedParticles/EMPIAR-10166/data/1000particles.star"))
     img, md = particles[1]
@@ -212,7 +162,7 @@ def _visual_test():
     sigma_values = [0., 1., 3., 5., 10.]
     # from math import ceil
     # kernel_sizes = [ceil(4*sigma +1) for sigma in sigma_values]
-    GaussianFilters = NaiveGaussianFilterBank #SeparableGaussianFilterBank #FFTGaussianFilterBank #SeparableGaussianFilterBank #NaiveGaussianFilterBank
+    GaussianFilters = FFTGaussianFilterBank #SeparableGaussianFilterBank #FFTGaussianFilterBank #NaiveGaussianFilterBank
     gaussian_filter_bank = GaussianFilters(1) #GaussianFilters(1, sigma_values, kernel_sizes)
 
     # Apply the Gaussian filters
@@ -304,6 +254,6 @@ def run_benchmark():
 
 
 if __name__ == "__main__":
-    _visual_test()
-    # run_benchmark()
+    # _visual_test()
+    run_benchmark()
 

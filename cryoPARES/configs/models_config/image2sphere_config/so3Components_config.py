@@ -19,3 +19,7 @@ class S2Conv_config:
 class SO3Conv_config:
     max_rads: float = np.pi/12 # np.pi/12== 15º
     n_angles: int = 8
+
+@dataclass
+class SO3Grid_config:
+    pass

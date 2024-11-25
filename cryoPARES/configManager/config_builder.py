@@ -1,9 +1,13 @@
+import functools
+import os
 from dataclasses import dataclass, field, make_dataclass, MISSING, fields
 from typing import Dict, Type, Any, Optional, List, Tuple, get_type_hints
 from pathlib import Path
 import importlib.util
 import sys
 import inspect
+
+import warnings
 
 
 def clean_name(name: str) -> str:
@@ -23,7 +27,7 @@ def load_python_module(file_path: Path) -> Optional[Any]:
         spec.loader.exec_module(module)
         return module
     except Exception as e:
-        print(f"Error loading module {file_path}: {e}")
+        warnings.warn(f"Error loading module {file_path}: {e}")
         return None
 
 
@@ -54,33 +58,50 @@ def get_module_configs(module: Any) -> Tuple[Dict[str, Type], Dict[str, Any]]:
     return nested_configs, direct_fields
 
 
-def find_configs_recursive(directory: Path) -> Dict[str, Any]:
-    """
-    Recursively find all configs and fields in __init__.py files.
-    Returns a nested dictionary structure of configs and fields.
-    """
-    results = {}
+def find_configs_recursive(directory: Path, debug: bool = False) -> Dict[str, Any]:
+    """Recursively find all configs and fields."""
+    results = {'configs': {}, 'fields': {}}
 
-    # Check for __init__.py
-    init_file = directory / '__init__.py'
+    # First process __init__.py if it exists
+    init_file = directory / "__init__.py"
     if init_file.exists():
+        if debug:
+            print(f"Processing {init_file}")
         module = load_python_module(init_file)
         if module:
             nested_configs, direct_fields = get_module_configs(module)
-            if nested_configs:
-                results['configs'] = nested_configs
-            if direct_fields:
-                results['fields'] = direct_fields
+            results['configs'].update(nested_configs)
+            results['fields'].update(direct_fields)
+
+    # Then process other .py files
+    for fname in os.listdir(directory):
+        if fname.endswith(".py") and fname not in ["__init__.py", "mainConfig.py"]:
+            config_file = directory / fname
+            if debug:
+                print(f"Processing {config_file}")
+            module = load_python_module(config_file)
+            if module:
+                nested_configs, direct_fields = get_module_configs(module)
+                if len(nested_configs) == 1:
+                    results['configs'].update(nested_configs)
+                else:
+                    module_name = clean_name(fname[:-3])
+                    results[module_name] = {
+                        'configs': nested_configs,
+                        'fields': direct_fields
+                    }
 
     # Process subdirectories
     for path in directory.iterdir():
         if path.is_dir() and not path.name.startswith('__'):
-            sub_results = find_configs_recursive(path)
-            if sub_results:  # Only add non-empty results
-                results[clean_name(path.name)] = sub_results
+            sub_results = find_configs_recursive(path, debug)
+            if sub_results:
+                clean_subdir_name = clean_name(path.name)
+                if debug:
+                    print(f"Adding subdirectory {clean_subdir_name}")
+                results[clean_subdir_name] = sub_results
 
-    return results
-
+    return {k: v for k, v in results.items() if v}
 
 def create_dataclass_structure(
         name: str,
@@ -144,3 +165,55 @@ def build_config_structure(project_root: Path, root_config_dict:Optional[Dict[st
     if main_config is None:
         raise ValueError("No config classes found in project")
     return main_config
+
+
+@functools.cache
+def find_configs_root() -> Path:
+    """Find the project root by looking for setup.py"""
+    return _find_directory_with_marker('constants.py')
+
+@functools.cache
+def find_project_root() -> Path:
+    """Find the project root by looking for setup.py"""
+    return _find_directory_with_marker('setup.py')
+
+def _find_directory_with_marker(marker_file):
+    """Find the project root by looking for setup.py"""
+    current = Path(__file__).resolve()
+    while current.parent != current:  # While we haven't hit the root
+        if (current / marker_file).exists():
+            return current
+        current = current.parent
+    raise FileNotFoundError(f"Could not find {marker_file} in any parent directory")
+
+def get_module_path(cls: Type, classname: Optional[str] = None) -> List[str]:
+    """
+    Get the module path by comparing file location to project root.
+    Returns: List of path components, e.g. ['models', 'image2sphere', 'components']
+    """
+    try:
+        actual_path = Path(os.path.abspath(sys.modules[cls.__module__].__file__))
+    except (AttributeError, KeyError):
+        actual_path = Path(__file__).resolve()
+    # Get project root
+    root = find_configs_root()
+
+    # Get relative path from project root to module
+    rel_path = actual_path.relative_to(root)
+
+    # Convert path to module components, excluding the filename and any __init__.py
+    path_parts = list(rel_path.parts)
+
+    if path_parts[0] == '.':
+        path_parts = path_parts[1:]
+
+    # Remove common Python package markers
+    path_parts = [p.removesuffix(".py") for p in path_parts if p not in {'src', 'lib', '__pycache__'}]
+
+    # Add the class name (lowercase)
+    if classname:
+        path_parts.append(classname)
+    else:
+        path_parts.append(cls.__name__)
+    path_parts = [p.lower() for p in path_parts]
+    return path_parts

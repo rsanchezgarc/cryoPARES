@@ -1,71 +1,42 @@
-import os
-import sys
 from dataclasses import is_dataclass
 from typing import Any, Type, TypeVar, Union, Optional, List, Callable
 from inspect import signature
 import functools
-from pathlib import Path
 
+from cryoPARES.configManager.config_builder import get_module_path
 from cryoPARES.configs.mainConfig import main_config
 
 T = TypeVar('T')
 ConfigType = TypeVar('ConfigType')
 F = TypeVar('F', bound=Callable)
 
-@functools.cache
-def find_project_root() -> Path:
-    """Find the project root by looking for setup.py"""
-    current = Path(__file__).resolve()
-    while current.parent != current:  # While we haven't hit the root
-        if (current / 'constants.py').exists():
-            return current
-        current = current.parent
-    raise FileNotFoundError("Could not find setup.py in any parent directory")
 
-
-def get_module_path(cls: Type, classname: Optional[str] = None) -> List[str]:
-    """
-    Get the module path by comparing file location to project root.
-    Returns: List of path components, e.g. ['models', 'image2sphere', 'components']
-    """
-    try:
-        actual_path = Path(os.path.abspath(sys.modules[cls.__module__].__file__))
-    except (AttributeError, KeyError):
-        actual_path = Path(__file__).resolve()
-    # Get project root
-    root = find_project_root()
-
-    # Get relative path from project root to module
-    rel_path = actual_path.relative_to(root)
-
-    # Convert path to module components, excluding the filename and any __init__.py
-    path_parts = list(rel_path.parts)
-
-    if path_parts[0] == '.':
-        path_parts = path_parts[1:]
-
-    # Remove common Python package markers
-    path_parts = [p.removesuffix(".py") for p in path_parts if p not in {'src', 'lib', '__pycache__'}]
-
-    # Add the class name (lowercase)
-    if classname:
-        path_parts.append(classname)
-    else:
-        path_parts.append(cls.__name__)
-    path_parts = [p.lower() for p in path_parts]
-    return path_parts
-
-
-def find_config(obj: Any, path: List[str]) -> Optional[Any]:
-    """Recursively traverse object using path to find config."""
+def find_config(obj: Any, path: List[str], debug: bool = False) -> Optional[Any]:
+    """Traverse config path, checking terminal nodes at each step"""
     current = obj
-    for part in path:
+
+    for i, part in enumerate(path[:-1]):  # All but last part
+        if debug:
+            print(f"At level {i}, checking {part}")
+
         try:
             current = getattr(current, part)
+            terminal = getattr(current, path[-1], None)
+            if is_dataclass(terminal):
+                if debug:
+                    print(f"Found terminal config at level {i}")
+                return terminal
         except AttributeError:
             return None
-    return current
 
+    try:
+        final = getattr(current, path[-1])
+        if is_dataclass(final):
+            return final
+    except AttributeError:
+        return None
+
+    return None
 
 def inject_params_from_config(func: F, config: Any, is_method: bool = False) -> F:
     """Injects parameters from config into a function or method."""

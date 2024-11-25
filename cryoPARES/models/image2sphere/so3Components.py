@@ -9,6 +9,7 @@ from torch import nn
 from cryoPARES.cacheManager import get_cache
 from cryoPARES.configManager.config_searcher import inject_config
 from cryoPARES.geometry.grids import s2_healpix_grid, so3_near_identity_grid_cartesianprod, so3_healpix_grid
+from cryoPARES.geometry.metrics_angles import nearest_rotmat_idx
 
 
 def s2_irreps(lmax):
@@ -220,7 +221,7 @@ class SO3Conv(nn.Module):
 
 
 
-# @inject_config()
+@inject_config()
 class SO3Grid(nn.Module):
     '''Define S2 group convolution which outputs signal over SO(3) irreps'''
 

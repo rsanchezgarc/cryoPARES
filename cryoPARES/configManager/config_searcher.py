@@ -23,7 +23,7 @@ def find_project_root() -> Path:
     raise FileNotFoundError("Could not find setup.py in any parent directory")
 
 
-def get_module_path(cls: Type) -> List[str]:
+def get_module_path(cls: Type, classname: Optional[str] = None) -> List[str]:
     """
     Get the module path by comparing file location to project root.
     Returns: List of path components, e.g. ['models', 'image2sphere', 'components']
@@ -48,8 +48,11 @@ def get_module_path(cls: Type) -> List[str]:
     path_parts = [p.removesuffix(".py") for p in path_parts if p not in {'src', 'lib', '__pycache__'}]
 
     # Add the class name (lowercase)
-    path_parts.append(cls.__name__.lower())
-
+    if classname:
+        path_parts.append(classname)
+    else:
+        path_parts.append(cls.__name__)
+    path_parts = [p.lower() for p in path_parts]
     return path_parts
 
 
@@ -90,6 +93,7 @@ def inject_params_from_config(func: F, config: Any, is_method: bool = False) -> 
 def inject_config(
         config_class_or_instance: Union[Type[ConfigType], ConfigType, None] = None,
         methods: Optional[List[str]] = None,
+        classname: Optional[str] = None,
 ):
     """
     Decorator that injects config values, with auto-search in main_config if no config provided.
@@ -101,7 +105,7 @@ def inject_config(
         config = config_class_or_instance
         if config is None:
             # Auto-detect path
-            path = get_module_path(target if isinstance(target, type) else target.__class__)
+            path = get_module_path(target if isinstance(target, type) else target.__class__, classname=classname)
             found_config = find_config(main_config, path)
 
             if found_config is not None and is_dataclass(found_config):

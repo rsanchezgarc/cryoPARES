@@ -14,7 +14,7 @@ from cryoPARES.geometry.grids import s2_healpix_grid, so3_healpix_grid
 from cryoPARES.geometry.metrics_angles import rotation_magnitude, mean_rot_matrix
 from cryoPARES.geometry.nearest_neigs_sphere import compute_nearest_neighbours
 from cryoPARES.geometry.symmetry import getSymmetryGroup
-from cryoPARES.models.image2sphere.components import S2Conv, SO3Conv, I2SProjector, SO3Grid
+from cryoPARES.models.image2sphere.so3Components import S2Conv, SO3Conv, I2SProjector, SO3Grid
 
 
 class I2S(nn.Module):

@@ -5,6 +5,8 @@ import numpy as np
 
 @dataclass
 class I2SProjector_config:
+    sphere_fdim: int = 512
+    hp_order: int = 3
     coverage: float = 0.9
     sigma: float = 0.2
     max_beta: float = np.radians(90)
@@ -13,13 +15,19 @@ class I2SProjector_config:
 
 @dataclass
 class S2Conv_config:
-   pass
+    f_out: int = 64
+    hp_order: int = 4
+
+@dataclass
+class SO3Activation_config:
+    so3_act_resolution : int = 10
 
 @dataclass
 class SO3Conv_config:
+    f_out = 1
     max_rads: float = np.pi/12 # np.pi/12== 15º
     n_angles: int = 8
 
 @dataclass
-class SO3Grid_config:
-    pass
+class SO3OuptutGrid_config:
+    hp_order: int = 4

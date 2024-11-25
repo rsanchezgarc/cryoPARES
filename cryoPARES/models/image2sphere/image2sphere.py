@@ -10,53 +10,67 @@ from tqdm import tqdm
 
 from cryoPARES.cacheManager import get_cache
 from cryoPARES.configs.mainConfig import main_config
-from cryoPARES.geometry.grids import s2_healpix_grid, so3_healpix_grid
+from cryoPARES.constants import BATCH_PARTICLES_NAME
+from cryoPARES.datamanager.datamanager import get_example_random_batch
 from cryoPARES.geometry.metrics_angles import rotation_magnitude, mean_rot_matrix
 from cryoPARES.geometry.nearest_neigs_sphere import compute_nearest_neighbours
 from cryoPARES.geometry.symmetry import getSymmetryGroup
-from cryoPARES.models.image2sphere.so3Components import S2Conv, SO3Conv, I2SProjector, SO3Grid
+from cryoPARES.models.image2sphere.imageEncoder.imageEncoder import ImageEncoder
+from cryoPARES.models.image2sphere.so3Components import S2Conv, SO3Conv, I2SProjector, SO3OuptutGrid, SO3Activation
 
 
-class I2S(nn.Module):
+class Image2sphere(nn.Module):
     '''
-    Instantiate I2S-style network for predicting distributions over SO(3) from
+    Instantiate Image2sphere-style network for predicting distributions over SO(3) from
     single image
     '''
 
     cache = get_cache(cache_name=__qualname__)
 
     def __init__(self,
-                 image_encoder, imageEncoderOutputShape,
-                 lmax, s2_fdim, so3_fdim,
-                 hp_order_projector,
-                 hp_order_s2,
-                 hp_order_so3,
-                 so3_act_resolution,  # TODO: what is the effect of resolution??
-                 rand_fraction_points_to_project,
-                 symmetry="c1",
+                 image_encoder,
+                 # imageEncoderOutputShape,
+                 lmax,
+                 # s2_fdim, so3_fdim,
+                 # hp_order_projector, #TODO: move hp_order, s2_fdim... to their own configs
+                 # hp_order_s2,
+                 # hp_order_so3,
+                 # so3_act_resolution,  # TODO: what is the effect of resolution??
+                 # rand_fraction_points_to_project,
+                 symmetry,
                  enforce_symmetry=True):
         super().__init__()
 
         self.encoder = image_encoder
-        self.lmax = lmax
-        self.s2_fdim = s2_fdim
-        self.so3_fdim = so3_fdim
-        self.hp_order_projector = hp_order_projector
-        self.hp_order_s2 = hp_order_s2
-        self.hp_order = hp_order_so3
+        # self.lmax = lmax
+        # self.s2_fdim = s2_fdim
+        # self.so3_fdim = so3_fdim
+        # self.hp_order_projector = hp_order_projector
+        # self.hp_order_s2 = hp_order_s2
+        # self.hp_order = hp_order_so3
+
+        batch = get_example_random_batch()
+        x = batch[BATCH_PARTICLES_NAME]
+        out = image_encoder(x)
 
         self.projector = I2SProjector(
-            fmap_shape=imageEncoderOutputShape,
-            sphere_fdim=s2_fdim,
+            fmap_shape=out.shape[1:],
+            # sphere_fdim=s2_fdim,
             lmax=lmax,
-            hp_order=self.hp_order_projector,
-            rand_fraction_points_to_project=rand_fraction_points_to_project
+            # hp_order=self.hp_order_projector,
+            # rand_fraction_points_to_project=rand_fraction_points_to_project
         )
+        out = self.projector(out)
 
-        self.s2_conv = S2Conv(s2_fdim, so3_fdim, lmax, hp_order_s2)
-        self.so3_act = I2S._build_so3_activation(lmax, so3_act_resolution)
-        self.so3_conv = SO3Conv(so3_fdim, 1, lmax)
-        self.so3_grid = SO3Grid(lmax, hp_order_so3)
+        self.s2_conv = S2Conv(f_in=out.shape[1], lmax=lmax) #lmax, s2_fdim, so3_fdim, lmax, hp_order_s2)
+        out = self.s2_conv(out)
+
+        self.so3_act = SO3Activation(lmax=lmax) #lmax, so3_act_resolution)
+
+        out = self.so3_act(out)
+
+        self.so3_conv = SO3Conv(f_in=out.shape[1], lmax=lmax) #so3_fdim, 1, lmax)
+        self.so3_grid = SO3OuptutGrid(lmax=lmax)#, hp_order_so3)
 
 
         self.symmetry = symmetry
@@ -68,14 +82,9 @@ class I2S(nn.Module):
         self._get_symmetry_equivalent_idxs() #what are the idxs that are equivalent under a symmetry group
         self.rotation_contraction_idxs() #indices that need to be averaged to make sure everybody in the symmetry group are o
         self._get_neigs_matrix()
-        print(f"I2S initialized (output_rotmats:{self.so3_grid.output_rotmats.shape[0]})")
+        print(f"Image2sphere initialized (output_rotmats:{self.so3_grid.output_rotmats.shape[0]})")
 
 
-
-    @staticmethod
-    @cache.cache()
-    def _build_so3_activation(lmax, so3_act_resolution):
-        return e3nn.nn.SO3Activation(lmax, lmax, act=torch.relu, resolution=so3_act_resolution)
 
     def predict_wignerDs(self, x):
         '''Returns so3 irreps
@@ -338,7 +347,7 @@ class I2S(nn.Module):
         if hp_order is None:
             so3_grid = self.so3_grid
         else:
-            so3_grid = SO3Grid(self.lmax, self.hp_order)
+            so3_grid = SO3OuptutGrid(self.lmax, self.hp_order)
 
         x = self.predict_wignerDs(img)
         logits = torch.matmul(x, so3_grid.output_wigners).squeeze(1)
@@ -421,14 +430,16 @@ def plot_so3_distribution(probs: torch.Tensor,
 
 
 def _test():
-    model = torchvision.models.resnet152(weights=None)  # Better if pretrained
-    model = nn.Sequential(*list(model.children())[:-2])
 
-    b, c, l = 4, 3, 224
-    imgs = torch.rand(b, c, l, l)
+    model = ImageEncoder()
 
-    model = I2S(model, model(imgs).shape[1:], lmax=6, s2_fdim=512, so3_fdim=16, hp_order_s2=1, hp_order_so3=3,
-                hp_order_projector=2, so3_act_resolution=10, rand_fraction_points_to_project=0.5, symmetry="c2")
+    b = 4
+    imgs = get_example_random_batch(4)[BATCH_PARTICLES_NAME]
+
+    model = Image2sphere(model, lmax=6, symmetry="c2",
+                         # s2_fdim=512, so3_fdim=16, hp_order_s2=1, hp_order_so3=3,
+                         # hp_order_projector=2, so3_act_resolution=10, rand_fraction_points_to_project=0.5,
+                         )
     model.eval()
     with torch.inference_mode():
         from scipy.spatial.transform import Rotation

@@ -15,7 +15,7 @@ from cryoPARES.datamanager.datamanager import get_number_image_channels
 
 class BaseGaussianFilterBank(nn.Module):
     def __init__(self, in_channels: Optional[int], sigma_values: Optional[List[float]],
-                 kernel_sizes: Optional[List[int]], out_dim: Optional[int] = None):
+                 kernel_sizes: Optional[List[int]],out_channels: Optional[int] = None):
         super().__init__()
 
         self.in_channels = in_channels if in_channels not in (None, MISSING) else get_number_image_channels()
@@ -23,8 +23,8 @@ class BaseGaussianFilterBank(nn.Module):
         self.kernel_sizes = kernel_sizes if kernel_sizes else [ceil(4 * sigma + 1) for sigma in sigma_values]
 
         self.setup_kernels()
-        self.out_projection = (nn.Conv2d(len(sigma_values) * self.in_channels, out_dim, 1)
-                               if out_dim not in (None, MISSING) else nn.Identity())
+        self.out_projection = (nn.Conv2d(len(sigma_values) * self.in_channels, out_channels, 1)
+                               if out_channels not in (None, MISSING) else nn.Identity())
 
     @staticmethod
     def gaussian_kernel(size: int, sigma: float) -> torch.Tensor:

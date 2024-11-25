@@ -11,3 +11,5 @@ RELION_PRED_POSE_CONFIDENCE_NAME: str = 'rlnParticleFigureOfMerit'
 RELION_ORI_POSE_CONFIDENCE_NAME: str = 'rlnMaxValueProbDistribution'
 """ The name of the metadata field with the estimated pose probability"""
 RELION_IMAGE_FNAME: str = 'rlnImageName'
+
+BATCH_PARTICLES_NAME: str = "particles"

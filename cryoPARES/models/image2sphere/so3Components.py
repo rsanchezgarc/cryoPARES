@@ -1,3 +1,4 @@
+import e3nn
 import torch
 
 from typing import Tuple, Optional
@@ -222,7 +223,7 @@ class SO3Conv(nn.Module):
 
 
 @inject_config()
-class SO3Grid(nn.Module):
+class SO3OuptutGrid(nn.Module):
     '''Define S2 group convolution which outputs signal over SO(3) irreps'''
 
     cache = get_cache(cache_name=__qualname__)
@@ -247,6 +248,7 @@ class SO3Grid(nn.Module):
     @cache.cache()
     def build_components(lmax: int, hp_order: int):
         output_eulerRad_yxy, _ = so3_healpix_grid(hp_order=hp_order)
+        output_eulerRad_yxy = output_eulerRad_yxy.transpose(0, 1)
         output_wigners = flat_wigner(lmax, *output_eulerRad_yxy).transpose(0, 1)
         output_rotmats = o3.angles_to_matrix(*output_eulerRad_yxy)
         return output_eulerRad_yxy, output_wigners, output_rotmats
@@ -264,6 +266,23 @@ class SO3Grid(nn.Module):
 
     def forward(self, rotMat: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         return self.nearest_rotmat(rotMat)
+
+@inject_config()
+class SO3Activation(nn.Module):
+    cache = get_cache(cache_name=__qualname__)
+    def __init__(self, lmax, so3_act_resolution):
+        super().__init__()
+        self.lmax = lmax
+        self.act = SO3Activation.build_components(lmax, so3_act_resolution)
+
+    @staticmethod
+    @cache.cache()
+    def build_components(lmax: int, so3_act_resolution: int):
+        return e3nn.nn.SO3Activation(lmax, lmax, act=torch.relu, resolution=so3_act_resolution)
+
+    def forward(self, x):
+        return self.act(x)
+
 
 def _test_SO3Conv():
     # Test parameters

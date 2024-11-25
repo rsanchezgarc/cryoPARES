@@ -12,6 +12,6 @@ class EncoderArchitecture(str, Enum):
 @dataclass
 class ImageEncoder_fields:
     encoderArtchitecture: EncoderArchitecture = EncoderArchitecture.ResNet
-    other_variable: str = "ImageEncoder_config"
+    out_channels: Optional[int] = 512
 
 

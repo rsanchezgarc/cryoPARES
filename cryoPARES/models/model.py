@@ -2,45 +2,28 @@ from typing import Union
 
 import torch
 import lightning.pytorch as pl
+from fontTools.misc.cython import returns
+
+from cryoPARES.models.image2sphere.image2sphere import Image2Sphere
 
 
 class PlModel(pl.LightningModule):
-    def __init__(self, image_size: int,
-                 symmetry: str, num_augmented_copies_per_batch:int):
-        """
+    def __init__(self, symmetry: str, num_augmented_copies_per_batch:int):
 
-        Args:
-            image_size: The size of the image, e.g. 256 pixels
-            feature_extractor: A vision model that takes an image of shape 1 x image_size x image_size and returns an \
-                image os shape C x K x K, with K< image_size
-            symmetry (str): The symmetry to be applied during training
-            num_augmented_copies_per_batch (int): The number of (augmented) copies of each image in a batch
-            lmax (int): The frequency of the signal
-            s2_fdim (int): The number of filters for the S2 convolution
-            so3_fdim (int): The number of filters for the SO(3) convolution
-            hp_order_so3 (int): The grid size for the probability calculation
-            rand_fraction_points_to_project (float): The fraction of points in the HEALPIX grid to be used in the \
-             hemisphere. Works similarly to dropout. Smaller numbers should reduce overfitting.
-        """
         super().__init__()
-        # self.save_hyperparameters(ignore=['feature_extractor']) #Not needed since we are using CLI
 
         self.symmetry = symmetry
         self.num_augmented_copies_per_batch = num_augmented_copies_per_batch
 
-        example = torch.rand(1, feature_extractor.in_channels, image_size, image_size)
-        imageEncoderOutputShape = feature_extractor(example).shape[1:]
 
-        self.model = I2S(imageEncoder=feature_extractor, imageEncoderOutputShape=imageEncoderOutputShape,
-                         symmetry=self.symmetry, lmax=lmax,
-                         s2_fdim=s2_fdim, so3_fdim=so3_fdim,
-                         hp_order_projector=hp_order_projector,
-                         hp_order_s2=hp_order_s2,
-                         hp_order_so3=hp_order_so3,
-                         rand_fraction_points_to_project=rand_fraction_points_to_project,
-                         num_augmented_copies_per_batch=num_augmented_copies_per_batch)
+        self.model = self.build_components(symmetry, num_augmented_copies_per_batch)
 
-
+    @staticmethod
+    def build_components(symmetry, num_augmented_copies_per_batch):
+        return Image2Sphere(
+                         symmetry=symmetry,
+                         # num_augmented_copies_per_batch=num_augmented_copies_per_batch
+        )
     def _step(self, batch, batch_idx):
 
         idd, imgs, (rotMats, shifts, conf), metadata = self.resolve_batch(batch)

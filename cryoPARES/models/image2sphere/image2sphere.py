@@ -1,4 +1,5 @@
 import functools
+from collections import defaultdict
 
 import e3nn
 import numpy as np
@@ -9,6 +10,7 @@ from torch import nn
 from tqdm import tqdm
 
 from cryoPARES.cacheManager import get_cache
+from cryoPARES.configManager.config_searcher import inject_config
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.constants import BATCH_PARTICLES_NAME
 from cryoPARES.datamanager.datamanager import get_example_random_batch
@@ -19,30 +21,23 @@ from cryoPARES.models.image2sphere.imageEncoder.imageEncoder import ImageEncoder
 from cryoPARES.models.image2sphere.so3Components import S2Conv, SO3Conv, I2SProjector, SO3OuptutGrid, SO3Activation
 
 
-class Image2sphere(nn.Module):
+@inject_config()
+class Image2Sphere(nn.Module):
     '''
-    Instantiate Image2sphere-style network for predicting distributions over SO(3) from
+    Instantiate Image2Sphere-style network for predicting distributions over SO(3) from
     single image
     '''
 
     cache = get_cache(cache_name=__qualname__)
 
     def __init__(self,
-                 image_encoder,
-                 # imageEncoderOutputShape,
-                 lmax,
-                 # s2_fdim, so3_fdim,
-                 # hp_order_projector, #TODO: move hp_order, s2_fdim... to their own configs
-                 # hp_order_s2,
-                 # hp_order_so3,
-                 # so3_act_resolution,  # TODO: what is the effect of resolution??
-                 # rand_fraction_points_to_project,
-                 symmetry,
-                 enforce_symmetry=True):
+                 lmax, symmetry, enforce_symmetry=True, encoder=None):
         super().__init__()
 
-        self.encoder = image_encoder
-        # self.lmax = lmax
+        if encoder is None:
+            encoder = ImageEncoder()
+        self.encoder = encoder
+        self.lmax = lmax
         # self.s2_fdim = s2_fdim
         # self.so3_fdim = so3_fdim
         # self.hp_order_projector = hp_order_projector
@@ -51,26 +46,20 @@ class Image2sphere(nn.Module):
 
         batch = get_example_random_batch()
         x = batch[BATCH_PARTICLES_NAME]
-        out = image_encoder(x)
+        out = self.encoder(x)
 
-        self.projector = I2SProjector(
-            fmap_shape=out.shape[1:],
-            # sphere_fdim=s2_fdim,
-            lmax=lmax,
-            # hp_order=self.hp_order_projector,
-            # rand_fraction_points_to_project=rand_fraction_points_to_project
-        )
+        self.projector = I2SProjector(fmap_shape=out.shape[1:], lmax=lmax)
         out = self.projector(out)
 
-        self.s2_conv = S2Conv(f_in=out.shape[1], lmax=lmax) #lmax, s2_fdim, so3_fdim, lmax, hp_order_s2)
+        self.s2_conv = S2Conv(f_in=out.shape[1], lmax=lmax)
         out = self.s2_conv(out)
 
-        self.so3_act = SO3Activation(lmax=lmax) #lmax, so3_act_resolution)
+        self.so3_act = SO3Activation(lmax=lmax)
 
         out = self.so3_act(out)
 
-        self.so3_conv = SO3Conv(f_in=out.shape[1], lmax=lmax) #so3_fdim, 1, lmax)
-        self.so3_grid = SO3OuptutGrid(lmax=lmax)#, hp_order_so3)
+        self.so3_conv = SO3Conv(f_in=out.shape[1], lmax=lmax)
+        self.so3_grid = SO3OuptutGrid(lmax=lmax)
 
 
         self.symmetry = symmetry
@@ -82,7 +71,7 @@ class Image2sphere(nn.Module):
         self._get_symmetry_equivalent_idxs() #what are the idxs that are equivalent under a symmetry group
         self.rotation_contraction_idxs() #indices that need to be averaged to make sure everybody in the symmetry group are o
         self._get_neigs_matrix()
-        print(f"Image2sphere initialized (output_rotmats:{self.so3_grid.output_rotmats.shape[0]})")
+        print(f"Image2Sphere initialized (output_rotmats:{self.so3_grid.output_rotmats.shape[0]})")
 
 
 
@@ -356,6 +345,37 @@ class Image2sphere(nn.Module):
         return probs, so3_grid.output_rotmats
 
 
+@functools.lru_cache(maxsize=None)
+def create_extraction_mask(lmax, device_type='cuda'):
+    """
+    Create a boolean mask to extract middle columns (m'=0) from flattened Wigner-D matrices.
+    This mask is created once and can be reused for all extractions.
+
+    Args:
+        lmax: Maximum degree l
+        device_type: String indicating device type ('cuda' or 'cpu')
+    """
+    mask = torch.zeros(sum((2 * l + 1) ** 2 for l in range(lmax + 1)), dtype=torch.bool)
+    idx = 0
+    for l in range(lmax + 1):
+        dim = 2 * l + 1
+        # Calculate indices for the middle column (m'=0)
+        middle_col_indices = torch.arange(idx + l, idx + dim ** 2, dim)
+        mask[middle_col_indices] = True
+        idx += dim ** 2
+    return mask
+
+
+def extract_sh_coeffs_fast(flat_wigner_d, lmax):
+    """
+    Efficiently extract spherical harmonic coefficients from flattened Wigner-D matrices
+    using cached mask.
+    """
+    device_type = 'cuda' if flat_wigner_d.is_cuda else 'cpu'
+    extraction_mask = create_extraction_mask(lmax, device_type).to(flat_wigner_d.device)
+    return flat_wigner_d[..., extraction_mask]
+
+
 def plot_so3_distribution(probs: torch.Tensor,
                           rots: torch.Tensor,
                           gt_rotation=None,
@@ -429,17 +449,20 @@ def plot_so3_distribution(probs: torch.Tensor,
     plt.show()
 
 
+def _update_config_for_test():
+    main_config.models.image2sphere.lmax = 6
+    main_config.models.image2sphere.so3components.i2sprojector.sphere_fdim = 128
+    main_config.models.image2sphere.so3components.i2sprojector.rand_fraction_points_to_project = 1.
+    main_config.models.image2sphere.so3components.i2sprojector.hp_order = 2
+    main_config.models.image2sphere.so3components.s2conv.hp_order = 2
+    main_config.models.image2sphere.so3components.so3ouptutgrid.hp_order = 3
+
 def _test():
-
-    model = ImageEncoder()
-
+    _update_config_for_test()
     b = 4
     imgs = get_example_random_batch(4)[BATCH_PARTICLES_NAME]
 
-    model = Image2sphere(model, lmax=6, symmetry="c2",
-                         # s2_fdim=512, so3_fdim=16, hp_order_s2=1, hp_order_so3=3,
-                         # hp_order_projector=2, so3_act_resolution=10, rand_fraction_points_to_project=0.5,
-                         )
+    model = Image2Sphere(symmetry="c2") #lmax=6
     model.eval()
     with torch.inference_mode():
         from scipy.spatial.transform import Rotation
@@ -456,6 +479,121 @@ def _test():
         plot_so3_distribution(probs[0], output_rotmats, gt_rotation=gt_rot[0])
 
 
+def _test_rotation_invariance(n_samples=10):
+    """
+    Test to verify that spherical harmonic coefficients are invariant to image rotations of 90 degrees.
+    """
+    _update_config_for_test()
+
+    def compute_relative_errors(coeffs1, coeffs2):
+        """
+        Compute relative errors between two sets of coefficients
+        """
+        error = torch.abs(coeffs1 - coeffs2) / (torch.abs(coeffs1) + 1e-6)
+        return {
+            'mean_error': error.mean().item(),
+            'max_error': error.max().item(),
+            'std_error': error.std().item(),
+            'median_error': error.median().item(),
+            'p90_error': torch.quantile(error, 0.9).item()}
+
+    # Initialize model
+    imgs = get_example_random_batch()[BATCH_PARTICLES_NAME]
+
+    encoder = nn.Conv2d(imgs.shape[1], main_config.models.image2sphere.so3components.i2sprojector.sphere_fdim,
+                        kernel_size=1, padding="same")
+    model = Image2Sphere(lmax=6, symmetry="c1", enforce_symmetry=False, encoder=encoder)
+    model.eval()
+
+    # Store all results
+    rotation_errors = defaultdict(list)
+    baseline_errors = []
+
+    for sample_idx in range(n_samples):
+        # Get two different random batches for baseline comparison
+        batch1 = get_example_random_batch(1)
+        batch2 = get_example_random_batch(1)
+        img1 = batch1[BATCH_PARTICLES_NAME][0:1]
+        img2 = batch2[BATCH_PARTICLES_NAME][0:1]
+
+        # Test 1: Rotation Invariance
+        from torchvision import transforms
+        rotations = [
+            transforms.functional.rotate(img1, angle)
+            for angle in [0, 90, 180, 270]
+        ]
+        rotations = torch.stack(rotations)
+
+        with torch.no_grad():
+            # Get coefficients for rotated versions
+            wDs_rot = [model.predict_wignerDs(rot_img) for rot_img in rotations]
+            sh_coeffs_rot = [extract_sh_coeffs_fast(wd, model.lmax).squeeze(1) for wd in wDs_rot]
+
+            # Get coefficients for different image (baseline)
+            wD2 = model.predict_wignerDs(img2)
+            sh_coeffs2 = extract_sh_coeffs_fast(wD2, model.lmax).squeeze(1)
+
+        # Compare rotated versions to original
+        base_coeffs = sh_coeffs_rot[0]
+        for i, rot_coeffs in enumerate(sh_coeffs_rot[1:], 1):
+            errors = compute_relative_errors(base_coeffs, rot_coeffs)
+            for key, value in errors.items():
+                rotation_errors[f"{i * 90}_{key}"].append(value)  # Changed key format
+
+        # Baseline: Compare different images
+        baseline = compute_relative_errors(base_coeffs, sh_coeffs2)
+        baseline_errors.append(baseline)
+
+    # Compute statistics
+    def compute_stats(errors_list):
+        stats = {}
+        for key in errors_list[0].keys():
+            values = [e[key] for e in errors_list]
+            stats[key] = {
+                'mean': np.mean(values),
+                'std': np.std(values),
+                'min': np.min(values),
+                'max': np.max(values)
+            }
+        return stats
+
+    # Calculate statistics for both rotation and baseline errors
+    rotation_stats = {}
+    for angle in [90, 180, 270]:
+        # Collect all errors for this angle
+        angle_errors = [{k.split('_', 1)[1]: v
+                         for k, v in rotation_errors.items()
+                         if k.startswith(f"{angle}_")}]
+        rotation_stats[f"{angle}deg"] = compute_stats(angle_errors)
+
+    baseline_stats = compute_stats(baseline_errors)
+
+    print("\nRotation Invariance Test Results (with baseline comparison):")
+    print("--------------------------------------------------------")
+    print("\nBaseline (Different Images):")
+    for metric, values in baseline_stats.items():
+        print(f"\n{metric}:")
+        for stat, val in values.items():
+            print(f"  {stat}: {val:.6f}")
+
+    print("\nRotation Results:")
+    for angle, stats in rotation_stats.items():
+        print(f"\n{angle}:")
+        for metric, values in stats.items():
+            print(f"  {metric}: {values}")
+
+    print("\nInterpretation:")
+    # Compare mean errors
+    for angle, stats in rotation_stats.items():
+        ratio = stats['mean_error']['mean'] / baseline_stats['mean_error']['mean']
+        print(f"\n{angle} rotation mean error is {ratio:.3f}x smaller than baseline")
+        max_ratio = stats['max_error']['mean'] / baseline_stats['max_error']['mean']
+        print(f"{angle} rotation max error is {max_ratio:.3f}x smaller than baseline")
+
+    return rotation_stats, baseline_stats
+
+
 if __name__ == "__main__":
-    _test()
+    # _test()
+    _test_rotation_invariance()
     print("Done!")

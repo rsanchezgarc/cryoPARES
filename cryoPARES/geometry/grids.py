@@ -77,14 +77,14 @@ def so3_healpix_grid_equiangular(hp_order: int = 3):
 
 def so3_healpix_grid_escnn(hp_order: int, method:Literal["thomson", "hopf", "thomson_cube", "fibonacci"] = "hopf",
                            representation:Optional[Literal["MAT", "Q", "ZYZ"]]="ZYZ"):
-    n_cones = hp.order2npix(hp_order)
+    n_cones = hp.order2npix(hp_order) * 6
     gridB = so3_group(maximum_frequency=1).grid(N=n_cones, type=method)
     if representation is not None:
         gridB = [x.to(representation) for x in gridB]
-        gridB = torch.stack([torch.as_tensor(x, dtype=torch.float32) for x in gridB])
+        gridB = torch.stack([torch.as_tensor(x, dtype=torch.float32) for x in gridB]).T.contiguous()
     return gridB, n_cones
 
-so3_healpix_grid = so3_healpix_grid_escnn #so3_healpix_grid_equiangular
+so3_healpix_grid = so3_healpix_grid_equiangular #so3_healpix_grid_escnn
 
 cache.cache()
 def so3_near_identity_grid_cartesianprod(max_rads, n_angles): #TODO: It is probably better to use something like healpy rather than a cartesian product.

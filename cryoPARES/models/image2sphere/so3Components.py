@@ -248,7 +248,6 @@ class SO3OuptutGrid(nn.Module):
     @cache.cache()
     def build_components(lmax: int, hp_order: int):
         output_eulerRad_yxy, _ = so3_healpix_grid(hp_order=hp_order)
-        output_eulerRad_yxy = output_eulerRad_yxy.transpose(0, 1)
         output_wigners = flat_wigner(lmax, *output_eulerRad_yxy).transpose(0, 1)
         output_rotmats = o3.angles_to_matrix(*output_eulerRad_yxy)
         return output_eulerRad_yxy, output_wigners, output_rotmats

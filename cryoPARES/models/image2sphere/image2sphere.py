@@ -14,7 +14,7 @@ from cryoPARES.configManager.config_searcher import inject_config
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.constants import BATCH_PARTICLES_NAME
 from cryoPARES.datamanager.datamanager import get_example_random_batch
-from cryoPARES.geometry.metrics_angles import rotation_magnitude, mean_rot_matrix
+from cryoPARES.geometry.metrics_angles import rotation_magnitude, mean_rot_matrix, rotation_error_rads
 from cryoPARES.geometry.nearest_neigs_sphere import compute_nearest_neighbours
 from cryoPARES.geometry.symmetry import getSymmetryGroup
 from cryoPARES.models.image2sphere.imageEncoder.imageEncoder import ImageEncoder
@@ -31,18 +31,14 @@ class Image2Sphere(nn.Module):
     cache = get_cache(cache_name=__qualname__)
 
     def __init__(self,
-                 lmax, symmetry, enforce_symmetry=True, encoder=None):
+                 lmax, symmetry, label_smoothing:float, enforce_symmetry=True, encoder=None):
         super().__init__()
 
         if encoder is None:
             encoder = ImageEncoder()
         self.encoder = encoder
         self.lmax = lmax
-        # self.s2_fdim = s2_fdim
-        # self.so3_fdim = so3_fdim
-        # self.hp_order_projector = hp_order_projector
-        # self.hp_order_s2 = hp_order_s2
-        # self.hp_order = hp_order_so3
+        self.label_smoothing = label_smoothing
 
         batch = get_example_random_batch()
         x = batch[BATCH_PARTICLES_NAME]
@@ -62,8 +58,8 @@ class Image2Sphere(nn.Module):
         self.so3_grid = SO3OuptutGrid(lmax=lmax)
 
 
-        self.symmetry = symmetry
-        self.has_symmetry = (symmetry.lower() != "c1")
+        self.symmetry = symmetry.upper()
+        self.has_symmetry = (self.symmetry != "C1")
 
         #TODO: The following needs to be refactored, since it is problematic with multigpu. We need to make sure that
         #TODO: They are precomputed
@@ -76,10 +72,12 @@ class Image2Sphere(nn.Module):
 
 
     def predict_wignerDs(self, x):
-        '''Returns so3 irreps
+        """
 
-        :x: image, tensor of shape (B, c, L, L)
-        '''
+        :param x: image, tensor of shape (B, c, L, L)
+        :return: flatten so3 irreps
+        """
+
         x = self.encoder(x)
         x = self.projector(x)
         x = self.s2_conv(x)
@@ -118,7 +116,7 @@ class Image2Sphere(nn.Module):
         return rotMat_logits, pred_rotmat_id, pred_rotmat
 
 
-    def forward(self, img, *, k=1):
+    def forward(self, img, k=1):
         '''
 
         :img: float tensor of shape (B, c, L, L)
@@ -132,11 +130,11 @@ class Image2Sphere(nn.Module):
         return wD, rotMat_logits, pred_rotmat_id, pred_rotmat, maxprob
 
 
-    @functools.lru_cache(3)
+    @functools.lru_cache(3) #TODO: lru_cache uses self for the catching
     def _forward_with_neigs_batch_dim_selector(self, batch_size, device):
         return torch.arange(batch_size, device=device)
 
-    def forward_with_neigs(self, img, *, k=1):
+    def forward_with_neigs(self, img, k=1):
 
         wD = self.predict_wignerDs(img)
         rotMat_logits, pred_rotmat_id, pred_rotmat = self.from_wignerD_to_topKMats(wD, k)
@@ -170,7 +168,7 @@ class Image2Sphere(nn.Module):
         return self._neigs
 
 
-    @functools.lru_cache(3)
+    @functools.lru_cache(3) #TODO: lru uses self for catching
     def _get_ies_for_aggregate_symmetry(self, batch_size, device):
         ies = torch.arange(batch_size, device=device).unsqueeze(-1).expand(-1, self.so3_grid.output_rotmats.shape[0]).unsqueeze(-1)
         return ies
@@ -345,6 +343,52 @@ class Image2Sphere(nn.Module):
         return probs, so3_grid.output_rotmats
 
 
+    def simCLR_like_loss(self, wD): #TODO: implement this
+        return 0.
+
+    def forward_and_loss(self, img, gt_rot, per_img_weight=None):
+        '''Compute cross entropy loss using ground truth rotation, the correct label
+        is the nearest rotation in the spatial grid to the ground truth rotation
+
+        :img: float tensor of shape (B, c, L, L)
+        :gt_rotation: valid rotation matrices, tensor of shape (B, 3, 3)
+        :per_img_weight: float tensor of shape (B,) with per_image_weight for loss calculation
+        '''
+
+        wD, rotMat_logits, pred_rotmat_ids, pred_rotmats, maxprobs = self.forward(img)
+
+        contrast_loss =  self.simCLR_like_loss(wD)
+
+        if self.symmetry != "C1":
+            n_groupElems = self.symmetryGroupMatrix.shape[0]
+            #Perform symmetry expansion
+            gtrotMats = self.symmetryGroupMatrix[None, ...] @ gt_rot[:, None, ...]
+            rotMat_gtIds = self.so3_grid.nearest_rotmat_idxs(gtrotMats.view(-1, 3, 3))[-1].view(rotMat_logits.shape[0], -1)
+            target_he = torch.zeros_like(rotMat_logits)
+            rows = torch.arange(rotMat_logits.shape[0]).view(-1, 1).repeat(1, n_groupElems)
+            target_he[rows, rotMat_gtIds] = 1 / n_groupElems
+            loss = nn.functional.cross_entropy(rotMat_logits, target_he, reduction="none", label_smoothing=self.label_smoothing)
+
+            with torch.no_grad():
+                error_rads = rotation_error_rads(gtrotMats.view(-1,3,3),
+                                                 torch.repeat_interleave(pred_rotmats, n_groupElems, dim=0))
+                error_rads = error_rads.view(-1, n_groupElems)
+                error_rads = error_rads.min(1).values
+
+        else:
+            # find nearest grid point to ground truth rotation matrix
+            rot_idx = self.so3_grid.nearest_rotmat_idxs(gt_rot)[-1]
+            loss = nn.functional.cross_entropy(rotMat_logits, rot_idx, reduction="none", label_smoothing=self.label_smoothing)
+            with torch.no_grad():
+                error_rads = rotation_error_rads(gt_rot, pred_rotmats)
+
+        if per_img_weight is not None:
+            loss = loss * per_img_weight.squeeze(-1)
+        loss = loss.mean()
+        loss = loss + contrast_loss
+
+        return (wD, rotMat_logits, pred_rotmat_ids, pred_rotmats, maxprobs), loss, error_rads
+    
 @functools.lru_cache(maxsize=None)
 def create_extraction_mask(lmax, device_type='cuda'):
     """
@@ -502,7 +546,7 @@ def _test_rotation_invariance(n_samples=10):
 
     encoder = nn.Conv2d(imgs.shape[1], main_config.models.image2sphere.so3components.i2sprojector.sphere_fdim,
                         kernel_size=1, padding="same")
-    model = Image2Sphere(lmax=6, symmetry="c1", enforce_symmetry=False, encoder=encoder)
+    model = Image2Sphere(lmax=6, symmetry="C1", enforce_symmetry=False, encoder=encoder)
     model.eval()
 
     # Store all results

@@ -261,6 +261,10 @@ class SO3OuptutGrid(nn.Module):
             - dot_trace: The similarity measurment fromthe rotMat and the highest score rotmat
             - idxs: The id of the closest rotMat
         """
+        dot_trace, idxs = self.nearest_rotmat_idx(rotMat, self.output_rotmats)
+        return dot_trace, self.output_rotmats[idxs]
+
+    def nearest_rotmat_idxs(self, rotMat) -> Tuple[torch.Tensor, torch.Tensor]:
         return nearest_rotmat_idx(rotMat, self.output_rotmats)
 
     def forward(self, rotMat: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:

@@ -10,27 +10,27 @@ class ParticlesRelionStarDataset(ParticlesDataset):
     It can download data automatically
 
     ```python
-    ds = ParticlesRelionStarDataset(starFname="/tmp/cryoSupervisedDataset/particles.star", rootDir="/tmp/cryoSupervisedDataset/", symmetry="c1)
+    ds = ParticlesRelionStarDataset(star_fname="/tmp/cryoSupervisedDataset/particles.star", particles_dir="/tmp/cryoSupervisedDataset/", symmetry="c1)
     ```
     <br>
     """
 
-    def __init__(self, starFname: Union[PathLike, str], rootDir: Optional[str], symmetry: str, **kwargs):
+    def __init__(self, star_fname: Union[PathLike, str], particles_dir: Optional[str], symmetry: str, **kwargs):
         """
         ##Builder
 
         Args:
-            starFname (Union[PathLike, str]): The star filename to use
-            rootDir (str): The root directory where the stack files are
+            star_fname (Union[PathLike, str]): The star filename to use
+            particles_dir (str): The root directory where the stack files are
             symmetry (str): The point symmetry of the macromolecule
         """
 
         super().__init__(symmetry=symmetry, **kwargs)
-        self._starFname = str(starFname)
-        self._datadir = osp.expanduser(rootDir) if rootDir is not None else None
+        self._star_fname = str(star_fname)
+        self._datadir = osp.expanduser(particles_dir) if particles_dir is not None else None
 
     def load_ParticlesStarSet(self):
-        return ParticlesStarSet(starFname=self._starFname, particlesDir=self._datadir)
+        return ParticlesStarSet(starFname=self._star_fname, particlesDir=self._datadir)
 
 
     def saveMd(self, fname: Union[str, PathLike], overwrite: bool = True):
@@ -42,7 +42,7 @@ class ParticlesRelionStarDataset(ParticlesDataset):
 
         """
         assert fname.endswith(".star"), "Error, metadata files will be saved as star files. Change extension to .star"
-        self.particles.save(starFname=fname, overwrite=overwrite)
+        self.particles.save(star_fname=fname, overwrite=overwrite)
 
 
 if __name__ == "__main__":
@@ -65,8 +65,8 @@ if __name__ == "__main__":
     parser.add_argument( "--mask_radius_angs", type=float,  default=None, required=False)
 
     args = parser.parse_args()
-    parts = ParticlesRelionStarDataset(starFname=osp.expanduser(args.filename),
-                                       rootDir=args.dirname,
+    parts = ParticlesRelionStarDataset(star_fname=osp.expanduser(args.filename),
+                                       particles_dir=args.dirname,
                                        symmetry=args.symmetry,
                                        desired_image_size_px=args.resize_box,
                                        desired_sampling_rate_angs=args.sampling_rate,

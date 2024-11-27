@@ -1,16 +1,12 @@
 from dataclasses import dataclass
 from enum import Enum
+from typing import Tuple
 
-
-class CTFCorrectionMode(str, Enum):
-    none = "none"
-    concat_phase_flip = "concat_phase_flip"
-    concat_wiener = "concat_wiener"
-    use_phase_flip = "use_phase_flip"
-    use_wiener = "use_wiener"
 
 @dataclass
 class Datamanager_fields:
-    desired_image_size_pixels: int = 160
-    desired_sampling_rate_angs: float = 1.5
-    ctf_correction_mode: CTFCorrectionMode = CTFCorrectionMode.concat_phase_flip
+    num_augmented_copies_per_batch: int = 2
+    train_validaton_split_seed: int = 113
+    train_validation_split: Tuple[float, float] = (0.7, 0.3)
+    num_data_workers: int = 0
+    augment_train: bool = True

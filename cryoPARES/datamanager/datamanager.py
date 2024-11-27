@@ -1,15 +1,23 @@
+import collections
+
 import torch
 import os
+import os.path as osp
 from os import PathLike
 
 import torch
-from torch.utils.data import DataLoader, BatchSampler, Sampler, RandomSampler
-from typing import Union, Literal, Optional, Tuple, Iterable
+from open3d.examples.visualization.to_mitsuba import dataset
+from torch.utils.data import DataLoader, BatchSampler, Sampler, RandomSampler, ConcatDataset
+from typing import Union, Literal, Optional, Tuple, Iterable, List
 
 from lightning import pytorch as pl
 
+from cryoPARES.configManager.config_searcher import inject_config
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.constants import BATCH_PARTICLES_NAME
+from cryoPARES.datamanager.relionStarDataset import ParticlesRelionStarDataset
+
+FnameType = Union[PathLike, str]
 
 
 def get_number_image_channels():
@@ -25,54 +33,83 @@ def get_example_random_batch(batch_size=1):
     return batch
 
 
-
-
+@inject_config
 class ParticlesDataModule(pl.LightningDataModule):
     """
     ParticlesDataModule: A LightningDataModule that wraps a ParticlesDataset
     """
 
-    def __init__(self, targetName: Union[PathLike, str], halfset: Optional[Literal[0, 1]], image_size: int,
-                 apply_perImg_normalization: bool = True,
-                 ctf_correction: Literal["none", "phase_flip"] = "phase_flip", image_size_factor_for_crop: float = 0.25,
-                 num_augmented_copies_per_batch: int = 2,
-                 augmenter: Optional[Augmenter] = None, train_validaton_split_seed: int = 113,
-                 train_validation_split: Tuple[float, float] = (0.7, 0.3), batch_size: int = 8,
-                 num_data_workers: int = 0):
+    def __init__(self, star_fnames: List[FnameType],
+                 symmetry:str,
+                 particles_dir: Optional[List[FnameType]],
+                 halfset: Optional[Literal[0, 1]],
+                 batch_size: int,
+                 save_train_val_partition_dir: Optional[FnameType],
+
+                 num_augmented_copies_per_batch: int,
+                 train_validaton_split_seed: int,
+                 train_validation_split: Tuple[float, float],
+                 num_data_workers: int,
+                 augment_train: bool,
+                 ):
 
         super().__init__()
-        # self.save_hyperparameters()  #Not needed since we are using CLI
-        self.targetName = targetName
+
+        self.star_fnames = self._expand_fname(star_fnames)
+        self.symmetry = symmetry.upper()
+        self.particles_dir = self._expand_fname(particles_dir)
+        if self.particles_dir is None:
+            self.particles_dir = [None] * len(self.star_fnames)
         self.halfset = halfset
-        self.benchmarkDir = os.path.expanduser(benchmarkDir)
-        self.image_size = image_size
-        self.apply_perImg_normalization = apply_perImg_normalization
-        self.ctf_correction = ctf_correction
-        self.image_size_factor_for_crop = image_size_factor_for_crop
         self.num_augmented_copies_per_batch = num_augmented_copies_per_batch
-        self.augmenter = augmenter
         self.train_validaton_split_seed = train_validaton_split_seed
         self.train_validation_split = train_validation_split
         self.batch_size = batch_size
         self.num_data_workers = num_data_workers
+        self.save_train_val_partition_dir = save_train_val_partition_dir
+        self.augment_train = augment_train
 
-        self._symmetry = None
+        if self.augment_train:
+            self.augmenter = augmenter #TODO: Implement the augmenter
+            raise NotImplementedError()
 
-    @property
-    def symmetry(self):
-        """The point symmetry of the dataset"""
-        if self._symmetry is None:
-            dataset = self.createDataset()
-            self._symmetry = dataset.symmetry
-        return self._symmetry
+    @staticmethod
+    def _expand_fname(fnameOrList):
+            if fnameOrList is None:
+                return None
+            elif isinstance(fnameOrList, str):
+                return [osp.expanduser(fnameOrList)]
+            elif isinstance(fnameOrList, collections.abc.Iterable):
+                return [osp.expanduser(fname) if fname else None for fname in fnameOrList]
+            else:
+                raise ValueError(f"Not valid fname {fnameOrList}")
 
-    def createDataset(self):
-        return ParticlesDataset(self.targetName, halfset=self.halfset, benchmarkDir=self.benchmarkDir,
-                                image_size=self.image_size, apply_perImg_normalization=self.apply_perImg_normalization)
+
+    def create_dataset(self, partitionName):
+        datasets = []
+        for i, (partFname, partDir) in enumerate(zip(self.star_fnames, self.particles_dir)):
+            mrcsDataset = ParticlesRelionStarDataset(star_fname=partFname,
+                                       particles_dir=partDir,
+                                       symmetry=self.symmetry
+                                       )
+
+            if self.save_train_val_partition_dir is not None:
+                dirname = osp.join(self.save_train_val_partition_dir, partitionName if partitionName is not None else "full")
+                os.makedirs(dirname, exist_ok=True)
+                fname = osp.join(dirname, f"{i}-particles.star")
+                if not osp.isfile(fname):
+                    mrcsDataset.saveMd(fname, overwrite=False)
+            datasets.append(mrcsDataset)
+            if dataConfig.ONLY_FIRST_STAR_FOR_VALIDATION and partitionName != "train":
+                break
+        dataset = ConcatDataset(datasets)
+        return dataset
+
+
 
     def _create_dataloader(self, partitionName: Optional[str]):
 
-        dataset = self.createDataset()
+        dataset = self.create_dataset(partitionName)
         if partitionName in ["train", "val"]:
             assert self.train_validation_split is not None, "Error, self.train_validation_split required"
             dataset.augmenter = self.augmenter if partitionName == "train" else None

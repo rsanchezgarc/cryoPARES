@@ -73,8 +73,10 @@ class ParticlesDataset(Dataset, ABC):
         self.ctf_correction_do_concat = ctf_correction.startswith("concat")
         self.ctf_correction = ctf_correction.removeprefix("concat_")
 
-        # if self.store_data_in_memory:
-        #     # self._getIdx = functools.cache(self._getIdx)
+
+        if self.store_data_in_memory:
+            warnings.warn("store_data_in_memory has not being implemented yet") #TODO: implement catching for getIdx
+            # self._getIdx = functools.cache(self._getIdx)
         #     print(locals())
         #     breakpoint()
         #     self.cacheDir = SharedTemporaryDirectory("particles_", locals(), rootdir="/dev/shm")

@@ -223,7 +223,7 @@ class SO3Conv(nn.Module):
 
 
 @inject_config()
-class SO3OuptutGrid(nn.Module):
+class SO3OutputGrid(nn.Module):
     '''Define S2 group convolution which outputs signal over SO(3) irreps'''
 
     cache = get_cache(cache_name=__qualname__)

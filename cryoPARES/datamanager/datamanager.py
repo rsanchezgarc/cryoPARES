@@ -1,4 +1,5 @@
 import collections
+from dataclasses import asdict
 
 import torch
 import os
@@ -6,7 +7,6 @@ import os.path as osp
 from os import PathLike
 
 import torch
-from open3d.examples.visualization.to_mitsuba import dataset
 from torch.utils.data import DataLoader, BatchSampler, Sampler, RandomSampler, ConcatDataset
 from typing import Union, Literal, Optional, Tuple, Iterable, List
 
@@ -15,42 +15,43 @@ from lightning import pytorch as pl
 from cryoPARES.configManager.config_searcher import inject_config
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.constants import BATCH_PARTICLES_NAME
+from cryoPARES.datamanager.augmentations import Augmenter
 from cryoPARES.datamanager.relionStarDataset import ParticlesRelionStarDataset
 
 FnameType = Union[PathLike, str]
 
 
 def get_number_image_channels():
-     if main_config.datamanager.ctf_correction_mode.startswith("concat"):
-         return 2
-     else:
-         return 1
 
-def get_example_random_batch(batch_size=1):
-    #TODO: batch size should be in the config
-    imgsize = main_config.datamanager.desired_image_size_pixels
+    if main_config.datamanager.particlesdataset.ctf_correction.startswith("concat"):
+        return 2
+    else:
+        return 1
+
+def get_example_random_batch(batch_size):
+    imgsize = main_config.datamanager.particlesdataset.desired_image_size_px
     batch = {BATCH_PARTICLES_NAME:torch.randn(batch_size, get_number_image_channels(), imgsize, imgsize)}
     return batch
 
-
-@inject_config
-class ParticlesDataModule(pl.LightningDataModule):
+@inject_config()
+class DataManager(pl.LightningDataModule):
     """
-    ParticlesDataModule: A LightningDataModule that wraps a ParticlesDataset
+    DataManager: A LightningDataModule that wraps a ParticlesDataset
     """
 
     def __init__(self, star_fnames: List[FnameType],
                  symmetry:str,
                  particles_dir: Optional[List[FnameType]],
-                 halfset: Optional[Literal[0, 1]],
+                 halfset: Optional[Literal[0, 1]], #TODO: particlesDataset does not handle halfsets
                  batch_size: int,
                  save_train_val_partition_dir: Optional[FnameType],
-
+                 # The following arguments have a default config value
                  num_augmented_copies_per_batch: int,
                  train_validaton_split_seed: int,
                  train_validation_split: Tuple[float, float],
                  num_data_workers: int,
                  augment_train: bool,
+                 onlfy_first_dataset_for_validation: bool,
                  ):
 
         super().__init__()
@@ -68,10 +69,12 @@ class ParticlesDataModule(pl.LightningDataModule):
         self.num_data_workers = num_data_workers
         self.save_train_val_partition_dir = save_train_val_partition_dir
         self.augment_train = augment_train
+        self.onlfy_first_dataset_for_validation = onlfy_first_dataset_for_validation
 
         if self.augment_train:
-            self.augmenter = augmenter #TODO: Implement the augmenter
-            raise NotImplementedError()
+            self.augmenter = Augmenter()
+        else:
+            self.augmenter = None
 
     @staticmethod
     def _expand_fname(fnameOrList):
@@ -88,10 +91,8 @@ class ParticlesDataModule(pl.LightningDataModule):
     def create_dataset(self, partitionName):
         datasets = []
         for i, (partFname, partDir) in enumerate(zip(self.star_fnames, self.particles_dir)):
-            mrcsDataset = ParticlesRelionStarDataset(star_fname=partFname,
-                                       particles_dir=partDir,
-                                       symmetry=self.symmetry
-                                       )
+            mrcsDataset = ParticlesRelionStarDataset(star_fname=partFname,  particles_dir=partDir,
+                                                     symmetry=self.symmetry)
 
             if self.save_train_val_partition_dir is not None:
                 dirname = osp.join(self.save_train_val_partition_dir, partitionName if partitionName is not None else "full")
@@ -100,7 +101,7 @@ class ParticlesDataModule(pl.LightningDataModule):
                 if not osp.isfile(fname):
                     mrcsDataset.saveMd(fname, overwrite=False)
             datasets.append(mrcsDataset)
-            if dataConfig.ONLY_FIRST_STAR_FOR_VALIDATION and partitionName != "train":
+            if self.onlfy_first_dataset_for_validation and partitionName != "train":
                 break
         dataset = ConcatDataset(datasets)
         return dataset
@@ -162,3 +163,22 @@ class MultiInstanceSampler(BatchSampler):
     def __iter__(self):
         for idx in super(MultiInstanceSampler, self).__iter__():
             yield idx * self.num_copies_to_sample
+
+def _test():
+
+    main_config.datamanager.num_data_workers = 0
+    dm = DataManager(star_fnames=["~/cryo/data/preAlignedParticles/EMPIAR-10166/data/1000particles.star"],
+                     symmetry="c1",
+                     augment_train=False,
+                     particles_dir=None,
+                     halfset=None,
+                     batch_size=2,
+                     save_train_val_partition_dir=None
+                     )
+    dl = dm.train_dataloader()
+    # dl = dm.val_dataloader()
+    for batch in dm.val_dataloader():
+        print(batch.keys())
+
+if __name__ == "__main__":
+    _test()

@@ -15,7 +15,8 @@ from cryoPARES.cacheManager import SharedTemporaryDirectory, get_cache
 from cryoPARES.configManager.config_searcher import inject_config
 from cryoPARES.configs.datamanager_config.particlesDataset_config import CtfCorrectionType, ImgNormalizationType
 from cryoPARES.constants import RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES, \
-    RELION_PRED_POSE_CONFIDENCE_NAME, RELION_EULER_CONVENTION, RELION_ORI_POSE_CONFIDENCE_NAME
+    RELION_PRED_POSE_CONFIDENCE_NAME, RELION_EULER_CONVENTION, RELION_ORI_POSE_CONFIDENCE_NAME, BATCH_PARTICLES_NAME, \
+    BATCH_PARTICLE_ID, BATCH_POSE_NAME, BATCH_MD_NAME
 
 warnings.filterwarnings("ignore", "Gimbal lock detected. Setting third angle to zero since it "
                                   "is not possible to uniquely determine all angles.")
@@ -227,6 +228,7 @@ class ParticlesDataset(Dataset, ABC):
     @cached_property
     def symmetry_group(self):
         return R.create_group(self._symmetry.upper())
+
     def resizeImage(self, img):
 
         ori_pixelSize = float(self.particles.optics_md["rlnImagePixelSize"].item())
@@ -256,7 +258,13 @@ class ParticlesDataset(Dataset, ABC):
 
         mask = self._getParticleMask(self.image_size_px, sampling_rate=self.sampling_rate, mask_radius_angs=self.mask_radius_angs)[1]
         img *= mask
-        return iid, img, (rotMat, xyShiftAngs, confidence), md_dict
+        batch = {BATCH_PARTICLE_ID: iid,
+                 BATCH_PARTICLES_NAME: img,
+                 BATCH_POSE_NAME: (rotMat, xyShiftAngs, confidence),
+                 BATCH_MD_NAME: md_dict}
+
+        # return iid, img, (rotMat, xyShiftAngs, confidence), md_dict
+        return batch
 
     def __getitem__(self, item):
         return self.__getitem(item)

@@ -1,10 +1,13 @@
+import os
+import sys
 from dataclasses import is_dataclass
+from pathlib import Path
 from typing import Any, Type, TypeVar, Union, Optional, List, Callable
 from inspect import signature
 import functools
 
-from cryoPARES.configManager.config_builder import get_module_path
 from cryoPARES.configs.mainConfig import main_config
+from cryoPARES.utils.paths import find_configs_root
 
 T = TypeVar('T')
 ConfigType = TypeVar('ConfigType')
@@ -38,6 +41,52 @@ def find_config(obj: Any, path: List[str], debug: bool = False) -> Optional[Any]
 
     return None
 
+
+def get_module_path(cls: Type, classname: Optional[str] = None) -> List[str]:
+    """
+    Get the module path by comparing file location to project root.
+    Returns: List of path components, e.g. ['models', 'image2sphere', 'components']
+    """
+    try:
+        actual_path = Path(os.path.abspath(sys.modules[cls.__module__].__file__))
+    except (AttributeError, KeyError):
+        actual_path = Path(__file__).resolve()
+    # Get project root
+    root = find_configs_root()
+
+    # Get relative path from project root to module
+    rel_path = actual_path.relative_to(root)
+
+    # Convert path to module components, excluding the filename and any __init__.py
+    path_parts = list(rel_path.parts)
+    # if "Image2Sphere" in str(cls): breakpoint()
+    # if "DataManager" in str(cls): breakpoint()
+
+    if path_parts[0] == '.':
+        path_parts = path_parts[1:]
+
+    # Remove common Python package markers
+    # path_parts = [p.removesuffix(".py") for p in path_parts if p not in {'src', 'lib', '__pycache__'}]
+    path_parts = [p for p in path_parts if p not in {'src', 'lib', '__pycache__'}]
+    assert path_parts
+    # Add the class name (lowercase)
+    if classname:
+        if path_parts[-1].endswith(".py"):
+            path_parts[-1] = path_parts[-1].removesuffix(".py")
+        path_parts.append(classname)
+    else:
+        if len(path_parts)>1 and path_parts[-1].removesuffix(".py").lower() == path_parts[-2]: #Somethinkg that looks like name/name.py
+            path_parts = path_parts[:-1]
+        else:
+            path_parts[-1] = path_parts[-1].removesuffix(".py")
+        if cls.__name__.lower() != path_parts[-1].lower(): #Somethinkg does it is not like name/name.py
+            path_parts.append(cls.__name__)
+
+    path_parts = [p.lower() for p in path_parts]
+    #TODO: Handle the case in which you have module.module.class, like datamanager.datamamager.DataManager
+    print(cls, path_parts)
+    return path_parts
+
 def inject_params_from_config(func: F, config: Any, is_method: bool = False) -> F:
     """Injects parameters from config into a function or method."""
 
@@ -70,7 +119,6 @@ def inject_config(
     Decorator that injects config values, with auto-search in main_config if no config provided.
     Automatically determines module path based on file location relative to project root.
     """
-
     def decorator(target: Union[Type[T], F]) -> Union[Type[T], F]:
         # Determine config to use
         config = config_class_or_instance
@@ -83,6 +131,7 @@ def inject_config(
                 config = found_config
 
             if config is None:
+                breakpoint()
                 raise ValueError(
                     f"Could not find matching config for {target.__name__} "
                     f"with path {path}"

@@ -31,3 +31,12 @@ class SO3Conv_config:
 @dataclass
 class SO3OuptutGrid_config:
     hp_order: int = 4
+
+
+@dataclass
+class So3Components_config:
+    i2sprojector: I2SProjector_config = field(default_factory=I2SProjector_config)
+    s2conv: S2Conv_config = field(default_factory=S2Conv_config)
+    so3activation: SO3Activation_config = field(default_factory=SO3Activation_config)
+    so3conv: SO3Conv_config = field(default_factory=SO3Conv_config)
+    so3outputgrid: SO3OuptutGrid_config = field(default_factory=SO3OuptutGrid_config)

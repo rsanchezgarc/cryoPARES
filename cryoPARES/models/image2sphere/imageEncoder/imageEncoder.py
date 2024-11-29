@@ -9,7 +9,8 @@ import torchvision
 from torch import nn
 
 from cryoPARES.configs.mainConfig import pyObjectFromStr, main_config
-from cryoPARES.configs.models_config.image2sphere_config.imageEncoder_config import EncoderArchitecture
+from cryoPARES.configs.models_config.image2sphere_config.imageEncoder_config.imageEncoder_config import \
+    EncoderArchitecture
 from cryoPARES.datamanager.datamanager import get_number_image_channels, get_example_random_batch
 from cryoPARES.models.image2sphere.gaussianFilters import GaussianFilterBank
 
@@ -41,7 +42,7 @@ class ImageEncoder(nn.Module):
 if __name__ == "__main__":
     from cryoPARES.datamanager.datamanager import get_example_random_batch
     from cryoPARES.constants import BATCH_PARTICLES_NAME
-    batch = get_example_random_batch()
+    batch = get_example_random_batch(1)
     x = batch[BATCH_PARTICLES_NAME]
     model = ImageEncoder()
     out = model(x)

@@ -1,7 +1,10 @@
 import os.path as osp
+
 from starstack.particlesStar import ParticlesStarSet
 from typing import Union, Optional
 from os import PathLike
+
+from cryoPARES.constants import BATCH_PARTICLES_NAME
 from cryoPARES.datamanager.particlesDataset import ParticlesDataset
 
 class ParticlesRelionStarDataset(ParticlesDataset):
@@ -65,21 +68,26 @@ if __name__ == "__main__":
     parser.add_argument( "--mask_radius_angs", type=float,  default=None, required=False)
 
     args = parser.parse_args()
+    kwargs = {}
+    if args.resize_box:
+        kwargs["desired_image_size_px"] = args.resize_box
+    if args.resize_box:
+        kwargs["desired_sampling_rate_angs"] = args.sampling_rate
+    if args.mask_radius_angs:
+        kwargs["mask_radius_angs"] = args.mask_radius_angs
+    if args.ctf_correction:
+        kwargs["ctf_correction"] = args.ctf_correction
     parts = ParticlesRelionStarDataset(star_fname=osp.expanduser(args.filename),
                                        particles_dir=args.dirname,
                                        symmetry=args.symmetry,
-                                       desired_image_size_px=args.resize_box,
-                                       desired_sampling_rate_angs=args.sampling_rate,
-                                       mask_radius_angs=args.mask_radius_angs,
-                                       perImg_normalization=args.normalization_type,
-                                       ctf_correction=args.ctf_correction
+                                       **kwargs
                                        )
 
     print(len(parts))
     from matplotlib import pyplot as plt
     channels_to_show = args.channels_to_show
     for elem in parts:
-        iid, img, *_ = elem
+        img = elem[BATCH_PARTICLES_NAME]
         print(img.shape)
         # continue
         assert 1 <= len(channels_to_show) <= 4, "Error, at least one channel required and no more than 4"

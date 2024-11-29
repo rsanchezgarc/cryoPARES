@@ -1,9 +1,13 @@
 import importlib
 import inspect
 import os
+import tempfile
+from dataclasses import field, dataclass
 from pathlib import Path
 
-from cryoPARES.configManager.config_builder import build_config_structure, find_project_root
+from cryoPARES.configs.datamanager_config.datamanager_config import DataManager_config
+from cryoPARES.configs.models_config.models_config import Models_config
+from cryoPARES.utils.paths import find_project_root
 
 
 def pyObjectFromStr(full_name, prefix=""):
@@ -42,12 +46,11 @@ def pyObjectFromStr(full_name, prefix=""):
 configs_root = Path(__file__).parent.parent / "configs"
 
 
-
-MainConfig = build_config_structure(configs_root,
-                                    dict(
-                                        cachedir=(Path, "/tmp/cache") #TODO: this is an ugly place to define where the cachedir should be
-                                    )
-                                    )
+@dataclass
+class MainConfig:
+    cachedir: Path = Path(tempfile.gettempdir()) / "cryoPARES_cache"
+    models: Models_config = field(default_factory=Models_config)
+    datamanager: DataManager_config = field(default_factory=DataManager_config)
 
 # Create an instance
 main_config = MainConfig()

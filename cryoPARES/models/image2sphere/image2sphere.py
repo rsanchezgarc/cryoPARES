@@ -1,5 +1,6 @@
 import functools
 from collections import defaultdict
+from dataclasses import asdict
 
 import e3nn
 import numpy as np
@@ -18,8 +19,11 @@ from cryoPARES.geometry.metrics_angles import rotation_magnitude, mean_rot_matri
 from cryoPARES.geometry.nearest_neigs_sphere import compute_nearest_neighbours
 from cryoPARES.geometry.symmetry import getSymmetryGroup
 from cryoPARES.models.image2sphere.imageEncoder.imageEncoder import ImageEncoder
-from cryoPARES.models.image2sphere.so3Components import S2Conv, SO3Conv, I2SProjector, SO3OuptutGrid, SO3Activation
+from cryoPARES.models.image2sphere.so3Components import S2Conv, SO3Conv, I2SProjector, SO3OutputGrid, SO3Activation
 
+
+# print(asdict(main_config.models).keys())
+# breakpoint()
 
 @inject_config()
 class Image2Sphere(nn.Module):
@@ -40,7 +44,7 @@ class Image2Sphere(nn.Module):
         self.lmax = lmax
         self.label_smoothing = label_smoothing
 
-        batch = get_example_random_batch()
+        batch = get_example_random_batch(1)
         x = batch[BATCH_PARTICLES_NAME]
         out = self.encoder(x)
 
@@ -55,7 +59,7 @@ class Image2Sphere(nn.Module):
         out = self.so3_act(out)
 
         self.so3_conv = SO3Conv(f_in=out.shape[1], lmax=lmax)
-        self.so3_grid = SO3OuptutGrid(lmax=lmax)
+        self.so3_grid = SO3OutputGrid(lmax=lmax)
 
 
         self.symmetry = symmetry.upper()
@@ -334,7 +338,7 @@ class Image2Sphere(nn.Module):
         if hp_order is None:
             so3_grid = self.so3_grid
         else:
-            so3_grid = SO3OuptutGrid(self.lmax, self.hp_order)
+            so3_grid = SO3OutputGrid(self.lmax, self.hp_order)
 
         x = self.predict_wignerDs(img)
         logits = torch.matmul(x, so3_grid.output_wigners).squeeze(1)
@@ -499,7 +503,7 @@ def _update_config_for_test():
     main_config.models.image2sphere.so3components.i2sprojector.rand_fraction_points_to_project = 1.
     main_config.models.image2sphere.so3components.i2sprojector.hp_order = 2
     main_config.models.image2sphere.so3components.s2conv.hp_order = 2
-    main_config.models.image2sphere.so3components.so3ouptutgrid.hp_order = 3
+    main_config.models.image2sphere.so3components.so3outputgrid.hp_order = 3
 
 def _test():
     _update_config_for_test()
@@ -542,7 +546,7 @@ def _test_rotation_invariance(n_samples=10):
             'p90_error': torch.quantile(error, 0.9).item()}
 
     # Initialize model
-    imgs = get_example_random_batch()[BATCH_PARTICLES_NAME]
+    imgs = get_example_random_batch(1)[BATCH_PARTICLES_NAME]
 
     encoder = nn.Conv2d(imgs.shape[1], main_config.models.image2sphere.so3components.i2sprojector.sphere_fdim,
                         kernel_size=1, padding="same")

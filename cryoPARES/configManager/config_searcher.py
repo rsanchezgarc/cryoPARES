@@ -83,8 +83,7 @@ def get_module_path(cls: Type, classname: Optional[str] = None) -> List[str]:
             path_parts.append(cls.__name__)
 
     path_parts = [p.lower() for p in path_parts]
-    #TODO: Handle the case in which you have module.module.class, like datamanager.datamamager.DataManager
-    print(cls, path_parts)
+    # print(cls, path_parts)
     return path_parts
 
 def inject_params_from_config(func: F, config: Any, is_method: bool = False) -> F:

@@ -16,7 +16,7 @@ from cryoPARES.configManager.config_searcher import inject_config
 from cryoPARES.configs.datamanager_config.particlesDataset_config import CtfCorrectionType, ImgNormalizationType
 from cryoPARES.constants import RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES, \
     RELION_PRED_POSE_CONFIDENCE_NAME, RELION_EULER_CONVENTION, RELION_ORI_POSE_CONFIDENCE_NAME, BATCH_PARTICLES_NAME, \
-    BATCH_PARTICLE_ID, BATCH_POSE_NAME, BATCH_MD_NAME
+    BATCH_IDS_NAME, BATCH_POSE_NAME, BATCH_MD_NAME
 
 warnings.filterwarnings("ignore", "Gimbal lock detected. Setting third angle to zero since it "
                                   "is not possible to uniquely determine all angles.")
@@ -25,7 +25,7 @@ warnings.filterwarnings("ignore", message="The torchvision.datapoints and torchv
 
 from cryoPARES.datamanager.augmentations import AugmenterBase
 from cryoPARES.datamanager.ctf.rfft_ctf import correct_ctf
-from cryoPARES.utils.tensors import data_to_numpy
+from cryoPARES.utils.torchUtils import data_to_numpy
 
 @inject_config()
 class ParticlesDataset(Dataset, ABC):
@@ -40,6 +40,7 @@ class ParticlesDataset(Dataset, ABC):
                  min_maxProb: Optional[float],
                  perImg_normalization: Literal["none", "noiseStats", "subtractMean"],
                  ctf_correction: Literal["none", "phase_flip", "ctf_multiply"],
+                 reduce_symmetry_label:bool
                  ):
 
         super().__init__()
@@ -49,6 +50,7 @@ class ParticlesDataset(Dataset, ABC):
         self.store_data_in_memory = store_data_in_memory
         self.mask_radius_angs = mask_radius_angs
         self.min_maxProb = min_maxProb
+        self.reduce_symmetry_label = reduce_symmetry_label
         self._symmetry = symmetry.upper()
 
 
@@ -251,14 +253,14 @@ class ParticlesDataset(Dataset, ABC):
 
         r = R.from_euler(RELION_EULER_CONVENTION, degEuler, degrees=True)
 
-        if self._symmetry != "C1":
+        if self._symmetry != "C1" and self.reduce_symmetry_label:
             r = r.reduce(self.symmetry_group)
         rotMat = r.as_matrix()
         rotMat = torch.FloatTensor(rotMat)
 
         mask = self._getParticleMask(self.image_size_px, sampling_rate=self.sampling_rate, mask_radius_angs=self.mask_radius_angs)[1]
         img *= mask
-        batch = {BATCH_PARTICLE_ID: iid,
+        batch = {BATCH_IDS_NAME: iid,
                  BATCH_PARTICLES_NAME: img,
                  BATCH_POSE_NAME: (rotMat, xyShiftAngs, confidence),
                  BATCH_MD_NAME: md_dict}

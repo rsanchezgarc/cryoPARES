@@ -7,6 +7,7 @@ from pathlib import Path
 
 from cryoPARES.configs.datamanager_config.datamanager_config import DataManager_config
 from cryoPARES.configs.models_config.models_config import Models_config
+from cryoPARES.configs.train_config.train_config import Train_config
 from cryoPARES.utils.paths import find_project_root
 
 
@@ -51,6 +52,7 @@ class MainConfig:
     cachedir: Path = Path(tempfile.gettempdir()) / "cryoPARES_cache"
     models: Models_config = field(default_factory=Models_config)
     datamanager: DataManager_config = field(default_factory=DataManager_config)
+    train: Train_config = field(default_factory=Train_config)
 
 # Create an instance
 main_config = MainConfig()

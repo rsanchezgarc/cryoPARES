@@ -1,7 +1,10 @@
 import abc
-import os.path as osp
 import functools
 import random
+import warnings
+warnings.filterwarnings('ignore', message='.*custom_fwd.*')
+import os.path as osp
+
 from dataclasses import asdict
 from typing import Optional, Dict, Tuple
 
@@ -16,7 +19,6 @@ import torchvision.transforms.functional as transformF
 from cryoPARES.configManager.config_searcher import inject_config
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.constants import BATCH_PARTICLES_NAME
-
 
 # TODO: Implement augmentations in a better way, defining custom torchvision operations so that they can be used in batch mode seamingly.
 
@@ -173,9 +175,9 @@ class Augmenter(AugmenterBase):
         return self.applyAugmentation(img, eulersDeg, shiftFraction)
 
 
-
+#TODO: Move this to a better place
 def rotTransImage(image, degrees, translationFract, scaling=1., padding_mode='reflection',
-                  interpolation_mode="bilinear", rotation_first=True) -> Tuple[torch.Tensor, torch.Tensor]: #TODO: Move to
+                  interpolation_mode="bilinear", rotation_first=True) -> Tuple[torch.Tensor, torch.Tensor]:
     """
 
     :param image: BxCxNxN

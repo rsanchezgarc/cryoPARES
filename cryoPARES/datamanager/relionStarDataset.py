@@ -45,7 +45,7 @@ class ParticlesRelionStarDataset(ParticlesDataset):
 
         """
         assert fname.endswith(".star"), "Error, metadata files will be saved as star files. Change extension to .star"
-        self.particles.save(star_fname=fname, overwrite=overwrite)
+        self.particles.save(starFname=fname, overwrite=overwrite)
 
 
 if __name__ == "__main__":

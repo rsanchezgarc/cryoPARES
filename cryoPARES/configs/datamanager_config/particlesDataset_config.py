@@ -21,3 +21,4 @@ class ParticlesDataset_config():
     min_maxProb: Optional[float] = None
     perImg_normalization: ImgNormalizationType = ImgNormalizationType.noiseStats
     ctf_correction: CtfCorrectionType = CtfCorrectionType.concat_phase_flip
+    reduce_symmetry_label: bool = True

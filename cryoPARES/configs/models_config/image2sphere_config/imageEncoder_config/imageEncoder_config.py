@@ -15,7 +15,7 @@ class EncoderArchitecture(str, Enum):
 
 @dataclass
 class ImageEncoder_config:
-    encoderArtchitecture: EncoderArchitecture = EncoderArchitecture.Unet
+    encoderArtchitecture: EncoderArchitecture = EncoderArchitecture.ResNet #EncoderArchitecture.Unet
     out_channels: Optional[int] = 512
 
     convmixer: ConvMixer_config = field(default_factory=ConvMixer_config)

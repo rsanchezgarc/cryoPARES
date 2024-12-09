@@ -10,7 +10,7 @@ import torch
 from torch.utils.data import DataLoader, BatchSampler, Sampler, RandomSampler, ConcatDataset
 from typing import Union, Literal, Optional, Tuple, Iterable, List
 
-from lightning import pytorch as pl
+import pytorch_lightning as pl
 
 from cryoPARES.configManager.config_searcher import inject_config
 from cryoPARES.configs.mainConfig import main_config
@@ -42,9 +42,10 @@ class DataManager(pl.LightningDataModule):
     def __init__(self, star_fnames: List[FnameType],
                  symmetry:str,
                  particles_dir: Optional[List[FnameType]],
-                 halfset: Optional[Literal[0, 1]], #TODO: particlesDataset does not handle halfsets
+                 halfset: Optional[Literal[1, 2]], #TODO: particlesDataset does not handle halfsets
                  batch_size: int,
                  save_train_val_partition_dir: Optional[FnameType],
+                 is_global_zero: bool,
                  # The following arguments have a default config value
                  num_augmented_copies_per_batch: int,
                  train_validaton_split_seed: int,
@@ -61,12 +62,15 @@ class DataManager(pl.LightningDataModule):
         self.particles_dir = self._expand_fname(particles_dir)
         if self.particles_dir is None:
             self.particles_dir = [None] * len(self.star_fnames)
-        self.halfset = halfset
+        self.halfset = halfset #TODO: halfset is not used
+        if self.halfset:
+            raise NotImplementedError()
         self.num_augmented_copies_per_batch = num_augmented_copies_per_batch
         self.train_validaton_split_seed = train_validaton_split_seed
         self.train_validation_split = train_validation_split
         self.batch_size = batch_size
         self.num_data_workers = num_data_workers
+        self.is_global_zero = is_global_zero
         self.save_train_val_partition_dir = save_train_val_partition_dir
         self.augment_train = augment_train
         self.onlfy_first_dataset_for_validation = onlfy_first_dataset_for_validation
@@ -87,6 +91,8 @@ class DataManager(pl.LightningDataModule):
             else:
                 raise ValueError(f"Not valid fname {fnameOrList}")
 
+    def prepare_data(self) -> None:
+        return
 
     def create_dataset(self, partitionName):
         datasets = []
@@ -94,7 +100,7 @@ class DataManager(pl.LightningDataModule):
             mrcsDataset = ParticlesRelionStarDataset(star_fname=partFname,  particles_dir=partDir,
                                                      symmetry=self.symmetry)
 
-            if self.save_train_val_partition_dir is not None:
+            if self.is_global_zero and self.save_train_val_partition_dir is not None:
                 dirname = osp.join(self.save_train_val_partition_dir, partitionName if partitionName is not None else "full")
                 os.makedirs(dirname, exist_ok=True)
                 fname = osp.join(dirname, f"{i}-particles.star")

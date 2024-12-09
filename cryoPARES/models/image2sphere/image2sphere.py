@@ -1,6 +1,7 @@
 import functools
 from collections import defaultdict
 from dataclasses import asdict
+from typing import Optional
 
 import e3nn
 import numpy as np
@@ -35,7 +36,8 @@ class Image2Sphere(nn.Module):
     cache = get_cache(cache_name=__qualname__)
 
     def __init__(self,
-                 lmax, symmetry, label_smoothing:float, enforce_symmetry=True, encoder=None):
+                 lmax, symmetry, label_smoothing:float, num_augmented_copies_per_batch:Optional[int],
+                 enforce_symmetry=True, encoder=None):
         super().__init__()
 
         if encoder is None:
@@ -43,6 +45,7 @@ class Image2Sphere(nn.Module):
         self.encoder = encoder
         self.lmax = lmax
         self.label_smoothing = label_smoothing
+        self.num_augmented_copies_per_batch = num_augmented_copies_per_batch #TODO: implement the SimCLR
 
         batch = get_example_random_batch(1)
         x = batch[BATCH_PARTICLES_NAME]

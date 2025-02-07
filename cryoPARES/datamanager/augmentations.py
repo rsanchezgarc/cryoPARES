@@ -15,8 +15,7 @@ from kornia.augmentation import RandomElasticTransform
 from scipy.spatial.transform import Rotation
 from torchvision.transforms.v2 import RandomErasing
 import torchvision.transforms.functional as transformF
-
-from cryoPARES.configManager.config_searcher import inject_config
+from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.constants import BATCH_PARTICLES_NAME
 
@@ -28,11 +27,12 @@ class AugmenterBase(abc.ABC):
         raise NotImplementedError()
 
 
-@inject_config()
 class Augmenter(AugmenterBase):
+    @inject_defaults_from_config(main_config.datamanager.augmenter, update_config_with_args=False)
     def __init__(self,
-                 min_n_augm_per_img: Optional[int],
-                 max_n_augm_per_img: Optional[int]):
+                 min_n_augm_per_img: int = CONFIG_PARAM(),
+                 max_n_augm_per_img: int= CONFIG_PARAM()):
+
         augmentConfig = main_config.datamanager.augmenter
         self.imageSize = main_config.datamanager.particlesdataset.desired_image_size_px
         self._augmentationTypes = asdict(augmentConfig.operations)

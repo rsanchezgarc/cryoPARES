@@ -9,13 +9,15 @@ from typing import Optional, List
 from einops import einops
 from omegaconf import MISSING
 
-from cryoPARES.configManager.config_searcher import inject_config
+from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
+from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.datamanager.datamanager import get_number_image_channels
 
 
 class BaseGaussianFilterBank(nn.Module):
-    def __init__(self, in_channels: Optional[int], sigma_values: Optional[List[float]],
-                 kernel_sizes: Optional[List[int]],out_channels: Optional[int] = None):
+    @inject_defaults_from_config(main_config.models.image2sphere.gaussianfilters)
+    def __init__(self, in_channels: Optional[int], sigma_values: List[float]= CONFIG_PARAM(),
+                 kernel_sizes: Optional[List[int]] = CONFIG_PARAM(), out_channels: Optional[int] = None):
         super().__init__()
 
         self.in_channels = in_channels if in_channels not in (None, MISSING) else get_number_image_channels()
@@ -39,7 +41,6 @@ class BaseGaussianFilterBank(nn.Module):
         raise NotImplementedError
 
 
-@inject_config(classname="GaussianFilters")
 class NaiveGaussianFilterBank(BaseGaussianFilterBank):
     def setup_kernels(self):
         max_kernel_size = max(self.kernel_sizes)
@@ -69,7 +70,6 @@ class NaiveGaussianFilterBank(BaseGaussianFilterBank):
         return self.out_projection(x)
 
 
-@inject_config(classname="GaussianFilters")
 class SeparableGaussianFilterBank(BaseGaussianFilterBank):
     def setup_kernels(self):
         max_kernel_size = max(self.kernel_sizes)
@@ -98,7 +98,6 @@ class SeparableGaussianFilterBank(BaseGaussianFilterBank):
         return self.out_projection(v_filtered)
 
 
-@inject_config(classname="GaussianFilters")
 class FFTGaussianFilterBank(BaseGaussianFilterBank):
     def setup_kernels(self):
         pass

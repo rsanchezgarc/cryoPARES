@@ -35,10 +35,7 @@ class PlModel(pl.LightningModule):
 
     @staticmethod
     def build_components(symmetry, num_augmented_copies_per_batch):
-        return Image2Sphere(
-                         symmetry=symmetry,
-                         num_augmented_copies_per_batch=num_augmented_copies_per_batch
-        )
+        return Image2Sphere(symmetry=symmetry, num_augmented_copies_per_batch=num_augmented_copies_per_batch)
     def _step(self, batch, batch_idx):
 
         idd, imgs, (rotMats, shifts, conf), metadata = self.resolve_batch(batch)

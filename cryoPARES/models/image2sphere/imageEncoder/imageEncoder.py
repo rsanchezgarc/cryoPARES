@@ -8,22 +8,19 @@ import torchvision
 
 from torch import nn
 
+from cryoPARES.constants import BATCH_PARTICLES_NAME
 from cryoPARES.configs.mainConfig import pyObjectFromStr, main_config
 from cryoPARES.configs.models_config.image2sphere_config.imageEncoder_config.imageEncoder_config import \
     EncoderArchitecture
 from cryoPARES.datamanager.datamanager import get_number_image_channels, get_example_random_batch
 from cryoPARES.models.image2sphere.gaussianFilters import GaussianFilterBank
 
-from cryoPARES.configManager.config_searcher import inject_config
-from cryoPARES.constants import BATCH_PARTICLES_NAME
+from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 
-def instatiateEncoder(encoderArtchitecture): #instatiateEncoder cannot be included in the __init__ because of the @inject_config
-    artchName = encoderArtchitecture.value
-    return pyObjectFromStr(f".{artchName}.{artchName[0].upper() + artchName[1:]}")
-
-@inject_config()
 class ImageEncoder(nn.Module):
-    def __init__(self, encoderArtchitecture:Optional[EncoderArchitecture], out_channels: Optional[int],
+    @inject_defaults_from_config(main_config.models.image2sphere.imageencoder)
+    def __init__(self, encoderArtchitecture:EncoderArchitecture = CONFIG_PARAM(),
+                 out_channels: Optional[int]=CONFIG_PARAM(),
                  **kwargs):
         super().__init__()
         self.in_channels = get_number_image_channels()
@@ -32,8 +29,12 @@ class ImageEncoder(nn.Module):
         out = self.filterBank(images)
         if encoderArtchitecture is None:
             encoderArtchitecture = main_config.models.image2sphere.imageencoder.encoderArtchitecture
-        encoderClass = instatiateEncoder(encoderArtchitecture)
+        encoderClass = self.instantiateEncoder(encoderArtchitecture)
         self.imageEncoder = encoderClass(out.shape[1], image_size=images.shape[-2], out_channels=out_channels)
+
+    def instantiateEncoder(self, encoderArtchitecture):
+        artchName = encoderArtchitecture.value
+        return pyObjectFromStr(f".{artchName}.{artchName[0].upper() + artchName[1:]}")
 
     def forward(self, x):
         x = self.filterBank(x)
@@ -41,7 +42,6 @@ class ImageEncoder(nn.Module):
 
 if __name__ == "__main__":
     from cryoPARES.datamanager.datamanager import get_example_random_batch
-    from cryoPARES.constants import BATCH_PARTICLES_NAME
     batch = get_example_random_batch(1)
     x = batch[BATCH_PARTICLES_NAME]
     model = ImageEncoder()

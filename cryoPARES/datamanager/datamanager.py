@@ -1,7 +1,5 @@
 import collections
 from dataclasses import asdict
-
-import torch
 import os
 import os.path as osp
 from os import PathLike
@@ -11,12 +9,9 @@ from torch.utils.data import DataLoader, BatchSampler, Sampler, RandomSampler, C
 from typing import Union, Literal, Optional, Tuple, Iterable, List
 
 import pytorch_lightning as pl
-
-from cryoPARES.configManager.config_searcher import inject_config
+from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.constants import BATCH_PARTICLES_NAME
-from cryoPARES.datamanager.augmentations import Augmenter
-from cryoPARES.datamanager.relionStarDataset import ParticlesRelionStarDataset
 
 FnameType = Union[PathLike, str]
 
@@ -33,26 +28,25 @@ def get_example_random_batch(batch_size):
     batch = {BATCH_PARTICLES_NAME:torch.randn(batch_size, get_number_image_channels(), imgsize, imgsize)}
     return batch
 
-@inject_config()
 class DataManager(pl.LightningDataModule):
     """
     DataManager: A LightningDataModule that wraps a ParticlesDataset
     """
-
+    @inject_defaults_from_config(main_config.datamanager, update_config_with_args=False)
     def __init__(self, star_fnames: List[FnameType],
                  symmetry:str,
                  particles_dir: Optional[List[FnameType]],
-                 halfset: Optional[Literal[1, 2]], #TODO: particlesDataset does not handle halfsets
+                 halfset: Optional[Literal[1, 2]],
                  batch_size: int,
                  save_train_val_partition_dir: Optional[FnameType],
                  is_global_zero: bool,
                  # The following arguments have a default config value
-                 num_augmented_copies_per_batch: int,
-                 train_validaton_split_seed: int,
-                 train_validation_split: Tuple[float, float],
-                 num_data_workers: int,
-                 augment_train: bool,
-                 onlfy_first_dataset_for_validation: bool,
+                 num_augmented_copies_per_batch: int = CONFIG_PARAM(),
+                 train_validaton_split_seed: int = CONFIG_PARAM(),
+                 train_validation_split: Tuple[float, float] = CONFIG_PARAM(),
+                 num_data_workers: int = CONFIG_PARAM(),
+                 augment_train: bool = CONFIG_PARAM(),
+                 onlfy_first_dataset_for_validation: bool = CONFIG_PARAM(),
                  ):
 
         super().__init__()
@@ -62,9 +56,7 @@ class DataManager(pl.LightningDataModule):
         self.particles_dir = self._expand_fname(particles_dir)
         if self.particles_dir is None:
             self.particles_dir = [None] * len(self.star_fnames)
-        self.halfset = halfset #TODO: halfset is not used
-        if self.halfset:
-            raise NotImplementedError()
+        self.halfset = halfset
         self.num_augmented_copies_per_batch = num_augmented_copies_per_batch
         self.train_validaton_split_seed = train_validaton_split_seed
         self.train_validation_split = train_validation_split
@@ -76,6 +68,7 @@ class DataManager(pl.LightningDataModule):
         self.onlfy_first_dataset_for_validation = onlfy_first_dataset_for_validation
 
         if self.augment_train:
+            from cryoPARES.datamanager.augmentations import Augmenter
             self.augmenter = Augmenter()
         else:
             self.augmenter = None
@@ -95,10 +88,11 @@ class DataManager(pl.LightningDataModule):
         return
 
     def create_dataset(self, partitionName):
+        from cryoPARES.datamanager.relionStarDataset import ParticlesRelionStarDataset
         datasets = []
         for i, (partFname, partDir) in enumerate(zip(self.star_fnames, self.particles_dir)):
             mrcsDataset = ParticlesRelionStarDataset(star_fname=partFname,  particles_dir=partDir,
-                                                     symmetry=self.symmetry)
+                                                     symmetry=self.symmetry, halfset=self.halfset)
 
             if self.is_global_zero and self.save_train_val_partition_dir is not None:
                 dirname = osp.join(self.save_train_val_partition_dir, partitionName if partitionName is not None else "full")

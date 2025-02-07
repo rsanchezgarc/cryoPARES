@@ -7,13 +7,14 @@ import torch
 import numpy as np
 
 from scipy.spatial.transform import Rotation as R
+from sklearn.model_selection import train_test_split
 from starstack.particlesStar import ParticlesStarSet
 from torch.utils.data import Dataset
 from typing import Union, Literal, Optional, List, Tuple, Any, Dict
 
-from cryoPARES.cacheManager import SharedTemporaryDirectory, get_cache
-from cryoPARES.configManager.config_searcher import inject_config
+from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.datamanager_config.particlesDataset_config import CtfCorrectionType, ImgNormalizationType
+from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.constants import RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES, \
     RELION_PRED_POSE_CONFIDENCE_NAME, RELION_EULER_CONVENTION, RELION_ORI_POSE_CONFIDENCE_NAME, BATCH_PARTICLES_NAME, \
     BATCH_IDS_NAME, BATCH_POSE_NAME, BATCH_MD_NAME
@@ -27,20 +28,21 @@ from cryoPARES.datamanager.augmentations import AugmenterBase
 from cryoPARES.datamanager.ctf.rfft_ctf import correct_ctf
 from cryoPARES.utils.torchUtils import data_to_numpy
 
-@inject_config()
 class ParticlesDataset(Dataset, ABC):
 
-
+    @inject_defaults_from_config(main_config.datamanager.particlesdataset)
     def __init__(self,
                  symmetry: str,
-                 desired_sampling_rate_angs: Optional[float],
-                 desired_image_size_px: Optional[int],
-                 store_data_in_memory: bool,
-                 mask_radius_angs: Optional[float],
-                 min_maxProb: Optional[float],
-                 perImg_normalization: Literal["none", "noiseStats", "subtractMean"],
-                 ctf_correction: Literal["none", "phase_flip", "ctf_multiply"],
-                 reduce_symmetry_label:bool
+                 halfset: Optional[int],
+                 desired_sampling_rate_angs: float = CONFIG_PARAM(),
+                 desired_image_size_px: int = CONFIG_PARAM(),
+                 store_data_in_memory: bool = CONFIG_PARAM(),
+                 mask_radius_angs: Optional[float] = CONFIG_PARAM(),
+                 min_maxProb: Optional[float] = CONFIG_PARAM(),
+                 perImg_normalization: Literal["none", "noiseStats", "subtractMean"] = CONFIG_PARAM(),
+                 ctf_correction: Literal["none", "phase_flip", "ctf_multiply",
+                                         "concat_phase_flip", "concat_ctf_multiply"] = CONFIG_PARAM(),
+                 reduce_symmetry_label:bool = CONFIG_PARAM(),
                  ):
 
         super().__init__()
@@ -52,7 +54,7 @@ class ParticlesDataset(Dataset, ABC):
         self.min_maxProb = min_maxProb
         self.reduce_symmetry_label = reduce_symmetry_label
         self._symmetry = symmetry.upper()
-
+        self.halfset = halfset
 
         assert perImg_normalization in (item.value for item in ImgNormalizationType)
         if perImg_normalization == "none":
@@ -70,6 +72,8 @@ class ParticlesDataset(Dataset, ABC):
             self._correctCtf = self._correctCtfNone
         elif ctf_correction.endswith("phase_flip"):
             self._correctCtf = self._correctCtfPhase
+        elif ctf_correction.endswith("ctf_multiply"):
+            raise NotImplementedError("Error, ctf_multiply was not implemented")
         else:
             ValueError(f"Error, perImg_normalization {ctf_correction} wrong option")
 
@@ -78,7 +82,8 @@ class ParticlesDataset(Dataset, ABC):
 
 
         if self.store_data_in_memory:
-            warnings.warn("store_data_in_memory has not being implemented yet") #TODO: implement catching for getIdx
+            warnings.warn("store_data_in_memory has not being implemented yet")
+            #TODO: implement catching for getIdx
             # self._getIdx = functools.cache(self._getIdx)
         #     print(locals())
         #     breakpoint()
@@ -106,13 +111,31 @@ class ParticlesDataset(Dataset, ABC):
     def load_ParticlesStarSet(self):
         raise NotImplementedError()
 
+    def _load_ParticlesStarSet(self):
+        part_set = self.load_ParticlesStarSet()
+        self._particles = part_set
+        if self.halfset is not None:
+            if "rlnRandomSubset" not in self._particles.particles_md:
+                half1, half2 = train_test_split(self._particles.particles_md.index, test_size=0.5,
+                                              random_state=11, #Using the same seed to ensure that we always split the same way
+                                              shuffle=True)
+                self._particles.particles_md.loc[:, "rlnRandomSubset"] = 1
+                self._particles.particles_md.loc[half2, "rlnRandomSubset"] = 2
+
+            subsetNums = self._particles.particles_md["rlnRandomSubset"].values
+            _subsetNums = set(subsetNums)
+            assert min(_subsetNums) >= 1 and max(_subsetNums) <= 2
+            idxs = np.where(subsetNums == self.halfset)[0]
+            self._particles = self.particles.createSubset(idxs=idxs)
+        return self._particles
+
     @property
     def particles(self) -> ParticlesStarSet:
         """
         a starstack.particlesStar.ParticlesStarSet representing the loaded particles
         """
         if self._particles is None:
-            self._particles = self.load_ParticlesStarSet()
+            self._particles = self._load_ParticlesStarSet()
         return self._particles
 
     @property

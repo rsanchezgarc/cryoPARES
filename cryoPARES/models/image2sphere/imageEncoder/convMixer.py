@@ -1,7 +1,9 @@
+from typing import Literal
+
 from torch import nn
 
-from cryoPARES.configManager.config_searcher import inject_config
-
+from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
+from cryoPARES.configs.mainConfig import main_config
 
 class ResidualForConvMixer(nn.Module):
     def __init__(self, fn):
@@ -11,11 +13,14 @@ class ResidualForConvMixer(nn.Module):
     def forward(self, x):
         return self.fn(x) + x
 
-@inject_config()
-class ConvMixer(nn.Module):
 
-    def __init__(self, in_channels, hidden_dim, n_blocks, kernel_size, patch_size,
-                 out_channels, add_stem, dropout_rate, normalization="Batch",
+class ConvMixer(nn.Module):
+    @inject_defaults_from_config(main_config.models.image2sphere.imageencoder.convmixer, update_config_with_args=False)
+    def __init__(self, in_channels, hidden_dim: int = CONFIG_PARAM(), n_blocks: int = CONFIG_PARAM(),
+                 kernel_size: int = CONFIG_PARAM(), patch_size: int = CONFIG_PARAM(),
+                 out_channels: int = CONFIG_PARAM(), add_stem: bool = CONFIG_PARAM(),
+                 dropout_rate: float = CONFIG_PARAM(),
+                 normalization: Literal["Batch"] = CONFIG_PARAM(),
                  global_pooling=False, flatten_if_no_global_pooling=False, flatten_start_dim=1, **kwargs):
         super().__init__()
         if normalization == "Batch":
@@ -25,7 +30,7 @@ class ConvMixer(nn.Module):
 
         if add_stem:
             steam = nn.Sequential(
-                nn.Conv2d(in_channels, hidden_dim, kernel_size=kernel_size, stride=2, padding=kernel_size//2),
+                nn.Conv2d(in_channels, hidden_dim, kernel_size=kernel_size, stride=2, padding=kernel_size // 2),
                 nn.GELU(),
                 normalization(hidden_dim))
             in_channels = hidden_dim
@@ -38,16 +43,16 @@ class ConvMixer(nn.Module):
             nn.GELU(),
             normalization(hidden_dim),
             *[nn.Sequential(
-                    ResidualForConvMixer(nn.Sequential(
-                        nn.Conv2d(hidden_dim, hidden_dim, kernel_size, groups=hidden_dim, padding="same"),
-                        nn.GELU(),
-                        nn.Dropout2d(dropout_rate),  # Dropout after token mixing
-                        normalization(hidden_dim)
-                    )),
-                    nn.Conv2d(hidden_dim, hidden_dim, kernel_size=1),
+                ResidualForConvMixer(nn.Sequential(
+                    nn.Conv2d(hidden_dim, hidden_dim, kernel_size, groups=hidden_dim, padding="same"),
                     nn.GELU(),
-                    nn.Dropout2d(dropout_rate),  # Dropout after channel mixing
-                    normalization(hidden_dim),
+                    nn.Dropout2d(dropout_rate),  # Dropout after token mixing
+                    normalization(hidden_dim)
+                )),
+                nn.Conv2d(hidden_dim, hidden_dim, kernel_size=1),
+                nn.GELU(),
+                nn.Dropout2d(dropout_rate),  # Dropout after channel mixing
+                normalization(hidden_dim),
             ) for _ in range(n_blocks)],
         )
         self.global_pooling = global_pooling
@@ -71,8 +76,10 @@ class ConvMixer(nn.Module):
         out = self.trailModel(feats)
         return out
 
+
 if __name__ == "__main__":
     from cryoPARES.datamanager.datamanager import get_example_random_batch
+
     batch = get_example_random_batch(1)
     x = batch["particle"]
     model = ConvMixer(x.shape[1])

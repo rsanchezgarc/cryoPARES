@@ -11,6 +11,7 @@ class CtfCorrectionType(str, Enum):
     none = "none"
     phase_flip = "phase_flip"
     concat_phase_flip = "concat_phase_flip"
+    ctf_multiply = "ctf_multiply"
 
 @dataclass
 class ParticlesDataset_config():

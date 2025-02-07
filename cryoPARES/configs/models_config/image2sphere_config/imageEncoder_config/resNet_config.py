@@ -6,3 +6,4 @@ from typing import Literal, Optional
 class ResNet_config:
     resnetName: str = "resnet50"
     load_imagenetweights: bool = True
+    out_channels: int = 512

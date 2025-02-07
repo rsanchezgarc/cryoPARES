@@ -8,7 +8,8 @@ from e3nn.o3._so3grid import flat_wigner
 from torch import nn
 
 from cryoPARES.cacheManager import get_cache
-from cryoPARES.configManager.config_searcher import inject_config
+from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
+from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.geometry.grids import s2_healpix_grid, so3_near_identity_grid_cartesianprod, so3_healpix_grid
 from cryoPARES.geometry.metrics_angles import nearest_rotmat_idx
 
@@ -20,23 +21,22 @@ def so3_irreps(lmax):
     return o3.Irreps([(2 * l + 1, (l, 1)) for l in range(lmax + 1)])
 
 
-@inject_config()
 class I2SProjector(nn.Module):
     '''Define orthographic projection from image space to half of sphere, returning spherical harmonics representation
     '''
 
     cache = get_cache(cache_name=__qualname__)
-
+    @inject_defaults_from_config(main_config.models.image2sphere.so3components.i2sprojector, update_config_with_args=False)
     def __init__(self,
                  fmap_shape: Tuple[int, int, int],
-                 sphere_fdim: int,
-                 lmax: int,
-                 hp_order: int,
-                 coverage: float,
-                 sigma: float,
-                 max_beta: float,
-                 taper_beta: float,
-                 rand_fraction_points_to_project: Optional[float],
+                 sphere_fdim: int = CONFIG_PARAM(),
+                 lmax: int = CONFIG_PARAM(config=main_config.models.image2sphere),
+                 hp_order: int = CONFIG_PARAM(),
+                 coverage: float = CONFIG_PARAM(),
+                 sigma: float = CONFIG_PARAM(),
+                 max_beta: float = CONFIG_PARAM(),
+                 taper_beta: float = CONFIG_PARAM(),
+                 rand_fraction_points_to_project: float = CONFIG_PARAM(),
                  ):
         """
 
@@ -121,18 +121,17 @@ class I2SProjector(nn.Module):
         x = torch.einsum('ps,bcp->bcs', self.Y[ind], x) / ind.shape[0] ** 0.5
         return x
 
-
-@inject_config()
 class S2Conv(nn.Module):
     '''Define S2 group convolution which outputs signal over SO(3) irreps'''
 
     cache = get_cache(cache_name=__qualname__)
 
+    @inject_defaults_from_config(main_config.models.image2sphere.so3components.s2conv, update_config_with_args=False)
     def __init__(self,
                  f_in: int,
-                 f_out: int,
-                 lmax: int,
-                 hp_order: int,
+                 f_out: int = CONFIG_PARAM(),
+                 lmax: int = CONFIG_PARAM(config=main_config.models.image2sphere),
+                 hp_order: int =CONFIG_PARAM(),
                 ):
         '''
         :param f_in: feature dimensionality of input signal
@@ -172,18 +171,17 @@ class S2Conv(nn.Module):
         return self.lin(x, weight=psi)
 
 
-@inject_config()
 class SO3Conv(nn.Module):
     '''SO3 group convolution'''
 
     cache = get_cache(cache_name=__qualname__)
-
+    @inject_defaults_from_config(main_config.models.image2sphere.so3components.so3conv, update_config_with_args=False)
     def __init__(self,
                  f_in: int,
-                 f_out: int,
-                 lmax: int,
-                 max_rads: float,
-                 n_angles: int
+                 f_out: int = CONFIG_PARAM(),
+                 lmax: int = CONFIG_PARAM(config=main_config.models.image2sphere),
+                 max_rads: float = CONFIG_PARAM(),
+                 n_angles: int = CONFIG_PARAM()
                  ):
         '''
         :param f_in: feature dimensionality of input signal
@@ -222,15 +220,14 @@ class SO3Conv(nn.Module):
 
 
 
-@inject_config()
 class SO3OutputGrid(nn.Module):
     '''Define S2 group convolution which outputs signal over SO(3) irreps'''
 
     cache = get_cache(cache_name=__qualname__)
-
+    @inject_defaults_from_config(main_config.models.image2sphere.so3components.so3outputgrid, update_config_with_args=False)
     def __init__(self,
-                 lmax: int,
-                 hp_order: int,
+                 lmax: int = CONFIG_PARAM(config=main_config.models.image2sphere),
+                 hp_order: int = CONFIG_PARAM(),
                 ):
         '''
         :param lmax: maximum degree of harmonics
@@ -270,10 +267,12 @@ class SO3OutputGrid(nn.Module):
     def forward(self, rotMat: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         return self.nearest_rotmat(rotMat)
 
-@inject_config()
 class SO3Activation(nn.Module):
     cache = get_cache(cache_name=__qualname__)
-    def __init__(self, lmax, so3_act_resolution):
+    @inject_defaults_from_config(main_config.models.image2sphere.so3components.so3activation, update_config_with_args=False)
+    def __init__(self,
+                 lmax: int = CONFIG_PARAM(config=main_config.models.image2sphere),
+                 so3_act_resolution: int = CONFIG_PARAM()):
         super().__init__()
         self.lmax = lmax
         self.act = SO3Activation.build_components(lmax, so3_act_resolution)

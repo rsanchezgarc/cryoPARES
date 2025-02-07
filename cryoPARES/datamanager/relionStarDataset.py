@@ -18,7 +18,8 @@ class ParticlesRelionStarDataset(ParticlesDataset):
     <br>
     """
 
-    def __init__(self, star_fname: Union[PathLike, str], particles_dir: Optional[str], symmetry: str, **kwargs):
+    def __init__(self, star_fname: Union[PathLike, str], particles_dir: Optional[str], symmetry: str,
+                 halfset:Optional[int]=None, **kwargs):
         """
         ##Builder
 
@@ -26,11 +27,13 @@ class ParticlesRelionStarDataset(ParticlesDataset):
             star_fname (Union[PathLike, str]): The star filename to use
             particles_dir (str): The root directory where the stack files are
             symmetry (str): The point symmetry of the macromolecule
+            halfset: [1,2,None]
         """
 
-        super().__init__(symmetry=symmetry, **kwargs)
+        super().__init__(symmetry=symmetry, halfset=halfset, **kwargs)
         self._star_fname = str(star_fname)
         self._datadir = osp.expanduser(particles_dir) if particles_dir is not None else None
+        self.halfset = halfset
 
     def load_ParticlesStarSet(self):
         return ParticlesStarSet(starFname=self._star_fname, particlesDir=self._datadir)

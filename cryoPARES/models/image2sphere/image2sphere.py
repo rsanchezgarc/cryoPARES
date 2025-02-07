@@ -12,7 +12,7 @@ from torch import nn
 from tqdm import tqdm
 
 from cryoPARES.cacheManager import get_cache
-from cryoPARES.configManager.config_searcher import inject_config
+
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.constants import BATCH_PARTICLES_NAME
 from cryoPARES.datamanager.datamanager import get_example_random_batch
@@ -21,12 +21,12 @@ from cryoPARES.geometry.nearest_neigs_sphere import compute_nearest_neighbours
 from cryoPARES.geometry.symmetry import getSymmetryGroup
 from cryoPARES.models.image2sphere.imageEncoder.imageEncoder import ImageEncoder
 from cryoPARES.models.image2sphere.so3Components import S2Conv, SO3Conv, I2SProjector, SO3OutputGrid, SO3Activation
+from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 
 
 # print(asdict(main_config.models).keys())
 # breakpoint()
 
-@inject_config()
 class Image2Sphere(nn.Module):
     '''
     Instantiate Image2Sphere-style network for predicting distributions over SO(3) from
@@ -35,9 +35,12 @@ class Image2Sphere(nn.Module):
 
     cache = get_cache(cache_name=__qualname__)
 
-    def __init__(self,
-                 lmax, symmetry, label_smoothing:float, num_augmented_copies_per_batch:Optional[int],
-                 enforce_symmetry=True, encoder=None):
+    @inject_defaults_from_config(main_config.models.image2sphere, update_config_with_args=False)
+    def __init__(self, symmetry, lmax: int = CONFIG_PARAM(), label_smoothing: float = CONFIG_PARAM(),
+                 num_augmented_copies_per_batch: Optional[int] = CONFIG_PARAM(config=main_config.datamanager),
+                 enforce_symmetry: bool = CONFIG_PARAM(),
+                 encoder: Optional[nn.Module] = None,
+                 use_simCLR: bool = False):
         super().__init__()
 
         if encoder is None:
@@ -45,7 +48,8 @@ class Image2Sphere(nn.Module):
         self.encoder = encoder
         self.lmax = lmax
         self.label_smoothing = label_smoothing
-        self.num_augmented_copies_per_batch = num_augmented_copies_per_batch #TODO: implement the SimCLR
+        self.num_augmented_copies_per_batch = num_augmented_copies_per_batch #TODO: refactor SimCLR
+        self.use_simCLR = use_simCLR
 
         batch = get_example_random_batch(1)
         x = batch[BATCH_PARTICLES_NAME]
@@ -351,7 +355,7 @@ class Image2Sphere(nn.Module):
 
 
     def simCLR_like_loss(self, wD): #TODO: implement this
-        return 0.
+        return NotImplementedError()
 
     def forward_and_loss(self, img, gt_rot, per_img_weight=None):
         '''Compute cross entropy loss using ground truth rotation, the correct label
@@ -364,7 +368,10 @@ class Image2Sphere(nn.Module):
 
         wD, rotMat_logits, pred_rotmat_ids, pred_rotmats, maxprobs = self.forward(img)
 
-        contrast_loss =  self.simCLR_like_loss(wD)
+        if self.use_simCLR:
+            contrast_loss = self.simCLR_like_loss(wD)
+        else:
+            contrast_loss = 0
 
         if self.symmetry != "C1":
             n_groupElems = self.symmetryGroupMatrix.shape[0]
@@ -513,7 +520,7 @@ def _test():
     b = 4
     imgs = get_example_random_batch(4)[BATCH_PARTICLES_NAME]
 
-    model = Image2Sphere(symmetry="c2") #lmax=6
+    model = Image2Sphere(symmetry="c2")  #lmax=6
     model.eval()
     with torch.inference_mode():
         from scipy.spatial.transform import Rotation
@@ -553,7 +560,7 @@ def _test_rotation_invariance(n_samples=10):
 
     encoder = nn.Conv2d(imgs.shape[1], main_config.models.image2sphere.so3components.i2sprojector.sphere_fdim,
                         kernel_size=1, padding="same")
-    model = Image2Sphere(lmax=6, symmetry="C1", enforce_symmetry=False, encoder=encoder)
+    model = Image2Sphere(symmetry="C1", lmax=6, enforce_symmetry=False, encoder=encoder)
     model.eval()
 
     # Store all results

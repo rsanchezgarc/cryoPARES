@@ -1,4 +1,5 @@
 from dataclasses import dataclass, asdict, field, MISSING
+from typing import Optional
 
 import numpy as np
 
@@ -11,7 +12,7 @@ class I2SProjector_config:
     sigma: float = 0.2
     max_beta: float = np.radians(90)
     taper_beta: float = np.radians(75)
-    rand_fraction_points_to_project: float = 0.5
+    rand_fraction_points_to_project: Optional[float] = 0.5
 
 @dataclass
 class S2Conv_config:

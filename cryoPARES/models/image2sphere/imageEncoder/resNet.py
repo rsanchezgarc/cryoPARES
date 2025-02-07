@@ -3,14 +3,14 @@ import torchvision
 from torch import nn
 from typing import Optional
 
-from cryoPARES.configManager.config_searcher import inject_config
+from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
+from cryoPARES.configs.mainConfig import main_config
 
 
-@inject_config()
 class ResNet(nn.Module):
-    def __init__(self, in_channels:int, resnetName: str, load_imagenetweights: bool,
-                 out_channels: Optional[int] = None, **kwargs):
-
+    @inject_defaults_from_config(main_config.models.image2sphere.imageencoder.resnet, update_config_with_args=False)
+    def __init__(self, in_channels:int, resnetName: str= CONFIG_PARAM(), load_imagenetweights: bool=CONFIG_PARAM(),
+                 out_channels: int =CONFIG_PARAM(), **kwargs):
 
         super().__init__()
         cls = getattr(torchvision.models, resnetName)

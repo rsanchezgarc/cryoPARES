@@ -11,3 +11,4 @@ class ConvMixer_config:
     add_stem : bool = False
     out_channels: int = 512
     dropout_rate: float = 0.
+    normalization: Literal["Batch"] = "Batch"

@@ -3,7 +3,9 @@ import torch
 from torch import nn
 from typing import Optional, Union
 
-from cryoPARES.configManager.config_searcher import inject_config
+from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
+from cryoPARES.configs.mainConfig import main_config
+
 
 class ConvolutionalBlock(nn.Module):
     def __init__(
@@ -395,17 +397,16 @@ def get_downsampling_layer(
     return class_(kernel_size)
 
 
-@inject_config()
 class Unet(nn.Module):
-
-    def __init__(self, in_channels, n_blocks,
-                 out_channels, out_channels_first,
-                 n_decoder_blocks_removed, kernel_size,
-                 pooling, padding,
-                 activation,
-                 normalization,
-                 upsampling_type,
-                 dropout,
+    @inject_defaults_from_config(main_config.models.image2sphere.imageencoder.unet, update_config_with_args=False)
+    def __init__(self, in_channels:int, n_blocks:int=CONFIG_PARAM(),
+                 out_channels:Optional[int]=CONFIG_PARAM(), out_channels_first:int=CONFIG_PARAM(),
+                 n_decoder_blocks_removed:int=CONFIG_PARAM(), kernel_size:int=CONFIG_PARAM(),
+                 pooling:str=CONFIG_PARAM(), padding:str=CONFIG_PARAM(),
+                 activation:str=CONFIG_PARAM(),
+                 normalization:str=CONFIG_PARAM(),
+                 upsampling_type:str=CONFIG_PARAM(),
+                 dropout:float=CONFIG_PARAM(),
                  keep_2d=True,
                  **kwargs
                  ):

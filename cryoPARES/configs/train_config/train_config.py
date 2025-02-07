@@ -1,7 +1,8 @@
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Literal
 
 
+#Don't use inject_config in Trainer
 @dataclass
 class Train_config:
     n_epochs: int = 2
@@ -29,3 +30,6 @@ class Train_config:
 
     default_optimizer: str = "RAdam"
     warmup_n_epochs: Optional[int] = None
+
+    pl_plugin: Literal["LightningEnvironment", "none"] = "LightningEnvironment"  #Try none to submit to slurm
+    num_computer_nodes: int  = 1 #It has not been tried with values different from 1

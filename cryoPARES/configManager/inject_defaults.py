@@ -126,11 +126,10 @@ def inject_defaults_from_config(default_config: Any, update_config_with_args: bo
 
         lazy_params = {}
         param_processors = {}
-        param_configs: Dict[str, Any] = {}  # Track which config each param uses
+        param_configs: Dict[str, Any] = {}
 
         for name, param in sig.parameters.items():
             if isinstance(param.default, CONFIG_PARAM):
-                # Determine which config to use
                 config_to_use = param.default._config or default_config
                 param_configs[name] = config_to_use
 
@@ -146,41 +145,67 @@ def inject_defaults_from_config(default_config: Any, update_config_with_args: bo
                         f"got {type(config_value)} with value {config_value}"
                     )
 
-                # Bind the CONFIG_PARAM to its config and name
                 param.default.bind(config_to_use, name)
                 lazy_params[name] = param.default
                 param_processors[name] = param.default
 
         @wraps(func)
         def wrapper(*args, **kwargs):
-            bound_args = sig.bind(*args, **kwargs)
-            bound_args.apply_defaults()
+            # First, bind positional arguments to their parameter names
+            bound_args = sig.bind_partial(*args, **kwargs)
 
+            # Create final kwargs dict starting with positional args
             final_kwargs = {}
+
+            # Handle the 'self' parameter for methods
             skip_first = inspect.ismethod(func) or (func.__name__ == '__init__' and 'self' in sig.parameters)
+            if skip_first and args:
+                first_param_name = list(sig.parameters.keys())[0]
+                final_kwargs[first_param_name] = args[0]
+                args = args[1:]
 
-            for i, (param, value) in enumerate(bound_args.arguments.items()):
-                if i == 0 and skip_first:
-                    final_kwargs[param] = value
-                    continue
+            # Process positional arguments first
+            positional_params = [p for p in sig.parameters.values()
+                                 if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
 
-                if param in lazy_params:
-                    if param in kwargs:
-                        processor = param_processors[param]
+            for i, param in enumerate(positional_params[1:] if skip_first else positional_params):
+                if i < len(args):
+                    # Use the positional argument value
+                    value = args[i]
+                    if param.name in param_processors:
+                        processor = param_processors[param.name]
                         value = processor.transform_value(value)
                         if not processor.validate(value):
-                            raise ValueError(f"Validation failed for parameter {param}")
+                            raise ValueError(f"Validation failed for parameter {param.name}")
                         if update_config_with_args:
-                            config_to_update = param_configs[param]
-                            setattr(config_to_update, param, value)
-                        final_kwargs[param] = value
-                    else:
-                        final_kwargs[param] = lazy_params[param]()
-                else:
-                    final_kwargs[param] = value
+                            config_to_update = param_configs[param.name]
+                            setattr(config_to_update, param.name, value)
+                    final_kwargs[param.name] = value
+
+            # Then process keyword arguments and remaining parameters
+            for name, param in sig.parameters.items():
+                if name in final_kwargs:  # Skip already processed positional args
+                    continue
+
+                if name in kwargs:
+                    value = kwargs[name]
+                    if name in param_processors:
+                        processor = param_processors[name]
+                        value = processor.transform_value(value)
+                        if not processor.validate(value):
+                            raise ValueError(f"Validation failed for parameter {name}")
+                        if update_config_with_args:
+                            config_to_update = param_configs[name]
+                            setattr(config_to_update, name, value)
+                    final_kwargs[name] = value
+                elif name in lazy_params:
+                    final_kwargs[name] = lazy_params[name]()
+                elif param.default is not param.empty:
+                    final_kwargs[name] = param.default
 
             return func(**final_kwargs)
 
+        # Update the signature
         new_params = []
         for param in sig.parameters.values():
             if isinstance(param.default, CONFIG_PARAM):

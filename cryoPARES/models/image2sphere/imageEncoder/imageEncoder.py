@@ -24,6 +24,7 @@ class ImageEncoder(nn.Module):
                  **kwargs):
         super().__init__()
         self.in_channels = get_number_image_channels()
+
         images = get_example_random_batch(batch_size=1)[BATCH_PARTICLES_NAME]
         self.filterBank = GaussianFilterBank(in_channels=self.in_channels)
         out = self.filterBank(images)

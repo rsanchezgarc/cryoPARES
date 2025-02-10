@@ -221,7 +221,7 @@ class SO3Conv(nn.Module):
 
 
 class SO3OutputGrid(nn.Module):
-    '''Define S2 group convolution which outputs signal over SO(3) irreps'''
+    '''Define the output grid over SO(3) '''
 
     cache = get_cache(cache_name=__qualname__)
     @inject_defaults_from_config(main_config.models.image2sphere.so3components.so3outputgrid, update_config_with_args=False)
@@ -235,6 +235,9 @@ class SO3OutputGrid(nn.Module):
 
         '''
         super().__init__()
+        # print(f"Building SO3OutputGrid lmax: {lmax} ; hp_order: {hp_order}")
+        self.lmax = lmax
+        self.hp_order = hp_order
         output_eulerRad_yxy, output_wigners, output_rotmats = self.build_components(lmax, hp_order)
         self.register_buffer("output_eulerRad_yxy", output_eulerRad_yxy)
         self.register_buffer("output_wigners", output_wigners)
@@ -258,7 +261,7 @@ class SO3OutputGrid(nn.Module):
             - dot_trace: The similarity measurment fromthe rotMat and the highest score rotmat
             - idxs: The id of the closest rotMat
         """
-        dot_trace, idxs = self.nearest_rotmat_idx(rotMat, self.output_rotmats)
+        dot_trace, idxs = self.nearest_rotmat_idxs(rotMat)
         return dot_trace, self.output_rotmats[idxs]
 
     def nearest_rotmat_idxs(self, rotMat) -> Tuple[torch.Tensor, torch.Tensor]:

@@ -1,12 +1,11 @@
 import functools
 from collections import defaultdict
 from dataclasses import asdict
-from typing import Optional
+from typing import Optional, Tuple
 
 import e3nn
 import numpy as np
 import torch
-import torchvision
 from e3nn import o3
 from torch import nn
 from tqdm import tqdm
@@ -36,17 +35,18 @@ class Image2Sphere(nn.Module):
     cache = get_cache(cache_name=__qualname__)
 
     @inject_defaults_from_config(main_config.models.image2sphere, update_config_with_args=False)
-    def __init__(self, symmetry, lmax: int = CONFIG_PARAM(), label_smoothing: float = CONFIG_PARAM(),
+    def __init__(self, symmetry, lmax: int = CONFIG_PARAM(),
+                 hp_order: int = CONFIG_PARAM(config=main_config.models.image2sphere.so3components.so3outputgrid),
+                 label_smoothing: float = CONFIG_PARAM(),
                  num_augmented_copies_per_batch: Optional[int] = CONFIG_PARAM(config=main_config.datamanager),
                  enforce_symmetry: bool = CONFIG_PARAM(),
                  encoder: Optional[nn.Module] = None,
                  use_simCLR: bool = False):
         super().__init__()
 
-        if encoder is None:
-            encoder = ImageEncoder()
-        self.encoder = encoder
+        self.encoder = encoder if encoder is not None else ImageEncoder()
         self.lmax = lmax
+        self.hp_order_output = hp_order
         self.label_smoothing = label_smoothing
         self.num_augmented_copies_per_batch = num_augmented_copies_per_batch #TODO: refactor SimCLR
         self.use_simCLR = use_simCLR
@@ -66,21 +66,61 @@ class Image2Sphere(nn.Module):
         out = self.so3_act(out)
 
         self.so3_conv = SO3Conv(f_in=out.shape[1], lmax=lmax)
-        self.so3_grid = SO3OutputGrid(lmax=lmax)
-
+        self.so3_grid = None #Will be set at self._initialize_grid_and_symmetry_components()
 
         self.symmetry = symmetry.upper()
         self.has_symmetry = (self.symmetry != "C1")
 
+        self.enforce_symmetry = enforce_symmetry
+
         #TODO: The following needs to be refactored, since it is problematic with multigpu. We need to make sure that
         #TODO: They are precomputed
-        self.enforce_symmetry = enforce_symmetry
-        self._get_symmetry_equivalent_idxs() #what are the idxs that are equivalent under a symmetry group
-        self.rotation_contraction_idxs() #indices that need to be averaged to make sure everybody in the symmetry group are o
-        self._get_neigs_matrix()
-        print(f"Image2Sphere initialized (output_rotmats:{self.so3_grid.output_rotmats.shape[0]})")
+        self._initialize_grid_and_symmetry_components()
+        # Register nearest neighbors buffer
+        self._initialize_neigs()
+        self._initialize_caches()
 
+    def _initialize_grid_and_symmetry_components(self):
+        """Initialize symmetry-related components."""
+        if not self.has_symmetry:
+            self._sym_equiv = None
+            self.register_buffer("symmetryGroupMatrix", torch.eye(3).unsqueeze(0))
+            self._selected_rotmat_idxs = None
+            self._old_idx_to_new_idx = None
+            self.so3_grid = SO3OutputGrid(self.lmax, self.hp_order_output)
+            return
 
+        # Using cached compute_symmetry_indices
+        (so3_grid, symmetryGroupMatrix, sym_equiv,
+         selected_rotmat_idxs, old_idx_to_new_idx) = compute_symmetry_indices(self.lmax,
+                                                                              self.hp_order_output,
+                                                                              self.symmetry)
+        self.so3_grid = so3_grid
+        self.register_buffer("symmetryGroupMatrix", symmetryGroupMatrix)
+        self.register_buffer("_sym_equiv", sym_equiv)
+        if self.enforce_symmetry:
+            self.register_buffer("_selected_rotmat_idxs", selected_rotmat_idxs)
+            self.register_buffer("_old_idx_to_new_idx", old_idx_to_new_idx)
+        else:
+            self._selected_rotmat_idxs = None
+            self._old_idx_to_new_idx = None
+
+    def _initialize_neigs(self, k: int = 10):
+        """Initialize nearest neighbors matrix."""
+        euler_angles = self.so3_grid.output_eulerRad_yxy.cpu()
+        neigs = compute_nearest_neighbours(
+                euler_angles,
+                k=k,
+                cache_dir=main_config.cachedir,
+                n_jobs=1
+            )["nearest_neigbours"]
+        self.register_buffer("_neigs", neigs)
+
+    def _initialize_caches(self):
+        self.register_buffer("_cached_batch_size_ies", torch.tensor(-1, dtype=torch.int64))
+        self.register_buffer("_cached_batch_size_range", torch.tensor(-1, dtype=torch.int64))
+        self.register_buffer("_cached_batch_indices", torch.empty(0, dtype=torch.int64))
+        self.register_buffer("_cached_ies", torch.empty(0, dtype=torch.int64))
 
     def predict_wignerDs(self, x):
         """
@@ -103,7 +143,7 @@ class Image2Sphere(nn.Module):
         return rotMat_logits
 
 
-    def from_wignerD_to_topKMats(self, wD, k):
+    def from_wignerD_to_topKMats(self, wD, k:int):
         """
 
         :param wD: The wignerD matrices
@@ -115,7 +155,7 @@ class Image2Sphere(nn.Module):
         """
         rotMat_logits = self._from_wignerD_to_logits(wD) #This has symmetry summed values (symmetry contraction)
         with torch.no_grad():
-            reduced_sym_selected_idxs, _ = self.rotation_contraction_idxs()
+            reduced_sym_selected_idxs = self._selected_rotmat_idxs
             if self.enforce_symmetry and reduced_sym_selected_idxs is not None:
                 _rotMat_logits = rotMat_logits[:, reduced_sym_selected_idxs]
                 _, pred_rotmat_id = torch.topk(_rotMat_logits, k=k, dim=-1, largest=True)
@@ -127,7 +167,7 @@ class Image2Sphere(nn.Module):
         return rotMat_logits, pred_rotmat_id, pred_rotmat
 
 
-    def forward(self, img, k=1):
+    def forward(self, img:torch.Tensor, k:int):
         '''
 
         :img: float tensor of shape (B, c, L, L)
@@ -140,12 +180,16 @@ class Image2Sphere(nn.Module):
         maxprob = probs.gather(dim=-1, index=pred_rotmat_id)
         return wD, rotMat_logits, pred_rotmat_id, pred_rotmat, maxprob
 
+    def _get_batch_indices(self, batch_size: int, device: torch.device) -> torch.Tensor:
+        """Replace _forward_with_neigs_batch_dim_selector with direct computation"""
+        if self._cached_batch_size_range != batch_size or self._cached_batch_indices.device != device:
+            # Update cache
+            indices = torch.arange(batch_size, device=device)
+            self._cached_batch_indices = indices
+            self._cached_batch_size_range.copy_(torch.tensor(batch_size, device=device))
+        return self._cached_batch_indices
 
-    @functools.lru_cache(3) #TODO: lru_cache uses self for the catching
-    def _forward_with_neigs_batch_dim_selector(self, batch_size, device):
-        return torch.arange(batch_size, device=device)
-
-    def forward_with_neigs(self, img, k=1):
+    def forward_with_neigs(self, img:torch.Tensor, k:int):
 
         wD = self.predict_wignerDs(img)
         rotMat_logits, pred_rotmat_id, pred_rotmat = self.from_wignerD_to_topKMats(wD, k)
@@ -154,7 +198,8 @@ class Image2Sphere(nn.Module):
         with torch.no_grad():
             probs = nn.functional.softmax(rotMat_logits, dim=-1)
             neigs = self._get_neigs_matrix()[pred_rotmat_id,:] #These are the neigs of the top-K predicted rotation matrices
-            _probs = probs[self._forward_with_neigs_batch_dim_selector(neigs.shape[0], device=neigs.device)[:,None,None], neigs]
+            batch_indices = self._get_batch_indices(neigs.shape[0], neigs.device)
+            _probs = probs[batch_indices[:, None, None], neigs]
             maxprob = _probs.sum(-1, keepdim=True)
             _rotmats = self.so3_grid.output_rotmats[neigs, ...]
             _probs = _probs / maxprob
@@ -178,166 +223,26 @@ class Image2Sphere(nn.Module):
             self.register_buffer("_neigs", neigs)
         return self._neigs
 
+    def _get_ies_for_aggregate_symmetry(self, batch_size: int, device: torch.device) -> torch.Tensor:
 
-    @functools.lru_cache(3) #TODO: lru uses self for catching
-    def _get_ies_for_aggregate_symmetry(self, batch_size, device):
-        ies = torch.arange(batch_size, device=device).unsqueeze(-1).expand(-1, self.so3_grid.output_rotmats.shape[0]).unsqueeze(-1)
-        return ies
+        if self._cached_batch_size_ies != batch_size or self._cached_ies.device != device:
+            # Update cache
+            n_rotmats = self.so3_grid.output_rotmats.shape[0]
+            ies = (torch.arange(batch_size, device=device)
+                   .unsqueeze(-1)
+                   .expand(-1, n_rotmats)
+                   .unsqueeze(-1))
+            self._cached_ies = ies
+            self._cached_batch_size_ies.copy_(torch.tensor(batch_size, device=device))
+        return self._cached_ies
 
-    def aggregate_symmetry(self, signal):
-        """
-
-        :param signal: (BxK), K is the number of pose pixels
-        :return:
-        """
-        jes = self._get_symmetry_equivalent_idxs()
-        if jes is None: #Then symmetry is C1
+    def aggregate_symmetry(self, signal: torch.Tensor) -> torch.Tensor:
+        jes = self._sym_equiv
+        if jes is None:  # Then symmetry is C1
             return signal
+
         ies = self._get_ies_for_aggregate_symmetry(signal.shape[0], signal.device)
         return signal[ies, jes].sum(-1)
-
-    def rotation_contraction_idxs(self):
-        """
-
-        :return:
-            - The indices of the geometry-equivalent selected poses (~ N_poses/symmetry_order,) Not exactly equal to N_poses/symmetry_order due to discretization problems
-            - The _old_idx_to_new_idx mapping
-        """
-
-        if not hasattr(self, "_selected_rotmat_idxs"):
-            if not self.has_symmetry:
-                self._selected_rotmat_idxs = None
-                self._old_idx_to_new_idx = None
-            else:
-                def _compute_selected_rotmat_idxs(n_rotmats, symmetry): #We need to store symmetry in the cache, because  self._get_symmetry_equivalent_idxs() uses symmetry
-                    assert n_rotmats == self.so3_grid.output_rotmats.shape[0]
-                    assert symmetry == self.symmetry
-                    equiv_idxs = self._get_symmetry_equivalent_idxs().squeeze(0)
-                    magnitudes = rotation_magnitude(self.so3_grid.output_rotmats)
-
-                    seen = set()
-                    selected_idxs=[]
-                    old_idx_to_new_idx = -999999 * torch.ones(n_rotmats, dtype=torch.int64)
-                    current_n_added = -1
-                    for i in range(n_rotmats):
-                        added = False
-                        candidates = sorted(equiv_idxs[i].tolist(), key=lambda ei: (magnitudes[ei].round(decimals=5), ei))
-                        # print([(magnitudes[c].item(), c) for c in candidates])
-                        # assert torch.isclose(rotation_error_rads(self.so3_grid.output_rotmats[candidates][0], self.so3_grid.output_rotmats[candidates][1]), torch.FloatTensor([torch.pi]), atol=0.01).all()
-                        for ei in candidates:
-                            if ei in seen:
-                                continue
-                            elif not added:
-                                selected_idxs.append(ei)
-                                added = True
-                                current_n_added += 1
-                            seen.add(ei)
-                        if added:
-                            for ei in candidates:
-                                old_idx_to_new_idx[ei] = current_n_added
-                        # else:
-                        #     raise RuntimeError(f"Error, node not added {i}")
-
-                    selected_rotmat_idxs = torch.as_tensor(selected_idxs, device=self.so3_grid.output_rotmats.device)
-
-                    # print(f"selected_rotmat_idxs {selected_rotmat_idxs.shape} representing symmetry reduction")
-                    # assert len(selected_idxs)*len(self.symmetryGroupMatrix) == n_rotmats, "Error, wrong number of selected idxs"
-
-                    # assert (old_idx_to_new_idx>=0).all()
-                    # _test_rotmats = torch.FloatTensor([[[-0.8899,  0.1786, -0.4198],
-                    #                                      [ 0.1791,  0.9831,  0.0386],
-                    #                                      [ 0.4196, -0.0408, -0.9068]],
-                    #                                     [[ 0.5233,  0.6696, -0.5270],
-                    #                                      [-0.6490,  0.7140,  0.2628],
-                    #                                      [ 0.5522,  0.2045,  0.8082]],
-                    #                                     [[-0.4651, -0.8846, -0.0331],
-                    #                                      [-0.0264,  0.0513, -0.9983],
-                    #                                      [ 0.8848, -0.4635, -0.0472]],
-                    #                                     [[-0.5505, -0.8333,  0.0518],
-                    #                                      [ 0.8330, -0.5441,  0.1000],
-                    #                                      [-0.0552,  0.0982,  0.9936]],
-                    #                                    [[0.6974, 0.2501, 0.6717],
-                    #                                     [0.0267, -0.9456, 0.3243],
-                    #                                     [0.7162, -0.2082, -0.6661]]
-                    #                                    ])
-                    # print(rotation_error_rads((self.symmetryGroupMatrix[None, ...] @ _test_rotmats[:, None, ...]).view(-1, 3, 3), self.so3_grid.output_rotmats.unsqueeze(1)).view(4, -1).min(-1))
-                    # print(rotation_error_rads((self.symmetryGroupMatrix[None, ...] @ _test_rotmats[:, None, ...]).view(-1, 3, 3), self.so3_grid.output_rotmats[selected_rotmat_idxs].unsqueeze(1)).view(4, -1).min(-1))
-
-                    return selected_rotmat_idxs, old_idx_to_new_idx
-
-                rotContractCache = get_cache("i2s_sym_selected_cache")
-                compute_selected_rotmat_idxs = rotContractCache.cache(_compute_selected_rotmat_idxs)
-                selected_rotmat_idxs, old_idx_to_new_idx = compute_selected_rotmat_idxs(self.so3_grid.output_rotmats.shape[0],  self.symmetry)
-                # print(f"selected_rotmat_idxs {selected_rotmat_idxs.shape}")
-                self.register_buffer("_selected_rotmat_idxs", selected_rotmat_idxs)
-                self.register_buffer("_old_idx_to_new_idx", old_idx_to_new_idx)
-
-        return self._selected_rotmat_idxs, self._old_idx_to_new_idx
-
-
-    def _get_symmetry_equivalent_idxs(self):
-        """
-        Sets the buffers:
-                  self.symmetryGroupMatrix: The stack of symmetry matrices, shape (G,3,3)
-                 self._sym_equiv: The array of equivalent idxs under symmetry, shape (full_so3_n_poses, G). For each pose,
-                 we annotate the pose idxs that are equivalent according to the group symmetry.
-
-        :param batch_size:
-        :return: self._sym_equiv
-        """
-
-        #TODO: this is executed by all the workers, which is a waste (and perhaps dangerous for racing conditions)
-        #TODO: It should be only executed in the rank 0, or distributed
-        if not hasattr(self, "_sym_equiv"):
-            if not self.has_symmetry:
-                self._sym_equiv = None
-                self.register_buffer("symmetryGroupMatrix", torch.eye(3).unsqueeze(0))
-
-            else:
-
-                def _computeSymIndices(total_rotmats, symmetry):
-
-                    symmetryGroupMatrix = torch.stack([torch.FloatTensor(x)
-                                                       for x in getSymmetryGroup(symmetry).as_matrix()])
-
-                    matched_idxs = torch.empty(total_rotmats, symmetryGroupMatrix.shape[0], dtype=torch.int64)
-                    ori_device = self.so3_grid.output_rotmats.device
-                    self.so3_grid.cuda()
-                    output_rotmats = self.so3_grid.output_rotmats
-                    _batch_size = 512
-                    if torch.cuda.is_available():
-                        symmetryGroupMatrix = symmetryGroupMatrix.cuda()
-                        matched_idxs = matched_idxs.cuda()
-                        gpu_memory_gb = torch.cuda.get_device_properties(symmetryGroupMatrix.device).total_memory / 1e9
-                        if gpu_memory_gb > 23.:
-                            _batch_size = _batch_size//4
-                        else: #TODO: find better ranges
-                            _batch_size = _batch_size//8
-
-                    # Process in batches
-                    for start_idx in tqdm(range(0, total_rotmats, _batch_size), desc="Computing indices for symmetry contraction", disable=False):
-                        end_idx = start_idx + _batch_size
-                        batch_rotmats = output_rotmats[start_idx:end_idx]
-
-                        # Expand rotation matrices for the current batch
-                        expanded_rotmats = torch.einsum("gij,pjk->gpik", symmetryGroupMatrix, batch_rotmats)
-
-                        # Compute matched indices for each symmetry operation
-                        for i in range(symmetryGroupMatrix.shape[0]):
-                            _, batch_matched_idxs = self.so3_grid.nearest_rotmat(expanded_rotmats[i, ...])
-                            matched_idxs[start_idx:end_idx, i] = batch_matched_idxs
-
-                    # for i in range(output_rotmats.shape[0]): assert torch.isclose(rotation_error_rads(output_rotmats[matched_idxs[i, 0]], output_rotmats[matched_idxs[i, 1]]), torch.FloatTensor([torch.pi]).to(output_rotmats.device), atol=0.01) #Test code for sym=c2
-                    self.so3_grid.to(ori_device)
-                    return symmetryGroupMatrix.cpu(), matched_idxs.unsqueeze(0).cpu()
-
-                symCache = get_cache("i2s_sym_equiv_cache")
-                computeSymIndices = symCache.cache(_computeSymIndices)
-                symmetryGroupMatrix, _sym_equiv= computeSymIndices(self.so3_grid.output_rotmats.shape[0], self.symmetry)
-                self.register_buffer("symmetryGroupMatrix", symmetryGroupMatrix)
-                self.register_buffer("_sym_equiv", _sym_equiv)
-
-        return self._sym_equiv
 
 
     def compute_probabilities(self, img, hp_order=None):
@@ -345,7 +250,7 @@ class Image2Sphere(nn.Module):
         if hp_order is None:
             so3_grid = self.so3_grid
         else:
-            so3_grid = SO3OutputGrid(self.lmax, self.hp_order)
+            so3_grid = SO3OutputGrid(self.lmax, hp_order)
 
         x = self.predict_wignerDs(img)
         logits = torch.matmul(x, so3_grid.output_wigners).squeeze(1)
@@ -366,7 +271,7 @@ class Image2Sphere(nn.Module):
         :per_img_weight: float tensor of shape (B,) with per_image_weight for loss calculation
         '''
 
-        wD, rotMat_logits, pred_rotmat_ids, pred_rotmats, maxprobs = self.forward(img)
+        wD, rotMat_logits, pred_rotmat_ids, pred_rotmats, maxprobs = self.forward(img, k=1)
 
         if self.use_simCLR:
             contrast_loss = self.simCLR_like_loss(wD)
@@ -402,9 +307,75 @@ class Image2Sphere(nn.Module):
         loss = loss + contrast_loss
 
         return (wD, rotMat_logits, pred_rotmat_ids, pred_rotmats, maxprobs), loss, error_rads
-    
+
+i2s_sym_equiv_cache = get_cache("i2s_sym_equiv_cache")
+@i2s_sym_equiv_cache.cache()
+def compute_symmetry_indices(lmax: int, hp_order: int, symmetry: str) -> Tuple[SO3OutputGrid, torch.Tensor,
+                                                                            torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Compute symmetry indices for the rotation matrices."""
+
+    so3_grid = SO3OutputGrid(lmax=lmax, hp_order=hp_order)
+    n_rotmats = so3_grid.output_rotmats.shape[0]
+    symmetryGroupMatrix = torch.stack([torch.FloatTensor(x)
+                                       for x in getSymmetryGroup(symmetry).as_matrix()])
+
+    sym_equiv_idxs = torch.empty(n_rotmats, symmetryGroupMatrix.shape[0], dtype=torch.int64)
+    ori_device = so3_grid.output_rotmats.device
+    so3_grid = so3_grid.cuda()
+    output_rotmats = so3_grid.output_rotmats
+
+    batch_size = 512 if not torch.cuda.is_available() else (
+        64 if torch.cuda.get_device_properties(0).total_memory / 1e9 > 23.0 else 32
+    )
+
+    if torch.cuda.is_available():
+        symmetryGroupMatrix = symmetryGroupMatrix.cuda()
+        sym_equiv_idxs = sym_equiv_idxs.cuda()
+
+    for start_idx in tqdm(range(0, n_rotmats, batch_size), desc="Computing symmetry indices"):
+        end_idx = min(start_idx + batch_size, n_rotmats)
+        batch_rotmats = output_rotmats[start_idx:end_idx]
+        expanded_rotmats = torch.einsum("gij,pjk->gpik", symmetryGroupMatrix, batch_rotmats)
+
+        for i in range(symmetryGroupMatrix.shape[0]):
+            _, batch_matched_idxs = so3_grid.nearest_rotmat_idxs(expanded_rotmats[i, ...])
+            sym_equiv_idxs[start_idx:end_idx, i] = batch_matched_idxs
+
+    so3_grid= so3_grid.to(ori_device)
+
+    magnitudes = rotation_magnitude(output_rotmats)
+
+    seen = set()
+    selected_idxs = []
+    old_idx_to_new_idx = -999999 * torch.ones(n_rotmats, dtype=torch.int64)
+    current_n_added = -1
+
+    for i in range(n_rotmats):
+        added = False
+        candidates = sorted(sym_equiv_idxs[i].tolist(),
+                            key=lambda ei: (magnitudes[ei].round(decimals=5), ei))
+
+        for ei in candidates:
+            if ei in seen:
+                continue
+            elif not added:
+                selected_idxs.append(ei)
+                added = True
+                current_n_added += 1
+            seen.add(ei)
+
+        if added:
+            for ei in candidates:
+                old_idx_to_new_idx[ei] = current_n_added
+
+    selected_rotmat_idxs = torch.as_tensor(selected_idxs, device=output_rotmats.device)
+
+    return (so3_grid.cpu(), symmetryGroupMatrix.cpu(), sym_equiv_idxs.unsqueeze(0).cpu(),
+            selected_rotmat_idxs.cpu(), old_idx_to_new_idx.cpu())
+
+
 @functools.lru_cache(maxsize=None)
-def create_extraction_mask(lmax, device_type='cuda'):
+def create_extraction_mask(lmax, device='cuda'):
     """
     Create a boolean mask to extract middle columns (m'=0) from flattened Wigner-D matrices.
     This mask is created once and can be reused for all extractions.
@@ -413,7 +384,7 @@ def create_extraction_mask(lmax, device_type='cuda'):
         lmax: Maximum degree l
         device_type: String indicating device type ('cuda' or 'cpu')
     """
-    mask = torch.zeros(sum((2 * l + 1) ** 2 for l in range(lmax + 1)), dtype=torch.bool)
+    mask = torch.zeros(sum((2 * l + 1) ** 2 for l in range(lmax + 1)), dtype=torch.bool, device=device)
     idx = 0
     for l in range(lmax + 1):
         dim = 2 * l + 1
@@ -520,8 +491,12 @@ def _test():
     b = 4
     imgs = get_example_random_batch(4)[BATCH_PARTICLES_NAME]
 
-    model = Image2Sphere(symmetry="c2")  #lmax=6
+    model = Image2Sphere(symmetry="C2", enforce_symmetry=True)
     model.eval()
+    out = model(imgs, k=1)
+    print(out[0].shape)
+    scripted_model = torch.jit.script(model)
+    torch.jit.save(scripted_model, '/tmp/scripted_model.pt')
     with torch.inference_mode():
         from scipy.spatial.transform import Rotation
         gt_rot = torch.from_numpy(Rotation.random(b).as_matrix().astype(np.float32))
@@ -532,7 +507,7 @@ def _test():
 
         print("logits", rotMat_logits.shape)
         print("pred_rotmat", pred_rotmat.shape)
-        model.forward_with_neigs(imgs)
+        model.forward_with_neigs(imgs, k=1)
         probs, output_rotmats = model.compute_probabilities(imgs)
         plot_so3_distribution(probs[0], output_rotmats, gt_rotation=gt_rot[0])
 
@@ -652,6 +627,6 @@ def _test_rotation_invariance(n_samples=10):
 
 
 if __name__ == "__main__":
-    # _test()
+    _test()
     _test_rotation_invariance()
     print("Done!")

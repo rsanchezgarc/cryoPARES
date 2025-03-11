@@ -49,7 +49,7 @@ def rotation_error_rads(rotA, rotB):
 
     :param rotA: tensor of shape (*,3,3)
     :param rotB: tensor of shape (*,3,3)
-    :return: otation error in radians, tensor of shape (*)
+    :return: rotation error in radians, tensor of shape (*)
     """
 
     trace = _compute_dot_trace(rotA, rotB)

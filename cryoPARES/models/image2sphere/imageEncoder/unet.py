@@ -1,11 +1,12 @@
 # Modified from here https://github.com/fepegar/unet
 import torch
 from torch import nn
-from typing import Optional, Union
+from typing import Optional, Union, List
 
 from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
 
+#TODO: Try monai Unets
 
 class ConvolutionalBlock(nn.Module):
     def __init__(
@@ -258,9 +259,9 @@ class Decoder(nn.Module):
     ):
         super().__init__()
         upsampling_type = fix_upsampling_type(upsampling_type, dimensions)
-        self.decoding_blocks = nn.ModuleList()
+        self.decoding_blocks = MultiInputSequential()
         self.dilation = initial_dilation
-        for _ in range(num_decoding_blocks):
+        for i in range(num_decoding_blocks):
             decoding_block = DecodingBlock(
                 in_channels_skip_connection,
                 dimensions,
@@ -275,15 +276,16 @@ class Decoder(nn.Module):
                 dilation=self.dilation,
                 dropout=dropout,
             )
-            self.decoding_blocks.append(decoding_block)
+            skip_index = num_decoding_blocks - i
+            decoding_stage = DecodingStage(decoding_block, skip_index)
+            self.decoding_blocks.append(decoding_stage)
             in_channels_skip_connection //= 2
             if self.dilation is not None:
                 self.dilation //= 2
+        self.n_decoding_blocks = len(self.decoding_blocks)
 
-    def forward(self, skip_connections, x):
-        zipped = zip(reversed(skip_connections), self.decoding_blocks)
-        for skip_connection, decoding_block in zipped:
-            x = decoding_block(skip_connection, x)
+    def forward(self, skip_connections:List[torch.Tensor], x:torch.Tensor):
+        x = self.decoding_blocks(skip_connections, x)
         return x
 
 
@@ -306,7 +308,7 @@ class DecodingBlock(nn.Module):
         super().__init__()
 
         self.residual = residual
-
+        self.channels_dimension = CHANNELS_DIMENSION
         if upsampling_type == 'conv':
             in_channels = out_channels = 2 * in_channels_skip_connection
             self.upsample = get_conv_transpose_layer(
@@ -328,11 +330,14 @@ class DecodingBlock(nn.Module):
                                                     kernel_size=1, activation=None, preactivation=preactivation,
                                                     padding=padding, dilation=dilation,
                                                     dropout=dropout)
+        else:
+            self.conv_residual = nn.Identity()
 
     def forward(self, skip_connection, x):
         x = self.upsample(x)
-        skip_connection = self.center_crop(skip_connection, x)
-        x = torch.cat((skip_connection, x), dim=CHANNELS_DIMENSION)
+        if x.shape[-2:] != skip_connection.shape[-2:]:
+            skip_connection = self.center_crop(skip_connection, x)
+        x = torch.cat((skip_connection, x), dim=self.channels_dimension)
         if self.residual:
             connection = self.conv_residual(x)
             x = self.conv1(x)
@@ -344,16 +349,48 @@ class DecodingBlock(nn.Module):
         return x
 
     def center_crop(self, skip_connection, x):
-        skip_shape = torch.tensor(skip_connection.shape)
-        x_shape = torch.tensor(x.shape)
-        crop = skip_shape[2:] - x_shape[2:]
-        half_crop = crop // 2
-        # If skip_connection is 10, 20, 30 and x is (6, 14, 12)
-        # Then pad will be (-2, -2, -3, -3, -9, -9)
-        pad = -torch.stack((half_crop, half_crop)).t().flatten()
-        skip_connection = nn.functional.pad(skip_connection, pad.tolist())
-        return skip_connection
+        """
+        Center-crop the skip connection tensor to match the spatial dimensions of x.
+        This version is fully TorchScript compatible by using explicit int types.
+        """
+        # Hard-coded for 2D case (assuming 4D tensors: batch, channels, height, width)
+        # Get the height and width differences
+        h_diff = skip_connection.shape[2] - x.shape[2]
+        w_diff = skip_connection.shape[3] - x.shape[3]
 
+        # Calculate crop values as explicit integers
+        h_crop_start = h_diff // 2
+        h_crop_end = skip_connection.shape[2] - (h_diff - h_crop_start)
+
+        w_crop_start = w_diff // 2
+        w_crop_end = skip_connection.shape[3] - (w_diff - w_crop_start)
+
+        # Use direct slicing with integers
+        return skip_connection[:, :, h_crop_start:h_crop_end, w_crop_start:w_crop_end]
+
+class DecodingStage(nn.Module):
+    def __init__(self, decoding_block: nn.Module, skip_index: int):
+        super().__init__()
+        self.decoding_block = decoding_block
+        self.skip_index = skip_index
+
+    def forward(self, skip_connections:List[torch.Tensor], x: torch.Tensor) -> torch.Tensor:
+        return self.decoding_block(skip_connections[self.skip_index], x)
+
+
+class MultiInputSequential(nn.Module):
+    def __init__(self, *modules: nn.Module):
+        super().__init__()
+        self.modules_list = nn.ModuleList(modules)
+
+    def forward(self, skip_connections: List[torch.Tensor], x: torch.Tensor) -> torch.Tensor:
+        for module in self.modules_list:
+            x = module(skip_connections, x)
+        return x
+    def append(self, module: nn.Module):
+        self.modules_list.append(module)
+    def __len__(self):
+        return len(self.modules_list)
 
 def get_upsampling_layer(upsampling_type: str) -> nn.Upsample:
     if upsampling_type not in UPSAMPLING_MODES:

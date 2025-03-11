@@ -6,7 +6,7 @@ import numpy as np
 
 @dataclass
 class I2SProjector_config:
-    sphere_fdim: int = 128 #512
+    sphere_fdim: int = 512
     hp_order: int = 3
     coverage: float = 0.9
     sigma: float = 0.2
@@ -16,8 +16,8 @@ class I2SProjector_config:
 
 @dataclass
 class S2Conv_config:
-    f_out: int = 16 #64
-    hp_order: int = 3 #4
+    f_out: int = 64
+    hp_order: int = 4
 
 @dataclass
 class SO3Activation_config:
@@ -31,7 +31,7 @@ class SO3Conv_config:
 
 @dataclass
 class SO3OuptutGrid_config:
-    hp_order: int = 3 #4
+    hp_order: int = 4
 
 
 @dataclass

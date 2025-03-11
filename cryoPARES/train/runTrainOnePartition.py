@@ -131,17 +131,21 @@ class TrainerPartition:
             precision=self.train_config.train_precision,
             sync_batchnorm=self.train_config.sync_batchnorm,
             plugins=plUtils.GET_PL_PLUGIN(main_config.train.pl_plugin),
-            callbacks=callbacks
+            callbacks=callbacks,
+            use_distributed_sampler=False #TODO: Check if this is required
         )
+
+    def _kwargs_for_loading(self):
+        return {
+            "lr": self.train_config.learning_rate,
+            "symmetry": self.symmetry,
+            "num_augmented_copies_per_batch": main_config.datamanager.num_augmented_copies_per_batch,
+            "top_k": main_config.inference.top_k
+        }
 
     def _setup_model(self, trainer):
         from cryoPARES.models.model import PlModel
-        kwargs = {
-            "lr": self.train_config.learning_rate,
-            "symmetry": self.symmetry,
-            "num_augmented_copies_per_batch": main_config.datamanager.num_augmented_copies_per_batch
-        }
-
+        kwargs = self._kwargs_for_loading()
         if self.continue_checkpoint_fname or self.finetune_checkpoint_fname:
             kwargs["map_location"] = torch.device("cpu")
             if self.continue_checkpoint_fname is None:
@@ -230,6 +234,12 @@ class TrainerPartition:
         if osp.isfile(constants.BEST_CHECKPOINT_BASENAME):
             os.unlink(constants.BEST_CHECKPOINT_BASENAME)
         os.symlink(best_model_basename, constants.BEST_CHECKPOINT_BASENAME)
+
+        from cryoPARES.models.model import PlModel
+        best_module = PlModel.load_from_checkpoint(constants.BEST_CHECKPOINT_BASENAME, map_location="cpu")
+        best_model_script = torch.jit.script(best_module.model)
+        torch.jit.save(best_model_script, constants.BEST_MODEL_SCRIPT_BASENAME)
+
         os.chdir(cwd)
 
         print("Training done!")
@@ -271,7 +281,7 @@ def execute_trainOnePartition(**kwargs):
     print(cmd)  # TODO: Use loggers
     subprocess.run(
         cmd.split(),
-        cwd=os.path.abspath(os.path.join(__file__, "..", "..", ".."))
+        cwd=os.path.abspath(os.path.join(__file__, "..", "..", "..")), check=True
     )
 
 

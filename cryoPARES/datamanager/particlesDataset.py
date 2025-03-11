@@ -53,7 +53,7 @@ class ParticlesDataset(Dataset, ABC):
         self.mask_radius_angs = mask_radius_angs
         self.min_maxProb = min_maxProb
         self.reduce_symmetry_label = reduce_symmetry_label
-        self._symmetry = symmetry.upper()
+        self.symmetry = symmetry.upper()
         self.halfset = halfset
 
         assert perImg_normalization in (item.value for item in ImgNormalizationType)
@@ -252,7 +252,7 @@ class ParticlesDataset(Dataset, ABC):
 
     @cached_property
     def symmetry_group(self):
-        return R.create_group(self._symmetry.upper())
+        return R.create_group(self.symmetry.upper())
 
     def resizeImage(self, img):
 
@@ -276,7 +276,7 @@ class ParticlesDataset(Dataset, ABC):
 
         r = R.from_euler(RELION_EULER_CONVENTION, degEuler, degrees=True)
 
-        if self._symmetry != "C1" and self.reduce_symmetry_label:
+        if self.symmetry != "C1" and self.reduce_symmetry_label:
             r = r.reduce(self.symmetry_group)
         rotMat = r.as_matrix()
         rotMat = torch.FloatTensor(rotMat)
@@ -288,7 +288,7 @@ class ParticlesDataset(Dataset, ABC):
                  BATCH_POSE_NAME: (rotMat, xyShiftAngs, confidence),
                  BATCH_MD_NAME: md_dict}
 
-        # return iid, img, (rotMat, xyShiftAngs, confidence), md_dict
+
         return batch
 
     def __getitem__(self, item):

@@ -84,6 +84,8 @@ def get_version_to_use(rootdir, basename, path_pattern=VERSION_PATTERN, extensio
         return  out
     return increment_version(last_version, basename, extension=extension)
 
+
+
 # Tests
 import pytest
 @pytest.fixture

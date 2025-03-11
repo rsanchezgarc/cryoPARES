@@ -4,7 +4,6 @@ import shutil
 import warnings
 import psutil
 import torch
-import subprocess
 import sys
 import os.path as osp
 import tempfile
@@ -139,8 +138,7 @@ class Trainer:
         with tempfile.TemporaryDirectory() as tmpdir:
             for partition in partitions:
                 if check_if_training_partion_done(self.experiment_root, partition):
-                    continue #TODO: It needs to find the done file at {partition}/checkpoints/DONE_TRAINING.txt
-
+                    continue
                 if self.map_fname_for_simulated_pretraining:
                     # TODO: Implement simulate_particles
                     simulatedParticles = simulate_particles(self.map_fname_for_simulated_pretraining, tmpdir)

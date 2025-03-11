@@ -5,13 +5,14 @@ import os.path as osp
 from os import PathLike
 
 import torch
-from torch.utils.data import DataLoader, BatchSampler, Sampler, RandomSampler, ConcatDataset
+from torch.utils.data import DataLoader, BatchSampler, Sampler, RandomSampler, ConcatDataset, DistributedSampler, \
+    SequentialSampler
 from typing import Union, Literal, Optional, Tuple, Iterable, List
 
 import pytorch_lightning as pl
 from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
-from cryoPARES.constants import BATCH_PARTICLES_NAME
+from cryoPARES.constants import BATCH_PARTICLES_NAME, BATCH_IDS_NAME, BATCH_MD_NAME, BATCH_POSE_NAME
 
 FnameType = Union[PathLike, str]
 
@@ -25,7 +26,12 @@ def get_number_image_channels():
 
 def get_example_random_batch(batch_size):
     imgsize = main_config.datamanager.particlesdataset.desired_image_size_px
-    batch = {BATCH_PARTICLES_NAME:torch.randn(batch_size, get_number_image_channels(), imgsize, imgsize)}
+    batch = {
+        BATCH_IDS_NAME: [str(i) for i in range(batch_size)],
+        BATCH_PARTICLES_NAME:torch.randn(batch_size, get_number_image_channels(), imgsize, imgsize),
+        BATCH_POSE_NAME: [torch.eye(3).unsqueeze(0).expand(batch_size, -1, -1), torch.randn(batch_size, 2), torch.rand(batch_size)],
+        BATCH_MD_NAME: {"mdField1": torch.rand(batch_size), "mdField2": ["a"*batch_size]}
+    }
     return batch
 
 class DataManager(pl.LightningDataModule):
@@ -91,7 +97,7 @@ class DataManager(pl.LightningDataModule):
         from cryoPARES.datamanager.relionStarDataset import ParticlesRelionStarDataset
         datasets = []
         for i, (partFname, partDir) in enumerate(zip(self.star_fnames, self.particles_dir)):
-            mrcsDataset = ParticlesRelionStarDataset(star_fname=partFname,  particles_dir=partDir,
+            mrcsDataset = ParticlesRelionStarDataset(particles_star_fname=partFname, particles_dir=partDir,
                                                      symmetry=self.symmetry, halfset=self.halfset)
 
             if self.is_global_zero and self.save_train_val_partition_dir is not None:
@@ -106,39 +112,77 @@ class DataManager(pl.LightningDataModule):
         dataset = ConcatDataset(datasets)
         return dataset
 
+    def setup_distributed(self, world_size: int, rank: int):
+        """Setup distributed inference.
 
+        Args:
+            world_size: Total number of GPUs/processes
+            rank: Current GPU/process ID
+        """
+        self.world_size = world_size
+        self.rank = rank
+        self.is_global_zero = (rank == 0)
 
     def _create_dataloader(self, partitionName: Optional[str]):
-
         dataset = self.create_dataset(partitionName)
+        # If we're in distributed mode (world_size and rank are set)
+        if hasattr(self, 'world_size') and hasattr(self, 'rank'):
+            # Override any provided sampler with DistributedSampler
+            sampler = DistributedSampler(
+                dataset,
+                num_replicas=self.world_size,
+                rank=self.rank,
+                shuffle=partitionName != "train" or not self.trainer.overfit_batches > 0
+            )
+        else:
+            sampler = None
+
         if partitionName in ["train", "val"]:
-            assert self.train_validation_split is not None, "Error, self.train_validation_split required"
+            # Original training/validation logic...
+            assert self.train_validation_split is not None
             dataset.augmenter = self.augmenter if partitionName == "train" else None
             generator = torch.Generator().manual_seed(self.train_validaton_split_seed)
-            train_dataset, val_dataset = torch.utils.data.random_split(dataset, self.train_validation_split,
-                                                                       generator=generator)
+            train_dataset, val_dataset = torch.utils.data.random_split(
+                dataset,
+                self.train_validation_split,
+                generator=generator
+            )
 
             if partitionName == "train":
                 dataset = train_dataset
                 print(f"Train dataset {len(train_dataset)}")
 
-                batch_sampler = MultiInstanceSampler(sampler=RandomSampler(dataset), batch_size=self.batch_size,
-                                                     drop_last=True,
-                                                     num_copies_to_sample=self.num_augmented_copies_per_batch)
+                if not hasattr(self, 'world_size'):  # Not distributed
+                    if self.trainer is not None and self.trainer.overfit_batches > 0:
+                        sampler = SequentialSampler(dataset)
+                    else:
+                        sampler = RandomSampler(dataset)
+
+                batch_sampler = MultiInstanceSampler(
+                    sampler=sampler,
+                    batch_size=self.batch_size,
+                    drop_last=True,
+                    num_copies_to_sample=self.num_augmented_copies_per_batch
+                )
                 return DataLoader(
-                                dataset,
-                                batch_sampler=batch_sampler,
-                                num_workers=self.num_data_workers,
-                                persistent_workers=True if self.num_data_workers > 0 else False)
+                    dataset,
+                    batch_sampler=batch_sampler,
+                    num_workers=self.num_data_workers,
+                    persistent_workers=True if self.num_data_workers > 0 else False,
+                )
             else:
                 dataset = val_dataset
                 print(f"Validation dataset {len(val_dataset)}")
 
         return DataLoader(
-            dataset, batch_size=self.batch_size,
+            dataset,
+            batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_data_workers,
-            persistent_workers=True if self.num_data_workers > 0 else False)
+            persistent_workers=True if self.num_data_workers > 0 else False,
+            sampler=sampler
+        )
+
 
     def train_dataloader(self):
         return self._create_dataloader(partitionName="train")
@@ -156,7 +200,7 @@ class DataManager(pl.LightningDataModule):
 class MultiInstanceSampler(BatchSampler):
     def __init__(self, sampler: Union[Sampler[int], Iterable[int]], batch_size: int, drop_last: bool,
                  num_copies_to_sample:int=1):
-        assert  batch_size % num_copies_to_sample == 0, "Error, batch_size % num_copies_to_sample == 0 required"
+        assert batch_size % num_copies_to_sample == 0, "Error, batch_size % num_copies_to_sample == 0 required"
         super().__init__(sampler, batch_size//num_copies_to_sample, drop_last)
         self.num_copies_to_sample = num_copies_to_sample
 

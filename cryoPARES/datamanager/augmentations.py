@@ -307,7 +307,9 @@ if __name__ == "__main__":
     from cryoPARES.datamanager.relionStarDataset import ParticlesRelionStarDataset
 
     # dataset = CIFAR100(root="/tmp/cifcar", transform=ToTensor(), download=True)
-    dataset = ParticlesRelionStarDataset(star_fname=osp.expanduser("~/cryo/data/preAlignedParticles/EMPIAR-10166/data/1000particles.star"), particles_dir=None, symmetry="c1")
+    dataset = ParticlesRelionStarDataset(
+        particles_star_fname=osp.expanduser("~/cryo/data/preAlignedParticles/EMPIAR-10166/data/1000particles.star"),
+        particles_dir=None, symmetry="c1")
 
     augmenter = Augmenter()
     # augmenter._get_rand = lambda: 0

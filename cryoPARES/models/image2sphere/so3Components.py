@@ -131,7 +131,7 @@ class S2Conv(nn.Module):
                  f_in: int,
                  f_out: int = CONFIG_PARAM(),
                  lmax: int = CONFIG_PARAM(config=main_config.models.image2sphere),
-                 hp_order: int =CONFIG_PARAM(),
+                 hp_order: int = CONFIG_PARAM(),
                 ):
         '''
         :param f_in: feature dimensionality of input signal

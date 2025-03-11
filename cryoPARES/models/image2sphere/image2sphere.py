@@ -3,7 +3,6 @@ from collections import defaultdict
 from dataclasses import asdict
 from typing import Optional, Tuple
 
-import e3nn
 import numpy as np
 import torch
 from e3nn import o3
@@ -74,7 +73,7 @@ class Image2Sphere(nn.Module):
         self.enforce_symmetry = enforce_symmetry
 
         #TODO: The following needs to be refactored, since it is problematic with multigpu. We need to make sure that
-        #TODO: They are precomputed
+        #TODO: they are always precomputed
         self._initialize_grid_and_symmetry_components()
         # Register nearest neighbors buffer
         self._initialize_neigs()
@@ -167,14 +166,14 @@ class Image2Sphere(nn.Module):
         return rotMat_logits, pred_rotmat_id, pred_rotmat
 
 
-    def forward(self, img:torch.Tensor, k:int):
+    def forward(self, img:torch.Tensor, top_k:int):
         '''
 
         :img: float tensor of shape (B, c, L, L)
-        :k: int number of top K elements to consider
+        :top_k: int number of top K elements to return
         '''
         wD = self.predict_wignerDs(img)
-        rotMat_logits, pred_rotmat_id, pred_rotmat = self.from_wignerD_to_topKMats(wD, k)
+        rotMat_logits, pred_rotmat_id, pred_rotmat = self.from_wignerD_to_topKMats(wD, top_k)
 
         probs = nn.functional.softmax(rotMat_logits, dim=-1)
         maxprob = probs.gather(dim=-1, index=pred_rotmat_id)
@@ -189,11 +188,11 @@ class Image2Sphere(nn.Module):
             self._cached_batch_size_range.copy_(torch.tensor(batch_size, device=device))
         return self._cached_batch_indices
 
-    def forward_with_neigs(self, img:torch.Tensor, k:int):
+    def forward_with_neigs(self, img:torch.Tensor, top_k:int):
 
         wD = self.predict_wignerDs(img)
-        rotMat_logits, pred_rotmat_id, pred_rotmat = self.from_wignerD_to_topKMats(wD, k)
-        # If self.enforce_symmetry == True, then pred_rotmat_id contain indices corresponding to a reduced area of the projection sphere that covers all the posible views
+        rotMat_logits, pred_rotmat_id, pred_rotmat = self.from_wignerD_to_topKMats(wD, top_k)
+        # If self.enforce_symmetry == True, then pred_rotmat_id contain indices corresponding to a reduced area of the projection sphere that covers all the possible views
         # Thus, if self.enforce_symmetry == True, the top-K won't have K-picks of equivalent points according to the symmetry
         with torch.no_grad():
             probs = nn.functional.softmax(rotMat_logits, dim=-1)
@@ -262,48 +261,49 @@ class Image2Sphere(nn.Module):
     def simCLR_like_loss(self, wD): #TODO: implement this
         return NotImplementedError()
 
-    def forward_and_loss(self, img, gt_rot, per_img_weight=None):
+    def forward_and_loss(self, img, gt_rotmat, per_img_weight=None, top_k:int=1):
         '''Compute cross entropy loss using ground truth rotation, the correct label
         is the nearest rotation in the spatial grid to the ground truth rotation
 
         :img: float tensor of shape (B, c, L, L)
-        :gt_rotation: valid rotation matrices, tensor of shape (B, 3, 3)
+        :gt_rotmat: float tensor of valid rotation matrices, tensor of shape (B, 3, 3)
         :per_img_weight: float tensor of shape (B,) with per_image_weight for loss calculation
+        :top_k: int number of top K elements to return
         '''
 
-        wD, rotMat_logits, pred_rotmat_ids, pred_rotmats, maxprobs = self.forward(img, k=1)
+        wD, rotMat_logits, pred_rotmat_ids, pred_rotmats, maxprobs = self.forward(img, top_k=top_k)
 
         if self.use_simCLR:
             contrast_loss = self.simCLR_like_loss(wD)
         else:
             contrast_loss = 0
-
+        # TODO: The problem is that pred_rotmats has shape (B, top_k, 3, 3), but gt_rotmat has shape (B,3,3)
         if self.symmetry != "C1":
             n_groupElems = self.symmetryGroupMatrix.shape[0]
             #Perform symmetry expansion
-            gtrotMats = self.symmetryGroupMatrix[None, ...] @ gt_rot[:, None, ...]
+            gtrotMats = self.symmetryGroupMatrix[None, ...] @ gt_rotmat[:, None, ...]
             rotMat_gtIds = self.so3_grid.nearest_rotmat_idxs(gtrotMats.view(-1, 3, 3))[-1].view(rotMat_logits.shape[0], -1)
             target_he = torch.zeros_like(rotMat_logits)
             rows = torch.arange(rotMat_logits.shape[0]).view(-1, 1).repeat(1, n_groupElems)
             target_he[rows, rotMat_gtIds] = 1 / n_groupElems
             loss = nn.functional.cross_entropy(rotMat_logits, target_he, reduction="none", label_smoothing=self.label_smoothing)
-
-            with torch.no_grad():
+            with torch.no_grad(): #TODO: Try to use error_rads as part of the loss function
                 error_rads = rotation_error_rads(gtrotMats.view(-1,3,3),
-                                                 torch.repeat_interleave(pred_rotmats, n_groupElems, dim=0))
+                                                 torch.repeat_interleave(pred_rotmats, n_groupElems, dim=0)[:,0,...])
                 error_rads = error_rads.view(-1, n_groupElems)
                 error_rads = error_rads.min(1).values
 
         else:
             # find nearest grid point to ground truth rotation matrix
-            rot_idx = self.so3_grid.nearest_rotmat_idxs(gt_rot)[-1]
+            rot_idx = self.so3_grid.nearest_rotmat_idxs(gt_rotmat)[-1]
             loss = nn.functional.cross_entropy(rotMat_logits, rot_idx, reduction="none", label_smoothing=self.label_smoothing)
             with torch.no_grad():
-                error_rads = rotation_error_rads(gt_rot, pred_rotmats)
+                #We will consider top1 only
+                error_rads = rotation_error_rads(gt_rotmat, pred_rotmats[:,0,...])
 
         if per_img_weight is not None:
             loss = loss * per_img_weight.squeeze(-1)
-        loss = loss.mean()
+        loss = loss
         loss = loss + contrast_loss
 
         return (wD, rotMat_logits, pred_rotmat_ids, pred_rotmats, maxprobs), loss, error_rads
@@ -493,21 +493,21 @@ def _test():
 
     model = Image2Sphere(symmetry="C2", enforce_symmetry=True)
     model.eval()
-    out = model(imgs, k=1)
+    out = model(imgs, top_k=1)
     print(out[0].shape)
     scripted_model = torch.jit.script(model)
     torch.jit.save(scripted_model, '/tmp/scripted_model.pt')
     with torch.inference_mode():
         from scipy.spatial.transform import Rotation
         gt_rot = torch.from_numpy(Rotation.random(b).as_matrix().astype(np.float32))
-        # wD, rotMat_logits, pred_rotmat, maxprob = model.forward(imgs)
-        # wD, rotMat_logits, pred_rotmat_idxs, pred_rotmat, maxprob = model.forward(imgs, k=8)
-        wD, rotMat_logits, pred_rotmat_idxs, pred_rotmat, maxprob = model.forward_with_neigs(imgs, k=1)
+        # wD, rotMat_logits, pred_rotmat, maxprob = model.forward(imgs, top_k=1)
+        wD, rotMat_logits, pred_rotmat_idxs, pred_rotmat, maxprob = model.forward(imgs, top_k=8)
+        wD, rotMat_logits, pred_rotmat_idxs, pred_rotmat, maxprob = model.forward_with_neigs(imgs, top_k=1)
 
 
         print("logits", rotMat_logits.shape)
         print("pred_rotmat", pred_rotmat.shape)
-        model.forward_with_neigs(imgs, k=1)
+        model.forward_with_neigs(imgs, top_k=1)
         probs, output_rotmats = model.compute_probabilities(imgs)
         plot_so3_distribution(probs[0], output_rotmats, gt_rotation=gt_rot[0])
 

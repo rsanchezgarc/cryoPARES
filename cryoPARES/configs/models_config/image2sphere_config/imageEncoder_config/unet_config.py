@@ -6,7 +6,7 @@ from typing import Literal, Optional
 class Unet_config:
     n_blocks: int = 5
     out_channels: Optional[int] = None
-    out_channels_first: int= 32
+    out_channels_first: int= 16
     n_decoder_blocks_removed: Optional[int] = 1
     kernel_size: int = 5
     pooling: Literal["max", "avg"] = 'max'

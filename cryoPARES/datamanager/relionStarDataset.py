@@ -18,22 +18,20 @@ class ParticlesRelionStarDataset(ParticlesDataset):
     <br>
     """
 
-    def __init__(self, star_fname: Union[PathLike, str], particles_dir: Optional[str], symmetry: str,
-                 halfset:Optional[int]=None, **kwargs):
+    def __init__(self, particles_star_fname: Union[PathLike, str], particles_dir: Optional[str], **kwargs):
         """
         ##Builder
 
         Args:
-            star_fname (Union[PathLike, str]): The star filename to use
+            particles_star_fname (Union[PathLike, str]): The star filename to use
             particles_dir (str): The root directory where the stack files are
             symmetry (str): The point symmetry of the macromolecule
             halfset: [1,2,None]
         """
 
-        super().__init__(symmetry=symmetry, halfset=halfset, **kwargs)
-        self._star_fname = str(star_fname)
+        super().__init__(**kwargs)
+        self._star_fname = str(particles_star_fname)
         self._datadir = osp.expanduser(particles_dir) if particles_dir is not None else None
-        self.halfset = halfset
 
     def load_ParticlesStarSet(self):
         return ParticlesStarSet(starFname=self._star_fname, particlesDir=self._datadir)
@@ -80,11 +78,8 @@ if __name__ == "__main__":
         kwargs["mask_radius_angs"] = args.mask_radius_angs
     if args.ctf_correction:
         kwargs["ctf_correction"] = args.ctf_correction
-    parts = ParticlesRelionStarDataset(star_fname=osp.expanduser(args.filename),
-                                       particles_dir=args.dirname,
-                                       symmetry=args.symmetry,
-                                       **kwargs
-                                       )
+    parts = ParticlesRelionStarDataset(particles_star_fname=osp.expanduser(args.filename), particles_dir=args.dirname,
+                                       symmetry=args.symmetry, **kwargs)
 
     print(len(parts))
     from matplotlib import pyplot as plt

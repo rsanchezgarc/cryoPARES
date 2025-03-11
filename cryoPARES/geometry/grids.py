@@ -2,7 +2,6 @@ import numpy as np
 import torch
 import healpy as hp
 from typing import Literal, Optional
-from escnn.group import so3_group
 
 from cryoPARES.cacheManager import get_cache
 from cryoPARES.constants import RELION_EULER_CONVENTION
@@ -75,14 +74,27 @@ def so3_healpix_grid_equiangular(hp_order: int = 3):
     result = torch.as_tensor(zyz_grid, dtype=torch.float)
     return result, n_cones
 
-def so3_healpix_grid_escnn(hp_order: int, method:Literal["thomson", "hopf", "thomson_cube", "fibonacci"] = "hopf",
-                           representation:Optional[Literal["MAT", "Q", "ZYZ"]]="ZYZ"):
-    n_cones = hp.order2npix(hp_order) * 6
-    gridB = so3_group(maximum_frequency=1).grid(N=n_cones, type=method)
-    if representation is not None:
-        gridB = [x.to(representation) for x in gridB]
-        gridB = torch.stack([torch.as_tensor(x, dtype=torch.float32) for x in gridB]).T.contiguous()
-    return gridB, n_cones
+# try:
+#     from escnn.group import so3_group
+#     def so3_healpix_grid_escnn(hp_order: int, method:Literal["thomson", "hopf", "thomson_cube", "fibonacci"] = "hopf",
+#                                representation:Optional[Literal["MAT", "Q", "ZYZ"]]="ZYZ"):
+#         n_cones = hp.order2npix(hp_order) * 6
+#         gridB = so3_group(maximum_frequency=1).grid(N=n_cones, type=method)
+#         if representation is not None:
+#             gridB = [x.to(representation) for x in gridB]
+#             gridB = torch.stack([torch.as_tensor(x, dtype=torch.float32) for x in gridB]).T.contiguous()
+#         return gridB, n_cones
+#
+#     def so3_near_identity_grid_escnn(max_rads,
+#                                      hp_order):  # TODO. It is hard to set parameters that lead to good results
+#         fullSo3 = so3_healpix_grid_escnn(hp_order, representation="MAT")[0]
+#         magnitudes = rotation_magnitude(fullSo3)
+#         angles = matrix_to_euler_angles(fullSo3[magnitudes < max_rads], convention=RELION_EULER_CONVENTION)
+#         assert angles.shape[0] > 0
+#         return angles
+#
+# except (ImportError, AttributeError):
+#     pass
 
 so3_healpix_grid = so3_healpix_grid_equiangular #so3_healpix_grid_escnn
 
@@ -98,15 +110,3 @@ def so3_near_identity_grid_cartesianprod(max_rads, n_angles): #TODO: It is proba
     grid = torch.cartesian_prod(angles_range, angles_range, angles_range)
     return grid.T.contiguous()
 
-
-def so3_near_identity_grid_escnn(max_rads, hp_order): #TODO. It is hard to set parameters that lead to good results
-    fullSo3 = so3_healpix_grid_escnn(hp_order, representation="MAT")[0]
-    magnitudes = rotation_magnitude(fullSo3)
-    angles = matrix_to_euler_angles(fullSo3[magnitudes<max_rads], convention=RELION_EULER_CONVENTION)
-    assert angles.shape[0] > 0
-    return angles
-
-# angles = so3_near_identity_grid_escnn(max_rads=0.08, hp_order=4)
-# print(angles.rad2deg())
-# print(angles.shape)
-# print()

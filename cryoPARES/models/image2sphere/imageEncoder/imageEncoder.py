@@ -2,7 +2,6 @@ import re
 from math import ceil
 from typing import Optional, Tuple, List
 
-import hydra.utils
 import torch
 import torchvision
 

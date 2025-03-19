@@ -29,7 +29,7 @@ from cryoPARES.datamanager.ctf.rfft_ctf import correct_ctf
 from cryoPARES.utils.torchUtils import data_to_numpy
 
 class ParticlesDataset(Dataset, ABC):
-
+    #TODO: This class still has several Relion-specific features
     @inject_defaults_from_config(main_config.datamanager.particlesdataset)
     def __init__(self,
                  symmetry: str,
@@ -91,13 +91,10 @@ class ParticlesDataset(Dataset, ABC):
         #     # warnings.warn(f"Data is going to be stored in memory ({memoryname}). Check if you have enough.")
         #     self.memory = get_cache(cache_name="mrcdataset", cachedir=self.cacheDir)
         #     self._getIdx = self.memory.cache(self._getIdx, ignore=["self"])
-
-
-
+            raise NotImplementedError()
         self._particles = None
         self._augmenter = None
         self._image_size = None
-
 
     @property
     def image_size_px(self) -> int:
@@ -127,6 +124,12 @@ class ParticlesDataset(Dataset, ABC):
             assert min(_subsetNums) >= 1 and max(_subsetNums) <= 2
             idxs = np.where(subsetNums == self.halfset)[0]
             self._particles = self.particles.createSubset(idxs=idxs)
+
+        if self.min_maxProb is not None:
+            maxprob = self._particles.particles_md[RELION_ORI_POSE_CONFIDENCE_NAME]
+            idxs = np.where(maxprob >= self.min_maxProb)[0]
+            self._particles = self.particles.createSubset(idxs=idxs)
+
         return self._particles
 
     @property

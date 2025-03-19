@@ -79,7 +79,8 @@ if __name__ == "__main__":
     if args.ctf_correction:
         kwargs["ctf_correction"] = args.ctf_correction
     parts = ParticlesRelionStarDataset(particles_star_fname=osp.expanduser(args.filename), particles_dir=args.dirname,
-                                       symmetry=args.symmetry, **kwargs)
+                                       symmetry=args.symmetry, halfset=None, min_maxProb=None,
+                                       **kwargs)
 
     print(len(parts))
     from matplotlib import pyplot as plt

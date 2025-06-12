@@ -7,7 +7,7 @@ class Train_config:
     n_epochs: int = 100
     learning_rate: float = 1e-3
     batch_size: int = 64
-    accumulate_grad_batches: int = 10
+    accumulate_grad_batches: int = 16
     weight_decay: float = 1e-5
 
     use_cuda: bool = True

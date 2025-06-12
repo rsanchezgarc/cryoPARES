@@ -148,7 +148,6 @@ class PlModel(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         loss, error_degs, pred_rotmats, maxprobs, gt_rotmats = self._step(batch, batch_idx)
-
         loss = loss.mean()
 
         self.log("loss", loss, prog_bar=True, batch_size=pred_rotmats.shape[0], sync_dist=False)
@@ -167,9 +166,9 @@ class PlModel(pl.LightningModule):
 
         # Calculate and log average angular error in degrees
         self.log("val_loss", loss, prog_bar=True, on_epoch=True,
-                 batch_size=pred_rotmats.shape[0], sync_dist=True)
+                 batch_size=pred_rotmats.shape[0], sync_dist=False)
         self.log("val_geo_degs", error_degs.mean(), prog_bar=True, on_step=False, on_epoch=True,
-                 batch_size=pred_rotmats.shape[0], sync_dist=True)
+                 batch_size=pred_rotmats.shape[0], sync_dist=False)
 
         if batch_idx == 0:
             # Visualize the predicted rotmats and the ground truth rotmats with error
@@ -267,8 +266,7 @@ def _update_config_for_test():
     main_config.models.image2sphere.so3components.s2conv.hp_order = 2
     main_config.models.image2sphere.so3components.so3ouptutgrid.hp_order = 3
 
-
-if __name__ == "__main__":
+def _test0():
     b = 3
     batch = get_example_random_batch(b)
     model_kwargs = dict(lr=1e-5, symmetry="c2", num_augmented_copies_per_batch=1, top_k=1)
@@ -284,3 +282,6 @@ if __name__ == "__main__":
     print([o.shape for o in out])
     out = plmodel.predict_step(batch, batch_idx=0)
     print([o.shape for o in out if isinstance(o, Tensor)])
+
+if __name__ == "__main__":
+    _test0()

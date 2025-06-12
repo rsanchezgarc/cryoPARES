@@ -8,6 +8,7 @@ import numpy as np
 
 from scipy.spatial.transform import Rotation as R
 from sklearn.model_selection import train_test_split
+from starstack.constants import RELION_IMAGE_FNAME
 from starstack.particlesStar import ParticlesStarSet
 from torch.utils.data import Dataset
 from typing import Union, Literal, Optional, List, Tuple, Any, Dict
@@ -38,6 +39,7 @@ class ParticlesDataset(Dataset, ABC):
                  desired_image_size_px: int = CONFIG_PARAM(),
                  store_data_in_memory: bool = CONFIG_PARAM(),
                  mask_radius_angs: Optional[float] = CONFIG_PARAM(),
+                 apply_mask_to_img: bool = CONFIG_PARAM(),
                  min_maxProb: Optional[float] = CONFIG_PARAM(),
                  perImg_normalization: Literal["none", "noiseStats", "subtractMean"] = CONFIG_PARAM(),
                  ctf_correction: Literal["none", "phase_flip", "ctf_multiply",
@@ -51,6 +53,7 @@ class ParticlesDataset(Dataset, ABC):
         self.desired_image_size_px = desired_image_size_px
         self.store_data_in_memory = store_data_in_memory
         self.mask_radius_angs = mask_radius_angs
+        self.apply_mask_to_img = apply_mask_to_img
         self.min_maxProb = min_maxProb
         self.reduce_symmetry_label = reduce_symmetry_label
         self.symmetry = symmetry.upper()
@@ -237,7 +240,7 @@ class ParticlesDataset(Dataset, ABC):
             print(f"Error retrieving item {item}")
             raise
 
-        iid = md_row["rlnImageName"]
+        iid = md_row[RELION_IMAGE_FNAME]
         img = torch.FloatTensor(img).unsqueeze(0)
         img = self._correctCtf(img, md_row)
 
@@ -245,7 +248,7 @@ class ParticlesDataset(Dataset, ABC):
             raise RuntimeError(f"Error, img with idx {item} is NAN")
 
         img = self.resizeImage(img)
-        img = self._normalize(img) #I changed th order of the normalization call, in cesped it was before ctf correction
+        img = self._normalize(img) #I changed the order of the normalization call, in cesped it was before ctf correction
 
         degEuler = torch.FloatTensor([md_row[name] for name in RELION_ANGLES_NAMES])
         xyShiftAngs = torch.FloatTensor([md_row[name] for name in RELION_SHIFTS_NAMES])
@@ -284,8 +287,10 @@ class ParticlesDataset(Dataset, ABC):
         rotMat = r.as_matrix()
         rotMat = torch.FloatTensor(rotMat)
 
-        mask = self._getParticleMask(self.image_size_px, sampling_rate=self.sampling_rate, mask_radius_angs=self.mask_radius_angs)[1]
-        img *= mask
+        if self.apply_mask_to_img:
+            mask = self._getParticleMask(self.image_size_px, sampling_rate=self.sampling_rate, mask_radius_angs=self.mask_radius_angs)[1]
+            img *= mask
+
         batch = {BATCH_IDS_NAME: iid,
                  BATCH_PARTICLES_NAME: img,
                  BATCH_POSE_NAME: (rotMat, xyShiftAngs, confidence),

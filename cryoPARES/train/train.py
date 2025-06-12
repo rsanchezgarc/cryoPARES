@@ -33,7 +33,7 @@ class Trainer:
             split_halfs: If True, it trains a model for each half of the data
             continue_checkpoint_dir: The path of a pre-trained model to continue training.
             finetune_checkpoint_dir: The path of a pre-trained model to do finetunning
-            compile_model: If True, torch 2.* will try to compile the model to make training faster.
+            compile_model: If True, torch will try to compile the model to make training faster.
             val_check_interval: The fraction of an epoch after which the validation set will be evaluated
             overfit_batches: If provided, number of train and validation batches to use
             map_fname_for_simulated_pretraining: If provided, it will run a warmup training on simulations using this maps. They need to match the particlesStarFname order

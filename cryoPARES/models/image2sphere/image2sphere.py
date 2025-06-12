@@ -22,6 +22,7 @@ from cryoPARES.models.image2sphere.so3Components import S2Conv, SO3Conv, I2SProj
 from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 
 
+
 # print(asdict(main_config.models).keys())
 # breakpoint()
 
@@ -491,6 +492,7 @@ def _update_config_for_test():
 
     main_config.datamanager.particlesdataset.desired_image_size_px = 224
     main_config.models.image2sphere.so3components.i2sprojector.rand_fraction_points_to_project = 1
+    main_config.models.image2sphere.label_smoothing = 0.1
 
 def _test():
     _update_config_for_test()
@@ -501,7 +503,7 @@ def _test():
     import torchvision
     encoder = nn.Sequential(*list(torchvision.models.resnet18(weights=torchvision.models.ResNet18_Weights.IMAGENET1K_V1).children())[:-2])
 
-    model = Image2Sphere(encoder=encoder, symmetry="C2", enforce_symmetry=True, example_batch=example_batch)
+    model = Image2Sphere(encoder=encoder, symmetry="C1", enforce_symmetry=True, example_batch=example_batch)
     model.eval()
     out = model(imgs, top_k=1)
     print(out[0].shape)
@@ -509,15 +511,17 @@ def _test():
     torch.jit.save(scripted_model, '/tmp/scripted_model.pt')
     with torch.inference_mode():
         from scipy.spatial.transform import Rotation
-        gt_rot = torch.from_numpy(Rotation.random(b).as_matrix().astype(np.float32))
+        gt_rot = torch.from_numpy(Rotation.random(b, random_state=42).as_matrix().astype(np.float32))
         # wD, rotMat_logits, pred_rotmat, maxprob = model.forward(imgs, top_k=1)
         wD, rotMat_logits, pred_rotmat_idxs, pred_rotmat, maxprob = model.forward(imgs, top_k=8)
         wD, rotMat_logits, pred_rotmat_idxs, pred_rotmat, maxprob = model.forward_with_neigs(imgs, top_k=1)
 
+        (wD, rotMat_logits, pred_rotmat_ids, pred_rotmats, maxprobs), loss, error_rads = model.forward_and_loss(imgs, gt_rot)
+
 
         print("logits", rotMat_logits.shape)
         print("pred_rotmat", pred_rotmat.shape)
-        model.forward_with_neigs(imgs, top_k=1)
+        fog_wn = model.forward_with_neigs(imgs, top_k=1)
         probs, output_rotmats = model.compute_probabilities(imgs)
         plot_so3_distribution(probs[0], output_rotmats, gt_rotation=gt_rot[0])
 

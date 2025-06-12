@@ -56,7 +56,7 @@ class DataManager(pl.LightningDataModule):
                  train_validation_split: Tuple[float, float] = CONFIG_PARAM(),
                  num_data_workers: int = CONFIG_PARAM(),
                  augment_train: bool = CONFIG_PARAM(),
-                 onlfy_first_dataset_for_validation: bool = CONFIG_PARAM(),
+                 only_first_dataset_for_validation: bool = CONFIG_PARAM(),
                  ):
 
         super().__init__()
@@ -75,7 +75,7 @@ class DataManager(pl.LightningDataModule):
         self.is_global_zero = is_global_zero
         self.save_train_val_partition_dir = save_train_val_partition_dir
         self.augment_train = augment_train
-        self.onlfy_first_dataset_for_validation = onlfy_first_dataset_for_validation
+        self.only_first_dataset_for_validation = only_first_dataset_for_validation
 
         if self.augment_train:
             from cryoPARES.datamanager.augmentations import Augmenter
@@ -110,8 +110,9 @@ class DataManager(pl.LightningDataModule):
                 fname = osp.join(dirname, f"{i}-particles.star")
                 if not osp.isfile(fname):
                     mrcsDataset.saveMd(fname, overwrite=False)
+            mrcsDataset.augmenter = self.augmenter if partitionName == "train" else None
             datasets.append(mrcsDataset)
-            if self.onlfy_first_dataset_for_validation and partitionName != "train":
+            if self.only_first_dataset_for_validation and partitionName != "train":
                 break
         dataset = ConcatDataset(datasets)
         return dataset
@@ -144,7 +145,6 @@ class DataManager(pl.LightningDataModule):
         if partitionName in ["train", "val"]:
             # Original training/validation logic...
             assert self.train_validation_split is not None
-            dataset.augmenter = self.augmenter if partitionName == "train" else None
             generator = torch.Generator().manual_seed(self.train_validaton_split_seed)
             train_dataset, val_dataset = torch.utils.data.random_split(
                 dataset,
@@ -217,16 +217,17 @@ def _test():
     main_config.datamanager.num_data_workers = 0
     dm = DataManager(star_fnames=["~/cryo/data/preAlignedParticles/EMPIAR-10166/data/1000particles.star"],
                      symmetry="c1",
-                     augment_train=False,
+                     augment_train=True,
                      particles_dir=None,
-                     halfset=None,
-                     batch_size=2,
+                     is_global_zero=True,
+                     halfset=1,
+                     batch_size=8,
                      save_train_val_partition_dir=None
                      )
     dl = dm.train_dataloader()
     # dl = dm.val_dataloader()
-    for batch in dm.val_dataloader():
-        print(batch.keys())
-
+    for batch in dl:
+        # print(batch.keys())
+        print(batch["idd"])
 if __name__ == "__main__":
     _test()

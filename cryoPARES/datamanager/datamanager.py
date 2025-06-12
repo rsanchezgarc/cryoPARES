@@ -24,13 +24,17 @@ def get_number_image_channels():
     else:
         return 1
 
-def get_example_random_batch(batch_size):
+def get_example_random_batch(batch_size, n_channels=None, seed=None):
     imgsize = main_config.datamanager.particlesdataset.desired_image_size_px
+    n_channels = n_channels if n_channels is not None else get_number_image_channels()
+    seed = torch.Generator().manual_seed(seed) if seed is not None else None
     batch = {
         BATCH_IDS_NAME: [str(i) for i in range(batch_size)],
-        BATCH_PARTICLES_NAME:torch.randn(batch_size, get_number_image_channels(), imgsize, imgsize),
-        BATCH_POSE_NAME: [torch.eye(3).unsqueeze(0).expand(batch_size, -1, -1), torch.randn(batch_size, 2), torch.rand(batch_size)],
-        BATCH_MD_NAME: {"mdField1": torch.rand(batch_size), "mdField2": ["a"*batch_size]}
+        BATCH_PARTICLES_NAME: torch.randn(batch_size, n_channels, imgsize, imgsize, generator=seed),
+        BATCH_POSE_NAME: [torch.eye(3).unsqueeze(0).expand(batch_size, -1, -1),
+                          torch.randn(batch_size, 2, generator=seed),
+                          torch.rand(batch_size, generator=seed)],
+        BATCH_MD_NAME: {"mdField1": torch.rand(batch_size, generator=seed), "mdField2": ["a"*batch_size]}
     }
     return batch
 

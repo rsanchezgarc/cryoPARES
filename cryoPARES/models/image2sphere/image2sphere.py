@@ -1,7 +1,7 @@
 import functools
 from collections import defaultdict
 from dataclasses import asdict
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any
 
 import numpy as np
 import torch
@@ -40,7 +40,8 @@ class Image2Sphere(nn.Module):
                  num_augmented_copies_per_batch: Optional[int] = CONFIG_PARAM(config=main_config.datamanager),
                  enforce_symmetry: bool = CONFIG_PARAM(),
                  encoder: Optional[nn.Module] = None,
-                 use_simCLR: bool = False):
+                 use_simCLR: bool = False,
+                 example_batch: Optional[Dict[str, Any]] = None):
         super().__init__()
 
         self.encoder = encoder if encoder is not None else ImageEncoder()
@@ -50,8 +51,9 @@ class Image2Sphere(nn.Module):
         self.num_augmented_copies_per_batch = num_augmented_copies_per_batch #TODO: refactor SimCLR
         self.use_simCLR = use_simCLR
 
-        batch = get_example_random_batch(1)
-        x = batch[BATCH_PARTICLES_NAME]
+        if example_batch is None:
+            example_batch = get_example_random_batch(1)
+        x = example_batch[BATCH_PARTICLES_NAME]
         out = self.encoder(x)
 
         self.projector = I2SProjector(fmap_shape=out.shape[1:], lmax=lmax)
@@ -277,7 +279,7 @@ class Image2Sphere(nn.Module):
             contrast_loss = self.simCLR_like_loss(wD)
         else:
             contrast_loss = 0
-        # TODO: The problem is that pred_rotmats has shape (B, top_k, 3, 3), but gt_rotmat has shape (B,3,3)
+        # TODO: The problem is that pred_rotmats has shape (B, top_k, 3, 3), but gt_rotmat has shape (B,3,3). Is it solved?
         if self.symmetry != "C1":
             n_groupElems = self.symmetryGroupMatrix.shape[0]
             #Perform symmetry expansion
@@ -480,18 +482,26 @@ def plot_so3_distribution(probs: torch.Tensor,
 
 def _update_config_for_test():
     main_config.models.image2sphere.lmax = 6
-    main_config.models.image2sphere.so3components.i2sprojector.sphere_fdim = 128
+    main_config.models.image2sphere.so3components.i2sprojector.sphere_fdim = 512
     main_config.models.image2sphere.so3components.i2sprojector.rand_fraction_points_to_project = 1.
     main_config.models.image2sphere.so3components.i2sprojector.hp_order = 2
     main_config.models.image2sphere.so3components.s2conv.hp_order = 2
+    main_config.models.image2sphere.so3components.s2conv.f_out = 16
     main_config.models.image2sphere.so3components.so3outputgrid.hp_order = 3
+
+    main_config.datamanager.particlesdataset.desired_image_size_px = 224
+    main_config.models.image2sphere.so3components.i2sprojector.rand_fraction_points_to_project = 1
 
 def _test():
     _update_config_for_test()
     b = 4
-    imgs = get_example_random_batch(4)[BATCH_PARTICLES_NAME]
+    example_batch = get_example_random_batch(4, n_channels=3, seed=42)
+    imgs = example_batch[BATCH_PARTICLES_NAME]
 
-    model = Image2Sphere(symmetry="C2", enforce_symmetry=True)
+    import torchvision
+    encoder = nn.Sequential(*list(torchvision.models.resnet18(weights=torchvision.models.ResNet18_Weights.IMAGENET1K_V1).children())[:-2])
+
+    model = Image2Sphere(encoder=encoder, symmetry="C2", enforce_symmetry=True, example_batch=example_batch)
     model.eval()
     out = model(imgs, top_k=1)
     print(out[0].shape)

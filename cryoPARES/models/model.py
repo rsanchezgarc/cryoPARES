@@ -198,9 +198,11 @@ class PlModel(pl.LightningModule):
     def forward(self, imgs: torch.Tensor, batch_idx: int, dataloader_idx: int = 0) -> Any:
         return self.model(imgs, top_k=self.top_k)
 
-    def resolve_batch(self, batch: Dict[
-        str, Union[torch.Tensor, List[str], Tuple[torch.Tensor, torch.Tensor, torch.Tensor], Dict[str, Any]]]) -> Tuple[
-        torch.Tensor, torch.Tensor, Tuple[torch.Tensor, torch.Tensor, torch.Tensor], Dict[str, Any]]:
+    def resolve_batch(self, batch: Dict[str, Union[torch.Tensor, List[str],
+                                                   Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+                                                   Dict[str, Any]]]
+                      ) -> Tuple[torch.Tensor, torch.Tensor,
+                                 Tuple[torch.Tensor, torch.Tensor, torch.Tensor], Dict[str, Any]]:
         idd = batch[self.BATCH_IDS_NAME]
         imgs = batch[self.BATCH_PARTICLES_NAME]
         (rotMats, xyShiftAngs, conf) = batch[self.BATCH_POSE_NAME]
@@ -241,11 +243,7 @@ class PlModel(pl.LightningModule):
         lr = self.lr
         configTrain = main_config.train
         optClass = getattr(torch.optim, configTrain.default_optimizer)
-        if self.warmup_epochs is None:
-            opt = optClass(self.parameters(), lr=lr, weight_decay=configTrain.weight_decay)
-
-        else:
-            opt = optClass(self.parameters(), lr=self.lr, weight_decay=configTrain.weight_decay)
+        opt = optClass(self.parameters(), lr=lr, weight_decay=configTrain.weight_decay)
         lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, verbose=True,
                                                                   factor=0.5,
                                                                   threshold=5e-4,

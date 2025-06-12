@@ -68,10 +68,10 @@ def so3_healpix_grid_equiangular(hp_order: int = 3):
 
     #If we were doing things with the angles we would NEED TO GO FROM ZYZ TO YXY to keep it consistent with e3nn, but
     #since we are not doing it, it is not necessary
-    # from scipy.spatial.transform import Rotation as R
-    # r = R.from_euler("ZYZ", zyz_grid.T, degrees=False)
-    # result = torch.FloatTensor(r.as_euler("YXY", degrees=False))
-    result = torch.as_tensor(zyz_grid, dtype=torch.float)
+    from scipy.spatial.transform import Rotation as R
+    r = R.from_euler("ZYZ", zyz_grid.T, degrees=False)
+    result = torch.FloatTensor(r.as_euler("YXY", degrees=False)).T.contiguous() #TODO. Is his needed after all?
+    # result = torch.as_tensor(zyz_grid, dtype=torch.float)
     return result, n_cones
 
 # try:
@@ -109,4 +109,19 @@ def so3_near_identity_grid_cartesianprod(max_rads, n_angles): #TODO: It is proba
     angles_range = torch.linspace(-max_rads, max_rads, n_angles)
     grid = torch.cartesian_prod(angles_range, angles_range, angles_range)
     return grid.T.contiguous()
+
+
+def so3_near_identity_grid_ori(max_alpha=np.pi / 12, max_beta=np.pi / 12, max_gamma=np.pi / 12,
+                           n_alpha=8, n_beta=3, n_gamma=8):  # New version
+    """Spatial grid over SO3 used to parametrize localized filter
+
+    :return: a local grid of SO(3) points
+           size of the kernel = n_alpha * n_beta * n_gamma
+    """
+
+    alpha = torch.linspace(-max_alpha, max_alpha, n_alpha)
+    beta = torch.linspace(-max_beta, max_beta, n_beta)
+    gamma = torch.linspace(-max_gamma, max_gamma, n_gamma)
+    grid = torch.cartesian_prod(alpha, beta, gamma)
+    return grid.T
 

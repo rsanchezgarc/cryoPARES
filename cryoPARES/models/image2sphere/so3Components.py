@@ -10,7 +10,8 @@ from torch import nn
 from cryoPARES.cacheManager import get_cache
 from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
-from cryoPARES.geometry.grids import s2_healpix_grid, so3_near_identity_grid_cartesianprod, so3_healpix_grid
+from cryoPARES.geometry.grids import s2_healpix_grid, so3_near_identity_grid_cartesianprod, so3_healpix_grid, \
+    so3_near_identity_grid_ori
 from cryoPARES.geometry.metrics_angles import nearest_rotmat_idx
 
 
@@ -68,7 +69,7 @@ class I2SProjector(nn.Module):
 
         self.n_pts = self.weight.shape[-1]
         self.ind = torch.arange(self.n_pts)
-        if rand_fraction_points_to_project is None or rand_fraction_points_to_project > 0:
+        if rand_fraction_points_to_project is None or rand_fraction_points_to_project >= 1:
             self.n_subset = None
         else:
             self.n_subset = int(rand_fraction_points_to_project * self.n_pts) + 1
@@ -158,7 +159,8 @@ class S2Conv(nn.Module):
         )
         s2_ir = s2_irreps(lmax)
         so3_ir = so3_irreps(lmax)
-        w = nn.Parameter(torch.randn(f_in, f_out, kernel_grid[0].shape[0]))
+        seed = None #torch.Generator().manual_seed(42) #TODO: Remove me, this is to debug only
+        w = nn.Parameter(torch.randn(f_in, f_out, kernel_grid[0].shape[0], generator=seed))
         lin = o3.Linear(s2_ir, so3_ir, f_in=f_in, f_out=f_out, internal_weights=False)
         return spherical_harmonics, w, lin
 
@@ -203,10 +205,12 @@ class SO3Conv(nn.Module):
     @staticmethod
     @cache.cache()
     def build_components(f_in: int, f_out: int, lmax: int, max_rads: float, n_angles: int):
-        kernel_grid = so3_near_identity_grid_cartesianprod(max_rads, n_angles)
+        # kernel_grid = so3_near_identity_grid_cartesianprod(max_rads, n_angles)
+        kernel_grid = so3_near_identity_grid_ori(n_alpha=8, n_beta=3) #TODO: This was the original implementation
         f_wigner = flat_wigner(lmax, *kernel_grid)
         so3_ir = so3_irreps(lmax)
-        w = nn.Parameter(torch.randn(f_in, f_out, kernel_grid[0].shape[0]))
+        seed = None #torch.Generator().manual_seed(42) #TODO: Remove me. This is only for debugging
+        w = nn.Parameter(torch.randn(f_in, f_out, kernel_grid[0].shape[0], generator=seed))
         lin = o3.Linear(so3_ir, so3_ir, f_in=f_in, f_out=f_out, internal_weights=False)
         return w, f_wigner, lin
 

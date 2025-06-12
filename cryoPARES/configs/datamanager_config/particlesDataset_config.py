@@ -18,8 +18,8 @@ class ParticlesDataset_config():
     desired_sampling_rate_angs: float = 1.5
     desired_image_size_px: int = 160
     store_data_in_memory: bool = False
-    mask_radius_angs: Optional[float] = None
-    min_maxProb: Optional[float] = None
+    mask_radius_angs: Optional[float] = None #If None, use a circular mask of radius Box/2
+    min_maxProb: Optional[float] = None #Particles with maxProb smaller than this number will be ruled out
     perImg_normalization: ImgNormalizationType = ImgNormalizationType.noiseStats
     ctf_correction: CtfCorrectionType = CtfCorrectionType.concat_phase_flip
     reduce_symmetry_label: bool = True

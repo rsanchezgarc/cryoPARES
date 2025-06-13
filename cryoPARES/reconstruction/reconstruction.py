@@ -19,8 +19,10 @@ V̂(k) = Σ_i   CTF_i(k) · Î_i(k)
 """
 from typing import List, Optional
 
+import mrcfile
 import torch
 import torch.fft as _fft
+import tqdm
 from starstack import ParticlesStarSet
 from starstack.constants import RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES, RELION_IMAGE_FNAME, RELION_EULER_CONVENTION
 from torch.utils.data import Dataset, DataLoader
@@ -28,59 +30,85 @@ from torch_fourier_shift import fourier_shift_dft_2d
 from torch_fourier_slice import backproject_2d_to_3d, insert_central_slices_rfft_3d
 from torch_grid_utils import fftfreq_grid
 
-from cryoPARES.datamanager.relionStarDataset import ParticlesRelionStarDataset
 from cryoPARES.geometry.convert_angles import euler_angles_to_matrix
+from cryoPARES.utils.paths import FnameType
 
 
 class Reconstructor():
-    def __init__(self, symmetry: str, image_size_px: int,
-                 correct_ctf: bool = True, eps=1e-3):
+    def __init__(self, symmetry: str, device:str,
+                 correct_ctf: bool = True, eps=1e-3, min_denominator_value=1e-4):
 
         self.symmetry = symmetry
-        self.box_size = image_size_px
-        nky, nkx = self.box_size, self.box_size // 2 + 1
-        self.f_num = torch.zeros((self.box_size, self.box_size, nkx), dtype=torch.complex64, device=self.device)
-        self.f_den = torch.zeros_like(self.f_num, dtype=torch.float32)
+        self.device = device
+
         self.correct_ctf = correct_ctf
         self.eps = eps # The Tikhonov constant
+        self.min_denominator_value = min_denominator_value
 
-    def _load_particles(self, particles_star_fname: List[str],
-                 particles_dir: Optional[List[str]] = None):
-        particles = ParticlesStarSet(starFname=particles_star_fname, particlesDir=particles_dir)
-        particlesDataset = ReconstructionParticlesDataset(particles)
+        self.box_size = None
+        self.sampling_rate = None
+        self.f_num = None
+        self.f_den = None
 
 
+    def set_metadata_from_particles(self, particlesDataset):
 
-    def backproject_particles(self, particles_star_fname: List[str],
-                              particles_dir: Optional[List[str]] = None,
+        box_size = particlesDataset.particle_shape[-1]
+        sampling_rate = particlesDataset.sampling_rate
+
+        if self.sampling_rate is not None:
+            assert sampling_rate == self.sampling_rate, "Error, mismatch between the previous and current sampling_rate"
+        else:
+            self.sampling_rate = sampling_rate
+
+        if self.box_size is not None:
+            assert box_size == self.box_size, "Error, mismatch between the previous and current box_size"
+        else:
+            self.box_size = box_size
+            nky, nkx = self.box_size, self.box_size // 2 + 1
+            self.f_num = torch.zeros((self.box_size, self.box_size, nkx), dtype=torch.complex64, device=self.device)
+            self.f_den = torch.zeros_like(self.f_num, dtype=torch.float32)
+
+
+    def backproject_particles(self, particles_star_fname: FnameType,
+                              particles_dir: Optional[FnameType] = None,
                               batch_size=1, num_workers=0,):
         particlesDataset = ReconstructionParticlesDataset(particles_star_fname, particles_dir,
                                                           correct_ctf=self.correct_ctf)
+        self.set_metadata_from_particles(particlesDataset)
+
         dl = DataLoader(particlesDataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
-        for imgs, rotMats in dl:
+        zyx_matrices = False
+        for imgs, ctf, rotMats in tqdm.tqdm(dl, desc="backprojecting", disable=False):
             dft_3d, weights = insert_central_slices_rfft_3d(
                 image_rfft=imgs,
-                volume_shape=(imgs.shape[-1], )*3,
+                volume_shape=(self.box_size,) * 3,
                 rotation_matrices=rotMats,
                 fftfreq_max=None,
-                zyx_matrices=True,
+                zyx_matrices=zyx_matrices,
             )
             self.f_num += dft_3d
 
             if self.correct_ctf:
                 ctf_sq_3d, _ = insert_central_slices_rfft_3d(
-                    image_rfft=imgs,
-                    volume_shape=(imgs.shape[-1],) * 3,
+                    image_rfft=ctf**2,
+                    volume_shape=(self.box_size,) * 3,
                     rotation_matrices=rotMats,
                     fftfreq_max=None,
-                    zyx_matrices=True,
+                    zyx_matrices=zyx_matrices,
                 )
-                self.f_den += (ctf_sq_3d * weights)
+                self.f_den += NotImplementedError #(ctf_sq_3d * weights)
             else:
                 self.f_den += weights
 
-    def generate_volume(self, device="cpu"):
-        dft = self.f_num / (self.f_den + self.eps)
+    def generate_volume(self, device="cpu", fname:Optional[FnameType]=None, overwrite_fname:bool=True):
+
+        dft = torch.zeros_like(self.f_num)
+
+        # Only divide where we have sufficient weights
+        mask = self.f_den > self.min_denominator_value
+        dft[mask] = self.f_num[mask] / (self.f_den[mask] + self.eps)
+
         # back to real space
         dft = torch.fft.ifftshift(dft, dim=(-3, -2))  # actual ifftshift
         dft = torch.fft.irfftn(dft, dim=(-3, -2, -1))
@@ -91,14 +119,19 @@ class Reconstructor():
             image_shape=dft.shape, rfft=False, fftshift=True, norm=True, device=dft.device
         )
         vol = dft / torch.sinc(grid) ** 2
+        vol = vol.to(device)
+
+        if fname is not None:
+            mrcfile.write(fname, data=vol.detach().cpu().numpy(), overwrite=overwrite_fname, voxel_size=self.sampling_rate)
         return vol
 
 class ReconstructionParticlesDataset(Dataset):
-    def __init__(self, particles_star_fname: List[str],
-                 particles_dir: Optional[List[str]] = None,
+    def __init__(self, particles_star_fname: FnameType,
+                 particles_dir: Optional[FnameType] = None,
                  correct_ctf=True):
         self.particles = ParticlesStarSet(starFname=particles_star_fname, particlesDir=particles_dir)
         self.sampling_rate = self.particles.sampling_rate
+        self.particle_shape = self.particles.particle_shape
         self.correct_ctf = correct_ctf
 
     def __len__(self):
@@ -113,19 +146,17 @@ class ReconstructionParticlesDataset(Dataset):
             raise
 
         degEuler = torch.FloatTensor([md_row[name] for name in RELION_ANGLES_NAMES])
-        rotMat = euler_angles_to_matrix(degEuler, convention=RELION_EULER_CONVENTION)
+        rotMat = euler_angles_to_matrix(torch.deg2rad(degEuler), convention=RELION_EULER_CONVENTION)
         xyShiftAngs = torch.FloatTensor([md_row[name] for name in RELION_SHIFTS_NAMES])
 
-        iid = md_row[RELION_IMAGE_FNAME]
         img = torch.FloatTensor(img)
-        img_shape = img.shape
         img = torch.fft.fftshift(img, dim=(-2, -1))  # volume center to array origin
         img = torch.fft.rfftn(img, dim=(-2, -1))
         img = torch.fft.fftshift(img, dim=(-2,))  # actual fftshift
 
-        img = fourier_shift_dft_2d(dft = img,
-            image_shape=img_shape,
-            shifts = xyShiftAngs/self.sampling_rate, #Shifts are in pixels
+        img = fourier_shift_dft_2d(dft=img,
+            image_shape=self.particle_shape,
+            shifts= xyShiftAngs.flip(0)/self.sampling_rate, #Shifts need to be passed in pixels
             rfft=True,
             fftshifted=True,
         )
@@ -133,10 +164,31 @@ class ReconstructionParticlesDataset(Dataset):
         if self.correct_ctf:
             raise NotImplementedError()
         else:
-            ctf = None
+            ctf = 0 #This is just an indicator that no ctf is going to be used
 
         return img, ctf, rotMat
 
 
 if __name__ == "__main__":
-    raise NotImplementedError()
+    reconstructor = Reconstructor(symmetry="C1", device="cpu", correct_ctf=False, eps=1e-3)
+
+    reconstructor.backproject_particles(
+        particles_star_fname="/home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/projections/proj_noCTF.star",
+        particles_dir="/home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/",
+        batch_size=128, num_workers=2,)
+
+    vol = reconstructor.generate_volume(device="cpu", fname="/tmp/reconstructed_volume.mrc")
+
+    relion_vol = torch.as_tensor(mrcfile.read("/tmp/relion_reconstruct.mrc"), dtype=torch.float32)
+    from torch_fourier_shell_correlation import fsc
+    fsc_result = fsc(vol, relion_vol)
+    print(fsc_result)
+
+    from matplotlib import pyplot as plt
+    f, axes = plt.subplots(1,3)
+    axes[0].imshow(vol[..., vol.shape[-1]//2])
+    axes[1].imshow(vol[..., vol.shape[-2]//2, :])
+    axes[2].imshow(vol[vol.shape[0]//2, ...])
+
+    plt.show()
+    print()

@@ -1,5 +1,7 @@
 import functools
+from os import PathLike
 from pathlib import Path
+from typing import Union
 
 
 def _find_directory_with_marker(marker_file):
@@ -20,3 +22,6 @@ def find_configs_root() -> Path:
 def find_project_root() -> Path:
     """Find the project root by looking for setup.py"""
     return _find_directory_with_marker('setup.py')
+
+
+FnameType = Union[PathLike, str]

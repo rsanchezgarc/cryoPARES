@@ -11,11 +11,6 @@ volume from a RELION‑style particle STAR file using the open‑source
 * [`torch‑fourier‑shift`](https://github.com/teamtomo/torch-fourier-shift) –
   sub‑pixel recentering in Fourier space.
 
-```text
-V̂(k) = Σ_i   CTF_i(k) · Î_i(k)
-        ─────────────────────────
-        Σ_i   CTF_i(k)^2 + ε
-```
 """
 from typing import List, Optional
 
@@ -24,13 +19,15 @@ import torch
 import torch.fft as _fft
 import tqdm
 from starstack import ParticlesStarSet
-from starstack.constants import RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES, RELION_IMAGE_FNAME, RELION_EULER_CONVENTION
+from starstack.constants import RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES, RELION_EULER_CONVENTION
 from torch.utils.data import Dataset, DataLoader
 from torch_fourier_shift import fourier_shift_dft_2d
-from torch_fourier_slice import backproject_2d_to_3d, insert_central_slices_rfft_3d
+from torch_fourier_slice import insert_central_slices_rfft_3d
 from torch_grid_utils import fftfreq_grid
 
+from cryoPARES.datamanager.ctf.rfft_ctf import compute_ctf_rfft
 from cryoPARES.geometry.convert_angles import euler_angles_to_matrix
+from cryoPARES.geometry.symmetry import getSymmetryGroup
 from cryoPARES.utils.paths import FnameType
 
 
@@ -38,11 +35,12 @@ class Reconstructor():
     def __init__(self, symmetry: str, device:str,
                  correct_ctf: bool = True, eps=1e-3, min_denominator_value=1e-4):
 
-        self.symmetry = symmetry
+        self.symmetry = symmetry.upper()
+        self.has_symmetry = self.symmetry != "C1"
         self.device = device
 
         self.correct_ctf = correct_ctf
-        self.eps = eps # The Tikhonov constant
+        self.eps = eps # The Tikhonov constant. Should be 1/SNR
         self.min_denominator_value = min_denominator_value
 
         self.box_size = None
@@ -65,9 +63,12 @@ class Reconstructor():
             assert box_size == self.box_size, "Error, mismatch between the previous and current box_size"
         else:
             self.box_size = box_size
+            self.particle_shape = (box_size, box_size)
             nky, nkx = self.box_size, self.box_size // 2 + 1
+
             self.f_num = torch.zeros((self.box_size, self.box_size, nkx), dtype=torch.complex64, device=self.device)
-            self.f_den = torch.zeros_like(self.f_num, dtype=torch.float32)
+            self.weights = torch.zeros_like(self.f_num, dtype=torch.float32) #TODO: Separate weights from ctf**2
+            self.ctfs = torch.zeros_like(self.f_num, dtype=torch.float32)
 
 
     def backproject_particles(self, particles_star_fname: FnameType,
@@ -75,11 +76,52 @@ class Reconstructor():
                               batch_size=1, num_workers=0,):
         particlesDataset = ReconstructionParticlesDataset(particles_star_fname, particles_dir,
                                                           correct_ctf=self.correct_ctf)
+
         self.set_metadata_from_particles(particlesDataset)
 
-        dl = DataLoader(particlesDataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+        dl = DataLoader(particlesDataset, batch_size=batch_size, shuffle=False,
+                        num_workers=num_workers,
+                        pin_memory=num_workers > 0 and str(self.device).startswith("cuda"))
+
+
+        symMat = getSymmetryGroup(self.symmetry, as_matrix=True, device=self.device)
         zyx_matrices = False
-        for imgs, ctf, rotMats in tqdm.tqdm(dl, desc="backprojecting", disable=False):
+        for imgs, ctf, rotMats, hwShiftAngs in tqdm.tqdm(dl, desc="backprojecting", disable=False):
+
+            imgs = imgs.to(self.device, non_blocking=True)
+            rotMats = rotMats.to(self.device, non_blocking=True)
+            hwShiftAngs = hwShiftAngs.to(self.device, non_blocking=True)
+
+            imgs = torch.fft.fftshift(imgs, dim=(-2, -1))  # volume center to array origin
+            imgs = torch.fft.rfftn(imgs, dim=(-2, -1))
+            imgs = torch.fft.fftshift(imgs, dim=(-2,))  # actual fftshift
+
+            # from matplotlib import pyplot as plt
+            # f, axes = plt.subplots(1, 2)
+            # axes[0].imshow(imgs[0].abs().log())
+            # axes[1].imshow(ctf[0])
+            # plt.show()
+
+            if self.has_symmetry:
+                extended_rotMats = symMat @ rotMats
+                raise NotImplementedError()
+
+            imgs = fourier_shift_dft_2d(dft=imgs,
+                                       image_shape=self.particle_shape,
+                                       shifts=hwShiftAngs / self.sampling_rate,  # Shifts need to be passed in pixels
+                                       rfft=True,
+                                       fftshifted=True,
+                                       )
+
+            if self.correct_ctf:
+                ctf = torch.fft.fftshift(ctf, dim=(-2,))
+
+                imgs *= ctf
+
+                # #This is for phase-flip
+                # imgs *= ctf.sign()
+                # ctf = torch.ones_like(ctf)
+
             dft_3d, weights = insert_central_slices_rfft_3d(
                 image_rfft=imgs,
                 volume_shape=(self.box_size,) * 3,
@@ -88,26 +130,34 @@ class Reconstructor():
                 zyx_matrices=zyx_matrices,
             )
             self.f_num += dft_3d
+            self.weights += weights
 
             if self.correct_ctf:
+                pass
                 ctf_sq_3d, _ = insert_central_slices_rfft_3d(
-                    image_rfft=ctf**2,
+                    image_rfft=ctf ** 2,
                     volume_shape=(self.box_size,) * 3,
                     rotation_matrices=rotMats,
                     fftfreq_max=None,
                     zyx_matrices=zyx_matrices,
                 )
-                self.f_den += NotImplementedError #(ctf_sq_3d * weights)
-            else:
-                self.f_den += weights
+                self.ctfs += ctf_sq_3d
+
 
     def generate_volume(self, device="cpu", fname:Optional[FnameType]=None, overwrite_fname:bool=True):
 
         dft = torch.zeros_like(self.f_num)
 
         # Only divide where we have sufficient weights
-        mask = self.f_den > self.min_denominator_value
-        dft[mask] = self.f_num[mask] / (self.f_den[mask] + self.eps)
+        mask = self.weights > self.min_denominator_value
+        if self.correct_ctf:
+            denominator = self.ctfs[mask] + self.eps * self.weights[mask]
+            # Handle potential near-zero denominators
+            denominator[denominator.abs() < self.min_denominator_value] = self.min_denominator_value
+            dft[mask] = self.f_num[mask] / denominator
+
+        else:
+            dft[mask] = self.f_num[mask] / self.weights[mask]
 
         # back to real space
         dft = torch.fft.ifftshift(dft, dim=(-3, -2))  # actual ifftshift
@@ -147,35 +197,34 @@ class ReconstructionParticlesDataset(Dataset):
 
         degEuler = torch.FloatTensor([md_row[name] for name in RELION_ANGLES_NAMES])
         rotMat = euler_angles_to_matrix(torch.deg2rad(degEuler), convention=RELION_EULER_CONVENTION)
-        xyShiftAngs = torch.FloatTensor([md_row[name] for name in RELION_SHIFTS_NAMES])
+        hwShiftAngs = torch.FloatTensor([md_row[name] for name in RELION_SHIFTS_NAMES[::-1]])
 
         img = torch.FloatTensor(img)
-        img = torch.fft.fftshift(img, dim=(-2, -1))  # volume center to array origin
-        img = torch.fft.rfftn(img, dim=(-2, -1))
-        img = torch.fft.fftshift(img, dim=(-2,))  # actual fftshift
-
-        img = fourier_shift_dft_2d(dft=img,
-            image_shape=self.particle_shape,
-            shifts= xyShiftAngs.flip(0)/self.sampling_rate, #Shifts need to be passed in pixels
-            rfft=True,
-            fftshifted=True,
-        )
 
         if self.correct_ctf:
-            raise NotImplementedError()
-        else:
-            ctf = 0 #This is just an indicator that no ctf is going to be used
+            dfu = md_row["rlnDefocusU"]
+            dfv = md_row["rlnDefocusV"]
+            dfang = md_row["rlnDefocusAngle"]
+            volt = float(self.particles.optics_md["rlnVoltage"][0])
+            cs = float(self.particles.optics_md["rlnSphericalAberration"][0])
+            w = float(self.particles.optics_md["rlnAmplitudeContrast"][0])
 
-        return img, ctf, rotMat
+            ctf = compute_ctf_rfft(img.shape[-2], self.sampling_rate, dfu, dfv, dfang, volt, cs, w,
+                                   phase_shift=0, bfactor=None,
+                                   device="cpu")
+        else:
+            ctf = 0 #This is just an indicator that no ctf is going to be used. None cannot be used due to torch DataLoader
+
+        return img, ctf, rotMat, hwShiftAngs
 
 
 if __name__ == "__main__":
-    reconstructor = Reconstructor(symmetry="C1", device="cpu", correct_ctf=False, eps=1e-3)
+    reconstructor = Reconstructor(symmetry="C1", device="cpu", correct_ctf=True, eps=0.1, min_denominator_value=1e-4)
 
     reconstructor.backproject_particles(
-        particles_star_fname="/home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/projections/proj_noCTF.star",
+        particles_star_fname="/home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/projections/1000proj_with_ctf.star",
         particles_dir="/home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/",
-        batch_size=128, num_workers=2,)
+        batch_size=96, num_workers=0,)
 
     vol = reconstructor.generate_volume(device="cpu", fname="/tmp/reconstructed_volume.mrc")
 

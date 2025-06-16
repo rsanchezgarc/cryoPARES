@@ -78,4 +78,5 @@ class Operations:
 class Augmenter_config:
     min_n_augm_per_img: int = 1
     max_n_augm_per_img: int = 8 #TODO: We probably want to do 4 since, in the original code we have the swap between particle and proj
+    prob_augment_each_image: float = 0.95
     operations: Operations = field(default_factory=Operations)

@@ -319,8 +319,7 @@ def compute_symmetry_indices(lmax: int, hp_order: int, symmetry: str) -> Tuple[S
 
     so3_grid = SO3OutputGrid(lmax=lmax, hp_order=hp_order)
     n_rotmats = so3_grid.output_rotmats.shape[0]
-    symmetryGroupMatrix = torch.stack([torch.FloatTensor(x)
-                                       for x in getSymmetryGroup(symmetry).as_matrix()])
+    symmetryGroupMatrix = getSymmetryGroup(symmetry, as_matrix=True)
 
     sym_equiv_idxs = torch.empty(n_rotmats, symmetryGroupMatrix.shape[0], dtype=torch.int64)
     ori_device = so3_grid.output_rotmats.device

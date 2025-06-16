@@ -22,7 +22,7 @@ from starstack import ParticlesStarSet
 from starstack.constants import RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES, RELION_EULER_CONVENTION
 from torch.utils.data import Dataset, DataLoader
 from torch_fourier_shift import fourier_shift_dft_2d
-from torch_fourier_slice import insert_central_slices_rfft_3d
+from torch_fourier_slice import insert_central_slices_rfft_3d, insert_central_slices_rfft_3d_multichannel
 from torch_grid_utils import fftfreq_grid
 
 from cryoPARES.datamanager.ctf.rfft_ctf import compute_ctf_rfft
@@ -114,34 +114,43 @@ class Reconstructor():
                                        )
 
             if self.correct_ctf:
-                ctf = torch.fft.fftshift(ctf, dim=(-2,))
-
                 imgs *= ctf
-
-                # #This is for phase-flip
+                # #The following is for phase-flip only
                 # imgs *= ctf.sign()
                 # ctf = torch.ones_like(ctf)
 
-            dft_3d, weights = insert_central_slices_rfft_3d(
-                image_rfft=imgs,
-                volume_shape=(self.box_size,) * 3,
-                rotation_matrices=rotMats,
-                fftfreq_max=None,
-                zyx_matrices=zyx_matrices,
-            )
-            self.f_num += dft_3d
-            self.weights += weights
-
-            if self.correct_ctf:
-                pass
-                ctf_sq_3d, _ = insert_central_slices_rfft_3d(
-                    image_rfft=ctf ** 2,
+                dft_ctf, weights = insert_central_slices_rfft_3d_multichannel(
+                    image_rfft=torch.stack([imgs, ctf**2], dim=1),
                     volume_shape=(self.box_size,) * 3,
                     rotation_matrices=rotMats,
                     fftfreq_max=None,
                     zyx_matrices=zyx_matrices,
                 )
-                self.ctfs += ctf_sq_3d
+
+                self.f_num += dft_ctf[0, ...]
+                self.ctfs += dft_ctf[1, ...].real
+                self.weights += weights
+            else:
+                dft_3d, weights = insert_central_slices_rfft_3d(
+                    image_rfft=imgs,
+                    volume_shape=(self.box_size,) * 3,
+                    rotation_matrices=rotMats,
+                    fftfreq_max=None,
+                    zyx_matrices=zyx_matrices,
+                )
+                self.f_num += dft_3d
+                self.weights += weights
+
+            # if self.correct_ctf:
+            #     pass
+            #     ctf_sq_3d, _ = insert_central_slices_rfft_3d(
+            #         image_rfft=ctf ** 2,
+            #         volume_shape=(self.box_size,) * 3,
+            #         rotation_matrices=rotMats,
+            #         fftfreq_max=None,
+            #         zyx_matrices=zyx_matrices,
+            #     )
+            #     self.ctfs += ctf_sq_3d
 
 
     def generate_volume(self, device="cpu", fname:Optional[FnameType]=None, overwrite_fname:bool=True):
@@ -165,14 +174,13 @@ class Reconstructor():
         dft = torch.fft.ifftshift(dft, dim=(-3, -2, -1))  # center in real space
 
         # correct for convolution with linear interpolation kernel
-        grid = fftfreq_grid(
-            image_shape=dft.shape, rfft=False, fftshift=True, norm=True, device=dft.device
-        )
+        grid = fftfreq_grid( image_shape=dft.shape, rfft=False, fftshift=True, norm=True, device=dft.device)
         vol = dft / torch.sinc(grid) ** 2
         vol = vol.to(device)
 
         if fname is not None:
-            mrcfile.write(fname, data=vol.detach().cpu().numpy(), overwrite=overwrite_fname, voxel_size=self.sampling_rate)
+            mrcfile.write(fname, data=vol.detach().cpu().numpy(), overwrite=overwrite_fname,
+                          voxel_size=self.sampling_rate)
         return vol
 
 class ReconstructionParticlesDataset(Dataset):
@@ -210,7 +218,7 @@ class ReconstructionParticlesDataset(Dataset):
             w = float(self.particles.optics_md["rlnAmplitudeContrast"][0])
 
             ctf = compute_ctf_rfft(img.shape[-2], self.sampling_rate, dfu, dfv, dfang, volt, cs, w,
-                                   phase_shift=0, bfactor=None,
+                                   phase_shift=0, bfactor=None, fftshift=True,
                                    device="cpu")
         else:
             ctf = 0 #This is just an indicator that no ctf is going to be used. None cannot be used due to torch DataLoader
@@ -219,7 +227,7 @@ class ReconstructionParticlesDataset(Dataset):
 
 
 if __name__ == "__main__":
-    reconstructor = Reconstructor(symmetry="C1", device="cpu", correct_ctf=True, eps=0.1, min_denominator_value=1e-4)
+    reconstructor = Reconstructor(symmetry="C1", device="cpu", correct_ctf=True, eps=1e-3, min_denominator_value=1e-4)
 
     reconstructor.backproject_particles(
         particles_star_fname="/home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/projections/1000proj_with_ctf.star",
@@ -228,16 +236,22 @@ if __name__ == "__main__":
 
     vol = reconstructor.generate_volume(device="cpu", fname="/tmp/reconstructed_volume.mrc")
 
-    relion_vol = torch.as_tensor(mrcfile.read("/tmp/relion_reconstruct.mrc"), dtype=torch.float32)
+    relion_vol = torch.as_tensor(
+        mrcfile.read("/home/sanchezg/cryo/myProjects/cryoPARES/cryoPARES/reconstruction/relion_reconstruct.mrc"),
+        dtype=torch.float32)
     from torch_fourier_shell_correlation import fsc
     fsc_result = fsc(vol, relion_vol)
     print(fsc_result)
 
     from matplotlib import pyplot as plt
-    f, axes = plt.subplots(1,3)
-    axes[0].imshow(vol[..., vol.shape[-1]//2])
-    axes[1].imshow(vol[..., vol.shape[-2]//2, :])
-    axes[2].imshow(vol[vol.shape[0]//2, ...])
+    f, axes = plt.subplots(2,3, squeeze=False)
+    axes[0, 0].imshow(vol[..., vol.shape[-1]//2])
+    axes[0, 1].imshow(vol[..., vol.shape[-2]//2, :])
+    axes[0, 2].imshow(vol[vol.shape[0]//2, ...])
+
+    axes[1, 0].imshow(relion_vol[..., relion_vol.shape[-1]//2])
+    axes[1, 1].imshow(relion_vol[..., relion_vol.shape[-2]//2, :])
+    axes[1, 2].imshow(relion_vol[relion_vol.shape[0]//2, ...])
 
     plt.show()
     print()

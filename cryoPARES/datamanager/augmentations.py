@@ -31,7 +31,8 @@ class Augmenter(AugmenterBase):
     @inject_defaults_from_config(main_config.datamanager.augmenter, update_config_with_args=False)
     def __init__(self,
                  min_n_augm_per_img: int = CONFIG_PARAM(),
-                 max_n_augm_per_img: int= CONFIG_PARAM()):
+                 max_n_augm_per_img: int= CONFIG_PARAM(),
+                 prob_augment_each_image: float = CONFIG_PARAM()):
 
         augmentConfig = main_config.datamanager.augmenter
         self.imageSize = main_config.datamanager.particlesdataset.desired_image_size_px
@@ -43,6 +44,8 @@ class Augmenter(AugmenterBase):
                     min_n_augm_per_img is None) else min_n_augm_per_img
         self.max_n_augm_per_img = augmentConfig.max_n_augm_per_img if (
                     max_n_augm_per_img is None) else max_n_augm_per_img
+
+        self.prob_augment_each_image = prob_augment_each_image
 
         self.probSchedulers = {name: Scheduler(vals.get("probScheduler")).generate() for name, vals in
                                self.augmentationTypes.items()}
@@ -172,7 +175,10 @@ class Augmenter(AugmenterBase):
         return img, degEuler, shiftFraction, applied_transforms
 
     def __call__(self, img, eulersDeg, shiftFraction):
-        return self.applyAugmentation(img, eulersDeg, shiftFraction)
+        if self._get_rand() < self.prob_augment_each_image:
+            return self.applyAugmentation(img, eulersDeg, shiftFraction)
+        else:
+            return img, eulersDeg, shiftFraction, []
 
 
 #TODO: Move this to a better place

@@ -120,6 +120,13 @@ def _check_type_match(expected_type: Any, actual_value: Any) -> bool:
 
 
 def inject_defaults_from_config(default_config: Any, update_config_with_args: bool = False):
+    """
+
+    :param default_config: The default configuration where the default values will be read. Can be parameter-specific
+                            ignored by providing CONFIG_PARAM(config=otherConfig)
+    :param update_config_with_args: If true, the config for a parameter will be updated with the new value if it is not a default one.
+    :return:
+    """
     def decorator(func):
         sig = inspect.signature(func)
         hints = get_type_hints(func)
@@ -207,15 +214,18 @@ def inject_defaults_from_config(default_config: Any, update_config_with_args: bo
 
         # Update the signature
         new_params = []
+        argname_to_configname = {}
         for param in sig.parameters.values():
             if isinstance(param.default, CONFIG_PARAM):
                 config_to_use = param_configs[param.name]
+                argname_to_configname[param.name] = param.default
                 new_default = getattr(config_to_use, param.name)
                 new_params.append(param.replace(default=new_default))
             else:
                 new_params.append(param)
 
         wrapper.__signature__ = sig.replace(parameters=new_params)
+        wrapper._argname_to_configname = argname_to_configname #This is used to keep track of the parameters that had configs as defaults
         return wrapper
 
     return decorator

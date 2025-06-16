@@ -10,8 +10,8 @@ class I2SProjector_config:
     hp_order: int = 3
     coverage: float = 0.9
     sigma: float = 0.2
-    max_beta: float = np.radians(90)
-    taper_beta: float = np.radians(75)
+    max_beta: float = float(np.radians(90))
+    taper_beta: float = float(np.radians(75))
     rand_fraction_points_to_project: Optional[float] = 0.5
 
 @dataclass

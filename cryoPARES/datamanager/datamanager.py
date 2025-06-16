@@ -1,8 +1,6 @@
 import collections
-from dataclasses import asdict
 import os
 import os.path as osp
-from os import PathLike
 
 import torch
 from torch.utils.data import DataLoader, BatchSampler, Sampler, RandomSampler, ConcatDataset, DistributedSampler, \
@@ -13,8 +11,7 @@ import pytorch_lightning as pl
 from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.constants import BATCH_PARTICLES_NAME, BATCH_IDS_NAME, BATCH_MD_NAME, BATCH_POSE_NAME
-
-FnameType = Union[PathLike, str]
+from cryoPARES.utils.paths import FnameType
 
 
 def get_number_image_channels():

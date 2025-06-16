@@ -8,6 +8,7 @@ import pytorch_lightning as pl
 from pytorch_lightning.core.optimizer import LightningOptimizer
 from torch.optim import Optimizer
 from typing import Union, Any, Callable, Optional, Dict, Tuple, List
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import io
@@ -131,20 +132,28 @@ class PlModel(pl.LightningModule):
 
         finally:
             # Switch back to the original backend
-            matplotlib.use(current_backend, force=True)
+            matplotlib.use(current_backend, force=False)
 
     def _plot_rotmat(self, ax, rotmat, title):
         """Helper function to visualize a rotation matrix"""
-        im = ax.imshow(rotmat, cmap='coolwarm', vmin=-1, vmax=1)
-        ax.set_title(title)
-        ax.set_xticks([0, 1, 2])
-        ax.set_yticks([0, 1, 2])
-        ax.set_xticklabels(['x', 'y', 'z'])
-        ax.set_yticklabels(['x', 'y', 'z'])
-        for i in range(3):
-            for j in range(3):
-                ax.text(j, i, f"{rotmat[i, j]:.2f}", ha="center", va="center", color="black")
-        return im
+
+        current_backend = matplotlib.get_backend()
+        try:
+            # Switch to non-interactive backend if needed
+            if current_backend.lower() == 'tkagg' or 'headless' in str(current_backend).lower():
+                matplotlib.use('Agg')
+            im = ax.imshow(rotmat, cmap='coolwarm', vmin=-1, vmax=1)
+            ax.set_title(title)
+            ax.set_xticks([0, 1, 2])
+            ax.set_yticks([0, 1, 2])
+            ax.set_xticklabels(['x', 'y', 'z'])
+            ax.set_yticklabels(['x', 'y', 'z'])
+            for i in range(3):
+                for j in range(3):
+                    ax.text(j, i, f"{rotmat[i, j]:.2f}", ha="center", va="center", color="black")
+            return im
+        finally:
+            matplotlib.use(current_backend)
 
     def training_step(self, batch, batch_idx):
         loss, error_degs, pred_rotmats, maxprobs, gt_rotmats = self._step(batch, batch_idx)
@@ -166,9 +175,9 @@ class PlModel(pl.LightningModule):
 
         # Calculate and log average angular error in degrees
         self.log("val_loss", loss, prog_bar=True, on_epoch=True,
-                 batch_size=pred_rotmats.shape[0], sync_dist=False)
+                 batch_size=pred_rotmats.shape[0], sync_dist=True)
         self.log("val_geo_degs", error_degs.mean(), prog_bar=True, on_step=False, on_epoch=True,
-                 batch_size=pred_rotmats.shape[0], sync_dist=False)
+                 batch_size=pred_rotmats.shape[0], sync_dist=True)
 
         if batch_idx == 0:
             # Visualize the predicted rotmats and the ground truth rotmats with error

@@ -1,5 +1,25 @@
-import torch
+import math
+from functools import lru_cache
 
+import torch
+from scipy import constants as C
+
+@lru_cache(1)
+def _calculate_relativistic_electron_wavelength(voltage: float):
+    """
+
+    :param voltage: in Volts
+    :return: relativistic wavelength in Angstroms
+    """
+    h = C.Planck
+    c = C.speed_of_light
+    m0 = C.electron_mass
+    e = C.elementary_charge
+    eV = e * voltage
+
+    numerator = h * c
+    denominator = math.sqrt(eV * (2 * m0 * c ** 2 + eV))
+    return 1e10 * numerator / denominator
 
 def _compute_ctf(freqs, dfu, dfv, dfang, volt, cs, w, phase_shift=0, bfactor=None):
     '''
@@ -23,10 +43,9 @@ def _compute_ctf(freqs, dfu, dfv, dfang, volt, cs, w, phase_shift=0, bfactor=Non
     dfang = dfang * torch.pi / 180
     phase_shift = phase_shift * torch.pi / 180
 
-    # lam = sqrt(h^2/(2*m*e*Vr)); Vr = V + (e/(2*m*c^2))*V^2
-    lam = 12.2639 / (volt + 0.97845e-6 * volt ** 2) ** .5
-    x = freqs[..., 0]
-    y = freqs[..., 1]
+    lam = _calculate_relativistic_electron_wavelength(volt)
+    y = freqs[..., 0]
+    x = freqs[..., 1]
     ang = torch.atan2(y, x)
     s2 = x ** 2 + y ** 2
     df = .5 * (dfu + dfv + (dfu - dfv) * torch.cos(2 * (ang - dfang)))
@@ -55,8 +74,8 @@ def convert_fft_to_rfft(ctf_fft):
         ctf_rfft[..., :-1] = ctf_fft[..., centre:]  # [centre:N]
         ctf_rfft[..., -1] = ctf_fft[..., 0]  # Nyquist frequency
     else:  # Odd size
-        ctf_rfft = torch.empty(*ctf_fft.shape[:-1], (N + 1) // 2,
-                               dtype=ctf_fft.dtype, device=ctf_fft.device)
+        # ctf_rfft = torch.empty(*ctf_fft.shape[:-1], (N + 1) // 2,
+        #                        dtype=ctf_fft.dtype, device=ctf_fft.device)
         ctf_rfft = ctf_fft[..., centre:]  # [centre:N]
 
     return ctf_rfft

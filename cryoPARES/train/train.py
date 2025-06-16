@@ -81,6 +81,7 @@ class Trainer:
 
         self._save_command_info()
         self._save_env_vars()
+        self._save_config_vals()
         self._copy_code_files()
 
     def _save_command_info(self):
@@ -110,6 +111,18 @@ class Trainer:
         with open(fname, 'w') as f:
             json.dump(dict(os.environ), f)
 
+    def _save_config_vals(self):
+        from cryoPARES.utils.checkpointUtils import get_version_to_use
+        basename = get_version_to_use(
+            self.experiment_root,
+            basename='configs_',
+            path_pattern=r'(configs_)(\d+)(\.yml)$',
+            extension="yml"
+        )
+        fname = osp.join(self.experiment_root, basename + "_configs.yml")
+        export_config_to_yaml(main_config, fname)
+
+
     def _copy_code_files(self):
         from cryoPARES.utils.reproducibility import _copyCode
         from cryoPARES.utils.checkpointUtils import get_version_to_use
@@ -123,7 +136,7 @@ class Trainer:
 
         module_path = osp.abspath(sys.modules[__name__].__file__)
         root_path = osp.dirname(osp.dirname(osp.dirname(module_path)))
-        _copyCode(root_path, osp.join(copycodedir, "cryoSolver"))
+        _copyCode(root_path, osp.join(copycodedir, "cryoPARES"))
 
     def run(self):
         from cryoPARES.train.runTrainOnePartition import execute_trainOnePartition, check_if_training_partion_done
@@ -164,12 +177,12 @@ class Trainer:
         from cryoPARES.utils.checkpointUtils import get_version_to_use
         finetune_checkpoint_base = get_version_to_use(
             self.experiment_root,
-            basename='finetuneCheckpoin_',
-            path_pattern=r'(finetuneCheckpoin_)(\d+)(\.txt)$',
+            basename='finetuneCheckpoint_',
+            path_pattern=r'(finetuneCheckpoint_)(\d+)(\.txt)$',
             extension="txt"
         )
         with open(osp.join(self.experiment_root, finetune_checkpoint_base), "w") as f:
-            f.write(f"finetuneCheckpoin: {self.finetune_checkpoint_dir}")
+            f.write(f"finetuneCheckpoint: {self.finetune_checkpoint_dir}")
 
 
 if __name__ == "__main__":
@@ -178,9 +191,10 @@ if __name__ == "__main__":
     print(" ".join(sys.argv))
     print("---------------------------------------")
 
-    from argParseFromDoc import AutoArgumentParser
+    # from argParseFromDoc import AutoArgumentParser
+    from cryoPARES.configManager.configParser import ConfigArgumentParser, export_config_to_yaml
 
-    parser = AutoArgumentParser(prog="train cryoPARES")
+    parser = ConfigArgumentParser(prog="train cryoPARES", config_obj=main_config)
     parser.add_args_from_function(Trainer.__init__)
     args = parser.parse_args()
     Trainer(**vars(args)).run()

@@ -25,7 +25,7 @@ def _test_ctf_conversion(image_size, visualize):
 
     # Generate CTFs using both methods
     ctf_fft = fft_ctf.compute_ctf(image_size, **test_params)
-    ctf_rfft = rfft_ctf.compute_ctf(image_size, **test_params)
+    ctf_rfft = rfft_ctf.compute_ctf_rfft(image_size, **test_params)
 
     # Print shapes for verification
     print(f"FFT CTF shape: {ctf_fft.shape}")

@@ -11,7 +11,7 @@ class DataManager_config:
     num_augmented_copies_per_batch: int = 4
     train_validaton_split_seed: int = 113
     train_validation_split: Tuple[float, float] = (0.7, 0.3)
-    num_data_workers: int = 4
+    num_data_workers: int = 8
     augment_train: bool = True
     only_first_dataset_for_validation: bool = True
 

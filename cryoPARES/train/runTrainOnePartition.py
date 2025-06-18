@@ -240,6 +240,8 @@ class TrainerPartition:
         best_model_script = torch.jit.script(best_module.model)
         torch.jit.save(best_model_script, constants.BEST_MODEL_SCRIPT_BASENAME)
 
+        #TODO: Compute cone zscores
+
         os.chdir(cwd)
 
         print("Training done!")
@@ -278,6 +280,8 @@ def execute_trainOnePartition(**kwargs):
         python_executable=sys.executable,
         **kwargs
     )
+    if "config_args" in kwargs:
+        cmd += " --config " + " ".join(kwargs["config_args"])
     print(cmd)  # TODO: Use loggers
     subprocess.run(
         cmd.split(),
@@ -286,10 +290,15 @@ def execute_trainOnePartition(**kwargs):
 
 
 if __name__ == "__main__":
-    from argParseFromDoc import AutoArgumentParser
-    parser = AutoArgumentParser(prog="train partition cryoPARES")
+    # from argParseFromDoc import AutoArgumentParser
+    # parser = AutoArgumentParser(prog="train partition cryoPARES")
+
+    from cryoPARES.configManager.configParser import ConfigArgumentParser, export_config_to_yaml
+
+    parser = ConfigArgumentParser(prog="train partition cryoPARES", config_obj=main_config)
+
     parser.add_args_from_function(TrainerPartition.__init__)
-    args = parser.parse_args()
+    args, config_args = parser.parse_args()
     TrainerPartition(**vars(args)).run()
 
     """

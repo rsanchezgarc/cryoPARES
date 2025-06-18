@@ -138,10 +138,16 @@ class Trainer:
         root_path = osp.dirname(osp.dirname(osp.dirname(module_path)))
         _copyCode(root_path, osp.join(copycodedir, "cryoPARES"))
 
-    def run(self):
+    def run(self, config_args):
+        """
+
+        :param config_args: The command line arguments provided to modify the config
+        :return:
+        """
         from cryoPARES.train.runTrainOnePartition import execute_trainOnePartition, check_if_training_partion_done
         torch.set_float32_matmul_precision(constants.float32_matmul_precision)
         print(main_config)
+        print(id(main_config))
 
         if self.finetune_checkpoint_dir is not None:
             self._save_finetune_checkpoint_info()
@@ -156,19 +162,21 @@ class Trainer:
                     # TODO: Implement simulate_particles
                     simulatedParticles = simulate_particles(self.map_fname_for_simulated_pretraining, tmpdir)
                     raise NotImplementedError()
-                    execute_trainOnePartition()
+                    execute_trainOnePartition() #TODO: Fill in this call
 
                 execute_trainOnePartition(
                     symmetry=self.symmetry,
                     particles_star_fname=self.particles_star_fname,
                     train_save_dir=self.experiment_root,
                     particles_dir=self.particles_dir,
+                    n_epochs=self.n_epochs,
                     partition=partition,
                     continue_checkpoint_fname=self.continue_checkpoint_dir,
                     finetune_checkpoint_fname=self.finetune_checkpoint_dir,
                     compile_model=self.compile_model,
                     val_check_interval=self.val_check_interval,
-                    overfit_batches=self.overfit_batches
+                    overfit_batches=self.overfit_batches,
+                    config_args=config_args
                 )
 
         print("Training complete!")
@@ -196,5 +204,5 @@ if __name__ == "__main__":
 
     parser = ConfigArgumentParser(prog="train cryoPARES", config_obj=main_config)
     parser.add_args_from_function(Trainer.__init__)
-    args = parser.parse_args()
-    Trainer(**vars(args)).run()
+    args, config_args = parser.parse_args()
+    Trainer(**vars(args)).run(config_args)

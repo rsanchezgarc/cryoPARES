@@ -1,3 +1,5 @@
+import functools
+
 import e3nn
 import torch
 
@@ -6,15 +8,17 @@ import numpy as np
 from e3nn import o3
 from e3nn.o3._so3grid import flat_wigner
 from torch import nn
+from tqdm import tqdm
 
 from cryoPARES.cacheManager import get_cache
 from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.geometry.grids import s2_healpix_grid, so3_near_identity_grid_cartesianprod, so3_healpix_grid, \
     so3_near_identity_grid_ori
-from cryoPARES.geometry.metrics_angles import nearest_rotmat_idx
+from cryoPARES.geometry.metrics_angles import nearest_rotmat_idx, rotation_magnitude
+from cryoPARES.geometry.symmetry import getSymmetryGroup
 
-GET_DEBUG_SEED = lambda: None #torch.Generator().manual_seed(42) # None
+GET_DEBUG_SEED = lambda: torch.Generator().manual_seed(42) # None
 
 def s2_irreps(lmax):
     return o3.Irreps([(1, (l, 1)) for l in range(lmax + 1)])
@@ -231,44 +235,176 @@ class SO3OutputGrid(nn.Module):
     def __init__(self,
                  lmax: int = CONFIG_PARAM(config=main_config.models.image2sphere),
                  hp_order: int = CONFIG_PARAM(),
-                ):
+                 symmetry: str = "C1",
+
+                 ):
         '''
         :param lmax: maximum degree of harmonics
         :param hp_order: The hp_order for the grid of the kernel
-
+        :param symmetry: The symmetry of the volume
         '''
         super().__init__()
         # print(f"Building SO3OutputGrid lmax: {lmax} ; hp_order: {hp_order}")
         self.lmax = lmax
         self.hp_order = hp_order
-        output_eulerRad_yxy, output_wigners, output_rotmats = self.build_components(lmax, hp_order)
+
+        self.symmetry = symmetry.upper()
+        # output_eulerRad_yxy, output_wigners, output_rotmats = self.build_components(lmax, hp_order)
+        (output_eulerRad_yxy, output_wigners, output_rotmats,
+         symmetryGroupMatrix, sym_equiv_idxs,
+         selected_rotmat_idxs, completeIdxs_to_reducedIdxs) = self.build_components(symmetry, lmax, hp_order)
+
         self.register_buffer("output_eulerRad_yxy", output_eulerRad_yxy)
         self.register_buffer("output_wigners", output_wigners)
         self.register_buffer("output_rotmats", output_rotmats)
 
+        self.has_symmetry = self.symmetry != "C1"
+
+        self.register_buffer("symmetryGroupMatrix", symmetryGroupMatrix) #Shape #1xoutput_rotmats.shape[0]xsymmetryGroupMatrix.shape[0]
+        self.register_buffer("sym_equiv_idxs", sym_equiv_idxs)
+        self.register_buffer("selected_rotmat_idxs", selected_rotmat_idxs) #Those are the indices of the rotmats that cover the portion of the projection sphere that corresponds to the symmetry
+        self.register_buffer("completeIdxs_to_reducedIdxs", completeIdxs_to_reducedIdxs)
+
+        self.register_buffer("_cached_batch_size_ies", torch.tensor(-1, dtype=torch.int64))
+        self.register_buffer("_cached_ies", torch.empty(0, dtype=torch.int64))
+
+    # @staticmethod
+    # @cache.cache()
+    # def build_components(lmax: int, hp_order: int):
+    #     output_eulerRad_yxy, _ = so3_healpix_grid(hp_order=hp_order)
+    #     output_wigners = flat_wigner(lmax, *output_eulerRad_yxy).transpose(0, 1)
+    #     output_rotmats = o3.angles_to_matrix(*output_eulerRad_yxy)
+    #     return output_eulerRad_yxy, output_wigners, output_rotmats
 
     @staticmethod
     @cache.cache()
-    def build_components(lmax: int, hp_order: int):
+    def build_components(symmetry: str, lmax: int, hp_order: int):
         output_eulerRad_yxy, _ = so3_healpix_grid(hp_order=hp_order)
         output_wigners = flat_wigner(lmax, *output_eulerRad_yxy).transpose(0, 1)
         output_rotmats = o3.angles_to_matrix(*output_eulerRad_yxy)
-        return output_eulerRad_yxy, output_wigners, output_rotmats
 
-    #TODO: Implement a nearest_rotmat that takes into account symmetry
+        (symmetryGroupMatrix, sym_equiv_idxs, selected_rotmat_idxs,
+                        completeIdxs_to_reducedIdxs) = SO3OutputGrid.compute_symmetry_indices(output_rotmats, symmetry)
+
+        return (output_eulerRad_yxy, output_wigners, output_rotmats, symmetryGroupMatrix,
+                sym_equiv_idxs, selected_rotmat_idxs, completeIdxs_to_reducedIdxs)
+
+    @staticmethod
+    def compute_symmetry_indices(output_rotmats, symmetry) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Compute symmetry indices for the rotation matrices."""
+
+        if symmetry == "C1":
+            symmetryGroupMatrix = torch.eye(3).unsqueeze(0)
+            sym_equiv_idxs = torch.arange(output_rotmats.shape[0])
+            selected_rotmat_idxs = sym_equiv_idxs
+            completeIdxs_to_reducedIdxs = sym_equiv_idxs
+            return (symmetryGroupMatrix, sym_equiv_idxs.unsqueeze(0),
+             selected_rotmat_idxs, completeIdxs_to_reducedIdxs)
+
+        n_rotmats = output_rotmats.shape[0]
+        symmetryGroupMatrix = getSymmetryGroup(symmetry, as_matrix=True)
+
+        sym_equiv_idxs = torch.empty(n_rotmats, symmetryGroupMatrix.shape[0], dtype=torch.int64)
+        ori_device = output_rotmats.device
+
+        batch_size = 512 if not torch.cuda.is_available() else (
+            64 if torch.cuda.get_device_properties(0).total_memory / 1e9 > 23.0 else 32
+        ) #TODO: Teak this numbers for better performance
+
+        if torch.cuda.is_available():
+            symmetryGroupMatrix = symmetryGroupMatrix.cuda()
+            sym_equiv_idxs = sym_equiv_idxs.cuda()
+            output_rotmats = output_rotmats.cuda()
+
+        for start_idx in tqdm(range(0, n_rotmats, batch_size), desc="Computing symmetry indices"):
+            end_idx = min(start_idx + batch_size, n_rotmats)
+            batch_rotmats = output_rotmats[start_idx:end_idx]
+            expanded_rotmats = torch.einsum("gij,pjk->gpik", symmetryGroupMatrix, batch_rotmats)
+
+            for i in range(symmetryGroupMatrix.shape[0]):
+                _, batch_matched_idxs = nearest_rotmat_idx(expanded_rotmats[i, ...], output_rotmats)
+                sym_equiv_idxs[start_idx:end_idx, i] = batch_matched_idxs
+
+
+        magnitudes = rotation_magnitude(output_rotmats)
+
+        seen = set()
+        selected_idxs = []
+        completeIdxs_to_reducedIdxs = -9999999 * torch.ones(n_rotmats, dtype=torch.int64)
+        current_n_added = -1
+
+        for i in range(n_rotmats):
+            added = False
+            candidates = sorted(sym_equiv_idxs[i].tolist(),
+                                key=lambda ei: (magnitudes[ei].round(decimals=5), ei))
+
+            for ei in candidates:
+                if ei in seen:
+                    continue
+                elif not added:
+                    selected_idxs.append(ei)
+                    added = True
+                    current_n_added += 1
+                seen.add(ei)
+
+            if added:
+                for ei in candidates:
+                    completeIdxs_to_reducedIdxs[ei] = selected_idxs[-1]
+
+        selected_rotmat_idxs = torch.as_tensor(selected_idxs, device=output_rotmats.device)
+
+        return (symmetryGroupMatrix.cpu(), sym_equiv_idxs.unsqueeze(0).cpu(),
+                selected_rotmat_idxs.cpu(), completeIdxs_to_reducedIdxs.cpu())
+
     def nearest_rotmat(self, rotMat) -> Tuple[torch.Tensor, torch.Tensor]:
         """
 
         :param rotMat: Tensor (Bx3x3)
         :return:
-            - dot_trace: The similarity measurment fromthe rotMat and the highest score rotmat
+            - dot_trace: The similarity measurement from the rotMat and the highest score rotmat
             - idxs: The id of the closest rotMat
         """
-        dot_trace, idxs = self.nearest_rotmat_idxs(rotMat)
+        dot_trace, idxs = self.nearest_rotmat_idx(rotMat)
         return dot_trace, self.output_rotmats[idxs]
 
-    def nearest_rotmat_idxs(self, rotMat) -> Tuple[torch.Tensor, torch.Tensor]:
-        return nearest_rotmat_idx(rotMat, self.output_rotmats)
+    def nearest_rotmat_idx(self, rotMat, reduce_sym: bool=False) -> Tuple[torch.Tensor, torch.Tensor]:
+        dot_trace, idxs = nearest_rotmat_idx(rotMat, self.output_rotmats)
+        if reduce_sym:
+            idxs = self.completeIdxs_to_reducedIdxs[idxs]
+        return dot_trace, idxs
+
+    def symmetry_expand_rotmat_idx(self, idxs):
+        expanded = self.sym_equiv_idxs[0, idxs]
+        return expanded
+
+    def symmetry_reduce_rotmat_idx(self, idxs):
+        reduced = self.completeIdxs_to_reducedIdxs[idxs]
+        return reduced
+
+    def _get_ies_for_aggregate_symmetry(self, batch_size: int, device: torch.device) -> torch.Tensor:
+
+        if self._cached_batch_size_ies != batch_size or self._cached_ies.device != device:
+            # Update cache
+            n_rotmats = self.output_rotmats.shape[0]
+            ies = (torch.arange(batch_size, device=device)
+                   .unsqueeze(-1)
+                   .expand(-1, n_rotmats)
+                   .unsqueeze(-1))
+            self._cached_ies = ies
+            self._cached_batch_size_ies.copy_(torch.tensor(batch_size, device=device))
+        return self._cached_ies
+
+    def aggregate_symmetry(self, signal):
+        """
+
+        :param signal: (BxK), K is the number of pose pixels
+        :return:
+        """
+        if not self.has_symmetry:
+            return signal
+        jes = self.sym_equiv_idxs
+        ies = self._get_ies_for_aggregate_symmetry(signal.shape[0], signal.device)
+        return signal[ies, jes].sum(2)
 
     def forward(self, rotMat: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         return self.nearest_rotmat(rotMat)
@@ -369,9 +505,19 @@ def _test_Image2SphereProjector():
     out4 = torch.jit.trace(proj, example_inputs=[img])(img)
     assert torch.isclose(out3, out4, atol=1e-7).all()
 
-
+def _test_so3grid():
+    so3grid = SO3OutputGrid(symmetry="C2", lmax=6, hp_order=1)
+    mat = torch.eye(3).unsqueeze(0)
+    idx = so3grid.nearest_rotmat_idx(mat)
+    print(idx)
+    found = so3grid.nearest_rotmat(mat)
+    print(found)
+    avg_sig = so3grid.aggregate_symmetry(torch.rand(2, so3grid.output_rotmats.shape[0], 3))
+    jitted = torch.jit.script(so3grid) #SO far is not compatible with torch.jit.script because of the dynamic method selection
+    print(jitted)
 
 if __name__ == "__main__":
     # _test_Image2SphereProjector()
     # _test_S2Conv()
-    _test_SO3Conv()
+    # _test_SO3Conv()
+    _test_so3grid()

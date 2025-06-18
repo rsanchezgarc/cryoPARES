@@ -372,11 +372,12 @@ class ConfigArgumentParser(AutoArgumentParser):
 
         # Remove config arguments from parsed_args so they don't interfere with downstream logic
         # that might not expect them (e.g., if train_model tried to use parsed_args directly for 'config').
+        config_args = getattr(parsed_args, "config", [])
         for arg_name in self._config_arg_names:
             if hasattr(parsed_args, arg_name):
                 delattr(parsed_args, arg_name)
 
-        return parsed_args
+        return parsed_args, config_args
 
     def _check_for_conflicts(self, args: argparse.Namespace, sys_argv: List[str]) -> None:
         """
@@ -503,7 +504,7 @@ class ConfigArgumentParser(AutoArgumentParser):
                             value_to_set = Path(arg_value)
 
                         setattr(target, keys[-1], value_to_set)
-                        print(f"Set {config_path} = {value_to_set} (from direct arg --{arg_name.replace('_', '-')})")
+                        print(f"Set {config_path} = {value_to_set} (from direct arg --{arg_name.replace('_', '-')})") #TODO: Enable verbosity
                     except Exception as e:
                         print(f"Warning: Failed to set config attribute '{config_path}' from direct argument '--{arg_name.replace('_', '-')}' to '{arg_value}': {e}")
 
@@ -537,5 +538,5 @@ class ConfigArgumentParser(AutoArgumentParser):
                         print(f"Warning: Invalid config assignment '{config_item}'. Skipping. Error: {e}")
 
             if overrides:
-                print("\nApplying config overrides from --config argument:")
+                print("\nApplying config overrides from --config argument:") #TODO: add a verbose flag
                 ConfigOverrideSystem.apply_overrides(self.config_obj, overrides)

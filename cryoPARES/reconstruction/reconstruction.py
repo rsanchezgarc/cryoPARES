@@ -153,7 +153,8 @@ class Reconstructor():
             #     self.ctfs += ctf_sq_3d
 
 
-    def generate_volume(self, device="cpu", fname:Optional[FnameType]=None, overwrite_fname:bool=True):
+    def generate_volume(self, fname: Optional[FnameType] = None, overwrite_fname: bool = True,
+                        device: Optional[str] = "cpu"):
 
         dft = torch.zeros_like(self.f_num)
 
@@ -225,8 +226,32 @@ class ReconstructionParticlesDataset(Dataset):
 
         return img, ctf, rotMat, hwShiftAngs
 
+def reconstruct_starfile(particles_star_fname: str, symmetry: str, output_fname: str, particles_dir:Optional[str]=None,
+                         num_workers: int = 1, batch_size: int = 64, use_cuda: bool = False,
+                         correct_ctf: bool = True, eps: float = 1e-3, min_denominator_value: float = 1e-4):
+    """
 
-if __name__ == "__main__":
+    :param particles_star_fname: The particles to reconstruct
+    :param symmetry: The symmetry of the volume (e.g. C1, D2, ...)
+    :param output_fname: The name of the output filename
+    :param particles_dir: The particles directory (root of the starfile fnames)
+    :param num_workers:
+    :param batch_size: The number of particles to be simultaneusly backprojected
+    :param use_cuda:
+    :param correct_ctf:
+    :param eps: The regularization constant (ideally, this is 1/SNR)
+    :param min_denominator_value: Used to prevent division by 0
+    :return:
+    """
+
+    device = "cpu" if not use_cuda else "cuda"
+    reconstructor = Reconstructor(symmetry=symmetry, device=device, correct_ctf=correct_ctf, eps=eps,
+                                  min_denominator_value=min_denominator_value)
+    reconstructor.backproject_particles(particles_star_fname, particles_dir, batch_size, num_workers)
+    reconstructor.generate_volume(output_fname)
+
+
+def _test():
     reconstructor = Reconstructor(symmetry="C1", device="cpu", correct_ctf=True, eps=1e-3, min_denominator_value=1e-4)
 
     reconstructor.backproject_particles(
@@ -234,7 +259,7 @@ if __name__ == "__main__":
         particles_dir="/home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/",
         batch_size=96, num_workers=0,)
 
-    vol = reconstructor.generate_volume(device="cpu", fname="/tmp/reconstructed_volume.mrc")
+    vol = reconstructor.generate_volume(fname="/tmp/reconstructed_volume.mrc", device="cpu")
 
     relion_vol = torch.as_tensor(
         mrcfile.read("/home/sanchezg/cryo/myProjects/cryoPARES/cryoPARES/reconstruction/relion_reconstruct.mrc"),
@@ -255,3 +280,8 @@ if __name__ == "__main__":
 
     plt.show()
     print()
+
+if __name__ == "__main__":
+    # _test()
+    from argParseFromDoc import parse_function_and_call
+    parse_function_and_call(reconstruct_starfile)

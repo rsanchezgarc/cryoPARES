@@ -12,6 +12,8 @@ volume from a RELION‑style particle STAR file using the open‑source
   sub‑pixel recentering in Fourier space.
 
 """
+import os
+import sys
 from typing import List, Optional
 
 import mrcfile
@@ -29,26 +31,33 @@ from cryoPARES.geometry.convert_angles import euler_angles_to_matrix
 from cryoPARES.geometry.symmetry import getSymmetryGroup
 from cryoPARES.utils.paths import FnameType
 
-compiled_insert_central_slices_rfft_3d_multichannel = torch.compile(insert_central_slices_rfft_3d_multichannel)
+
+# os.environ["CUDA_VISIBLE_DEVICES"] = "-1" # I noticed that it tries to compile in the GPU as well even if all the tensors are in the CPU
+compiled_insert_central_slices_rfft_3d_multichannel = torch.compile(insert_central_slices_rfft_3d_multichannel,
+                                                                    mode=None)  # mode="max-autotune")
 # compiled_insert_central_slices_rfft_3d_multichannel = insert_central_slices_rfft_3d_multichannel
 
 class Reconstructor():
-    def __init__(self, symmetry: str, device:str,
-                 correct_ctf: bool = True, eps=1e-3, min_denominator_value=1e-4):
+    def __init__(self, symmetry: str, correct_ctf: bool = True, eps=1e-3,
+                 min_denominator_value=1e-4, device:str ="cpu"):
 
         self.symmetry = symmetry.upper()
         self.has_symmetry = self.symmetry != "C1"
         self.device = device
-
         self.correct_ctf = correct_ctf
         self.eps = eps # The Tikhonov constant. Should be 1/SNR, we might want to estimate it per frequency
         self.min_denominator_value = min_denominator_value
 
+        if self.has_symmetry:
+            self.sym_matrices = getSymmetryGroup(self.symmetry, as_matrix=True, device=self.device)
+        else:
+            self.sym_matrices = None
+
         self.box_size = None
         self.sampling_rate = None
         self.f_num = None
-        self.f_den = None
-
+        self.weights = None
+        self.ctfs = None
 
     def set_metadata_from_particles(self, particlesDataset):
 
@@ -68,26 +77,88 @@ class Reconstructor():
             nky, nkx = self.box_size, self.box_size // 2 + 1
 
             self.f_num = torch.zeros((self.box_size, self.box_size, nkx), dtype=torch.complex64, device=self.device)
-            self.weights = torch.zeros_like(self.f_num, dtype=torch.float32) #TODO: Separate weights from ctf**2
+            self.weights = torch.zeros_like(self.f_num, dtype=torch.float32)
             self.ctfs = torch.zeros_like(self.f_num, dtype=torch.float32)
+
+
+    def _expand_with_symmetry(self, imgs, ctf, rotMats, hwShiftAngs):
+        """
+        Expand images and metadata with symmetry operations.
+
+        Args:
+            imgs: [B, H, W] tensor of images in Fourier space
+            ctf: [B, H, W] tensor of CTF values (or 0 if no CTF correction)
+            rotMats: [B, 3, 3] tensor of rotation matrices
+            hwShiftAngs: [B, 2] tensor of shifts
+
+        Returns:
+            Expanded tensors with symmetry operations applied
+        """
+        if not self.has_symmetry:
+            return imgs, ctf, rotMats, hwShiftAngs
+
+        batch_size = imgs.shape[0]
+        num_sym_ops = self.sym_matrices.shape[0]
+
+        # Expand images - no change needed as Fourier transforms are rotationally invariant
+        # for the image data itself
+        expanded_imgs = imgs.unsqueeze(1).expand(-1, num_sym_ops, -1, -1).reshape(-1, *imgs.shape[1:])
+
+        # Expand CTF - same as images since CTF is applied in image space
+        if isinstance(ctf, torch.Tensor):
+            expanded_ctf = ctf.unsqueeze(1).expand(-1, num_sym_ops, -1, -1).reshape(-1, *ctf.shape[1:])
+        else:
+            # Handle the case where ctf is 0 (no CTF correction)
+            expanded_ctf = ctf
+
+        # Expand shifts - symmetry operations don't change shifts in image space
+        expanded_hwShiftAngs = hwShiftAngs.unsqueeze(1).expand(-1, num_sym_ops, -1).reshape(-1, hwShiftAngs.shape[-1])
+
+        # Apply symmetry operations to rotation matrices
+        # sym_matrices: [num_sym_ops, 3, 3]
+        # rotMats: [batch_size, 3, 3]
+        # Result: [batch_size * num_sym_ops, 3, 3]
+        expanded_rotMats = torch.matmul(
+            self.sym_matrices.unsqueeze(1),  # [num_sym_ops, 1, 3, 3]
+            rotMats.unsqueeze(0)  # [1, batch_size, 3, 3]
+        ).reshape(-1, 3, 3)  # [batch_size * num_sym_ops, 3, 3]
+
+        return expanded_imgs, expanded_ctf, expanded_rotMats, expanded_hwShiftAngs
+
+    def _get_reconstructionParticlesDataset(self, particles_star_fname, particles_dir, subset_idxs=None):
+        particlesDataset = ReconstructionParticlesDataset(particles_star_fname, particles_dir,
+                                                          correct_ctf=self.correct_ctf, subset_idxs=subset_idxs)
+
+        self.set_metadata_from_particles(particlesDataset)
+        return particlesDataset
+
+
 
 
     def backproject_particles(self, particles_star_fname: FnameType,
                               particles_dir: Optional[FnameType] = None,
-                              batch_size=1, num_workers=0, use_only_n_first_batches=None):
-        particlesDataset = ReconstructionParticlesDataset(particles_star_fname, particles_dir,
-                                                          correct_ctf=self.correct_ctf)
+                              batch_size=1, num_dataworkers=0, use_only_n_first_batches=None, subset_idxs=None):
 
-        self.set_metadata_from_particles(particlesDataset)
+        for _ in self._backproject_particles(particles_star_fname, particles_dir, batch_size,
+                                                   num_dataworkers, use_only_n_first_batches, subset_idxs):
+            pass
 
+    def _backproject_particles(self, particles_star_fname: FnameType,
+                              particles_dir: Optional[FnameType] = None,
+                              batch_size=1, num_dataworkers=0, use_only_n_first_batches=None, subset_idxs=None,
+                               verbose=True):
+
+
+        particlesDataset = self._get_reconstructionParticlesDataset(particles_star_fname,
+                                                               particles_dir, subset_idxs=subset_idxs)
         dl = DataLoader(particlesDataset, batch_size=batch_size, shuffle=False,
-                        num_workers=num_workers,
-                        pin_memory=num_workers > 0 and str(self.device).startswith("cuda"))
+                        num_workers=num_dataworkers,
+                        pin_memory=num_dataworkers > 0 and str(self.device).startswith("cuda"),
+                        multiprocessing_context="fork" if num_dataworkers > 0 else None)
 
-
-        symMat = getSymmetryGroup(self.symmetry, as_matrix=True, device=self.device)
         zyx_matrices = False
-        for bidx, (imgs, ctf, rotMats, hwShiftAngs) in enumerate(tqdm.tqdm(dl, desc="backprojecting", disable=False)):
+        for bidx, (imgs, ctf, rotMats, hwShiftAngs) in enumerate(tqdm.tqdm(dl, desc=f"backprojecting PID({os.getpid()})",
+                                                                           disable=not verbose)):
 
             imgs = imgs.to(self.device, non_blocking=True)
             rotMats = rotMats.to(self.device, non_blocking=True)
@@ -103,16 +174,15 @@ class Reconstructor():
             # axes[1].imshow(ctf[0])
             # plt.show()
 
-            if self.has_symmetry:
-                extended_rotMats = symMat @ rotMats
-                raise NotImplementedError()
-
             imgs = fourier_shift_dft_2d(dft=imgs,
                                        image_shape=self.particle_shape,
                                        shifts=hwShiftAngs / self.sampling_rate,  # Shifts need to be passed in pixels
                                        rfft=True,
                                        fftshifted=True,
                                        )
+
+            if self.has_symmetry:
+                imgs, ctf, rotMats, hwShiftAngs = self._expand_with_symmetry(imgs, ctf, rotMats, hwShiftAngs)
 
             if self.correct_ctf:
                 ctf = ctf.to(imgs.device)
@@ -140,7 +210,7 @@ class Reconstructor():
 
                 self.weights += weights
             else:
-                dft_3d, weights = insert_central_slices_rfft_3d(
+                dft_3d, weights = insert_central_slices_rfft_3d( #TODO: Compile this as well
                     image_rfft=imgs,
                     volume_shape=(self.box_size,) * 3,
                     rotation_matrices=rotMats,
@@ -163,6 +233,7 @@ class Reconstructor():
 
             if use_only_n_first_batches and bidx > use_only_n_first_batches: #TODO: Remove this debug code
                 break
+            yield imgs.shape[0]
 
     def generate_volume(self, fname: Optional[FnameType] = None, overwrite_fname: bool = True,
                         device: Optional[str] = "cpu"):
@@ -198,8 +269,10 @@ class Reconstructor():
 class ReconstructionParticlesDataset(Dataset):
     def __init__(self, particles_star_fname: FnameType,
                  particles_dir: Optional[FnameType] = None,
-                 correct_ctf=True):
+                 correct_ctf=True, subset_idxs=None):
         self.particles = ParticlesStarSet(starFname=particles_star_fname, particlesDir=particles_dir)
+        if subset_idxs is not None:
+            self.particles = self.particles.createSubset(idxs=subset_idxs)
         self.sampling_rate = self.particles.sampling_rate
         self.particle_shape = self.particles.particle_shape
         self.correct_ctf = correct_ctf
@@ -258,21 +331,24 @@ def reconstruct_starfile(particles_star_fname: str, symmetry: str, output_fname:
     """
 
     device = "cpu" if not use_cuda else "cuda"
-    reconstructor = Reconstructor(symmetry=symmetry, device=device, correct_ctf=correct_ctf, eps=eps,
-                                  min_denominator_value=min_denominator_value)
+    reconstructor = Reconstructor(symmetry=symmetry, correct_ctf=correct_ctf, eps=eps,
+                                  min_denominator_value=min_denominator_value, device=device)
     reconstructor.backproject_particles(particles_star_fname, particles_dir, batch_size, num_workers,
-                                  use_only_n_first_batches=use_only_n_first_batches)
+                                        use_only_n_first_batches=use_only_n_first_batches)
     reconstructor.generate_volume(output_fname)
 
 
-def _test():
-    reconstructor = Reconstructor(symmetry="C1", device="cpu", correct_ctf=True, eps=1e-3, min_denominator_value=1e-4)
+def __backproject_test():
+    reconstructor = Reconstructor(symmetry="C1", correct_ctf=True, eps=1e-3, min_denominator_value=1e-4, device="cpu")
 
     reconstructor.backproject_particles(
         particles_star_fname="/home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/projections/1000proj_with_ctf.star",
-        particles_dir="/home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/",
-        batch_size=96, num_workers=0, )
+        particles_dir="/home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/", batch_size=96,
+        num_dataworkers=0)
+    return reconstructor
 
+def _test():
+    reconstructor = __backproject_test()
     vol = reconstructor.generate_volume(fname="/tmp/reconstructed_volume.mrc", device="cpu")
 
     relion_vol = torch.as_tensor(
@@ -325,7 +401,21 @@ def _test_real_insertion():
     print(dft_ctf0[1].allclose(dft_ctf1[0].imag, atol=1e-4))
     print("DONE")
 
+def _profile___backproject_test():
+    import cProfile
+    import pstats
+
+    __backproject_test() #Warmup
+    # Save profile data to a file
+    cProfile.run('__backproject_test()', '/tmp/profile_output.prof')
+
+    # Load and analyze the saved profile
+    stats = pstats.Stats('/tmp/profile_output.prof')
+    stats.sort_stats('cumulative')  # Sort by cumulative time
+    stats.print_stats()
+
 if __name__ == "__main__":
+    # _profile___backproject_test(); sys.exit()
     # _test()
     # _test_real_insertion()
     from argParseFromDoc import parse_function_and_call

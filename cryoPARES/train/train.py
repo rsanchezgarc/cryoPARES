@@ -163,7 +163,7 @@ class Trainer:
                     simulatedParticles = simulate_particles(self.map_fname_for_simulated_pretraining, tmpdir)
                     raise NotImplementedError()
                     execute_trainOnePartition() #TODO: Fill in this call
-
+                print(f"\nExecuting training for partition {partition}")
                 execute_trainOnePartition(
                     symmetry=self.symmetry,
                     particles_star_fname=self.particles_star_fname,

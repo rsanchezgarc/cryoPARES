@@ -163,8 +163,8 @@ class Image2Sphere(nn.Module):
         """
         rotMat_logits = self._from_wignerD_to_logits(wD) #This has symmetry summed values (symmetry contraction)
         with torch.no_grad():
-            reduced_sym_selected_idxs = self.so3_grid.selected_rotmat_idxs
-            if self.enforce_symmetry and reduced_sym_selected_idxs is not None:
+            if self.enforce_symmetry and self.so3_grid.has_symmetry:
+                reduced_sym_selected_idxs = self.so3_grid.selected_rotmat_idxs
                 _rotMat_logits = rotMat_logits[:, reduced_sym_selected_idxs]
                 _, pred_rotmat_id = torch.topk(_rotMat_logits, k=k, dim=-1, largest=True)
                 pred_rotmat_id = reduced_sym_selected_idxs[pred_rotmat_id]
@@ -258,7 +258,7 @@ class Image2Sphere(nn.Module):
         if hp_order is None:
             so3_grid = self.so3_grid
         else:
-            so3_grid = SO3OutputGrid(self.lmax, hp_order)
+            so3_grid = SO3OutputGrid(self.lmax, hp_order, symmetry=self.symmetry)
 
         x = self.predict_wignerDs(img)
         logits = torch.matmul(x, so3_grid.output_wigners).squeeze(1)

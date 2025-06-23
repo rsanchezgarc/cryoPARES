@@ -20,6 +20,7 @@ from cryoPARES import constants
 from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.constants import DATA_SPLITS_BASENAME, TRAINING_DONE_TEMPLATE
 from cryoPARES.configs.mainConfig import main_config
+from cryoPARES.reconstruction.reconstruction import reconstruct_starfile
 
 
 class TrainerPartition:
@@ -215,6 +216,21 @@ class TrainerPartition:
         if trainer.is_global_zero and trainer.state.status == TrainerStatus.FINISHED:
             self._save_training_completion(checkpointer)
 
+            reconstructions_dir = get_reconstructions_dir(self.train_save_dir, self.partition)
+            os.makedirs(reconstructions_dir, exist_ok=True)
+            if os.path.isdir(trainer.datamodule.save_train_val_partition_dir):
+                saved_particles_dir = os.path.join(trainer.datamodule.save_train_val_partition_dir, "train")
+                for fnameIdx, fname in enumerate(os.listdir(saved_particles_dir)):
+                    fname = os.path.join(saved_particles_dir, fname)
+                    print(f"Reconstructing {fname}")
+                    particles_dir = self.particles_dir[fnameIdx] if self.particles_dir is not None \
+                                                                else os.path.dirname(self.particles_star_fname[fnameIdx])
+
+                    output_fname = os.path.join(reconstructions_dir, "%d.mrc" % fnameIdx)
+                    reconstruct_starfile(fname, self.symmetry, output_fname, particles_dir,  # TODO: Add to CONFIG
+                                         num_workers=1, batch_size=64, use_cuda=False,
+                                         correct_ctf=True, eps=1e-3, min_denominator_value=1e-4)
+
     def _save_training_completion(self, checkpointer):
         dirname = osp.dirname(checkpointer.best_model_path)
         if dirname is None:
@@ -222,12 +238,6 @@ class TrainerPartition:
 
         done_name = get_done_fname(self.train_save_dir, self.partition)
         best_model_basename = osp.basename(checkpointer.best_model_path)
-
-        with open(done_name, "w") as f:
-            f.write(
-                f"Done (PID {os.getgid()}). Best score is {checkpointer.best_model_score}\n"
-                f"Best checkpoint is: {best_model_basename}\n"
-            )
 
         cwd = os.getcwd()
         os.chdir(dirname)
@@ -240,10 +250,13 @@ class TrainerPartition:
         best_model_script = torch.jit.script(best_module.model)
         torch.jit.save(best_model_script, constants.BEST_MODEL_SCRIPT_BASENAME)
 
-        #TODO: Compute cone zscores
-
         os.chdir(cwd)
 
+        with open(done_name, "w") as f:
+            f.write(
+                f"Done (PID {os.getgid()}). Best score is {checkpointer.best_model_score}\n"
+                f"Best checkpoint is: {best_model_basename}\n"
+            )
         print("Training done!")
 
 
@@ -256,6 +269,9 @@ def get_done_fname(dirname: str, partition: str) -> str:
     """
     return osp.join(dirname, partition, "checkpoints", TRAINING_DONE_TEMPLATE)
 
+
+def get_reconstructions_dir(dirname: str, partition: str):
+    return osp.join(dirname, partition, "reconstructions")
 
 def check_if_training_partion_done(dirname: str, partition: str):
     """Check if training for given partition is complete by looking for DONE_TRAINING.txt
@@ -280,8 +296,9 @@ def execute_trainOnePartition(**kwargs):
         python_executable=sys.executable,
         **kwargs
     )
-    if "config_args" in kwargs:
-        cmd += " --config " + " ".join(kwargs["config_args"])
+    config_args = kwargs.get("config_args", None)
+    if config_args is not None:
+        cmd += " --config " + " ".join(config_args)
     print(cmd)  # TODO: Use loggers
     subprocess.run(
         cmd.split(),

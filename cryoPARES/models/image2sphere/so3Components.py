@@ -209,8 +209,8 @@ class SO3Conv(nn.Module):
     @staticmethod
     @cache.cache()
     def build_components(f_in: int, f_out: int, lmax: int, max_rads: float, n_angles: int):
-        # kernel_grid = so3_near_identity_grid_cartesianprod(max_rads, n_angles)
-        kernel_grid = so3_near_identity_grid_ori(n_alpha=8, n_beta=3) #TODO: This was the original implementation
+        kernel_grid = so3_near_identity_grid_cartesianprod(max_rads, n_angles)
+        # kernel_grid = so3_near_identity_grid_ori(n_alpha=8, n_beta=3) #TODO: This was the original implementation
         f_wigner = flat_wigner(lmax, *kernel_grid)
         so3_ir = so3_irreps(lmax)
         w = nn.Parameter(torch.randn(f_in, f_out, kernel_grid[0].shape[0], generator=GET_DEBUG_SEED()))
@@ -249,16 +249,17 @@ class SO3OutputGrid(nn.Module):
         self.hp_order = hp_order
 
         self.symmetry = symmetry.upper()
+        self.has_symmetry = self.symmetry != "C1"
+
         # output_eulerRad_yxy, output_wigners, output_rotmats = self.build_components(lmax, hp_order)
         (output_eulerRad_yxy, output_wigners, output_rotmats,
          symmetryGroupMatrix, sym_equiv_idxs,
-         selected_rotmat_idxs, completeIdxs_to_reducedIdxs) = self.build_components(symmetry, lmax, hp_order)
+         selected_rotmat_idxs, completeIdxs_to_reducedIdxs) = self.build_components(self.symmetry, lmax, hp_order)
 
         self.register_buffer("output_eulerRad_yxy", output_eulerRad_yxy)
         self.register_buffer("output_wigners", output_wigners)
         self.register_buffer("output_rotmats", output_rotmats)
 
-        self.has_symmetry = self.symmetry != "C1"
 
         self.register_buffer("symmetryGroupMatrix", symmetryGroupMatrix) #Shape #1xoutput_rotmats.shape[0]xsymmetryGroupMatrix.shape[0]
         self.register_buffer("sym_equiv_idxs", sym_equiv_idxs)
@@ -299,7 +300,7 @@ class SO3OutputGrid(nn.Module):
             selected_rotmat_idxs = sym_equiv_idxs
             completeIdxs_to_reducedIdxs = sym_equiv_idxs
             return (symmetryGroupMatrix, sym_equiv_idxs.unsqueeze(0),
-             selected_rotmat_idxs, completeIdxs_to_reducedIdxs)
+                    selected_rotmat_idxs, completeIdxs_to_reducedIdxs)
 
         n_rotmats = output_rotmats.shape[0]
         symmetryGroupMatrix = getSymmetryGroup(symmetry, as_matrix=True)
@@ -316,7 +317,7 @@ class SO3OutputGrid(nn.Module):
             sym_equiv_idxs = sym_equiv_idxs.cuda()
             output_rotmats = output_rotmats.cuda()
 
-        for start_idx in tqdm(range(0, n_rotmats, batch_size), desc="Computing symmetry indices"):
+        for start_idx in tqdm(range(0, n_rotmats, batch_size), desc=f"Computing symmetry indices {symmetry}"):
             end_idx = min(start_idx + batch_size, n_rotmats)
             batch_rotmats = output_rotmats[start_idx:end_idx]
             expanded_rotmats = torch.einsum("gij,pjk->gpik", symmetryGroupMatrix, batch_rotmats)

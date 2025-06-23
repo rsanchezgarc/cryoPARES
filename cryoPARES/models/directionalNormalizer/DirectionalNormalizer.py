@@ -1,4 +1,5 @@
 import os
+
 import torch
 import torch.nn as nn
 import numpy as np
@@ -6,6 +7,9 @@ import healpy as hp
 from typing import Dict, Optional, Tuple, List, Union
 from collections import defaultdict
 import pickle
+
+from cryoPARES.geometry.convert_angles import matrix_to_euler_angles, euler_angles_to_matrix
+from cryoPARES.models.image2sphere.so3Components import SO3OutputGrid
 
 
 class DirectionalPercentileNormalizer(nn.Module):
@@ -31,8 +35,7 @@ class DirectionalPercentileNormalizer(nn.Module):
                  n_psi: Optional[int] = None,
                  symmetry: str = "c1",
                  score_name: str = "score",
-                 normalized_score_name: str = "normalized_score",
-                 device: str = "cuda" if torch.cuda.is_available() else "cpu"):
+                 normalized_score_name: str = "normalized_score"):
         """
         Initialize the DirectionalPercentileNormalizer.
 
@@ -41,18 +44,16 @@ class DirectionalPercentileNormalizer(nn.Module):
                       Higher values provide finer orientation binning
             n_psi: Number of in-plane rotations per cone
                   If None, calculated as 6 * (2**hp_order) based on standard grid
-            symmetry: Symmetry group (e.g., "c1", "d2", etc.) for handling symmetric structures
+            symmetry: Symmetry group (e.g., "C1", "D2", etc.) for handling symmetric structures
             score_name: Name of the score field in the input dictionary
             normalized_score_name: Name of the normalized score field in the output dictionary
-            device: Device to use for computation (cuda or cpu)
         """
         super().__init__()
 
         self.hp_order = hp_order
-        self.symmetry = symmetry
+        self.symmetry = symmetry.upper()
         self.score_name = score_name
         self.normalized_score_name = normalized_score_name
-        self.device = device
 
         # Calculate number of cones based on HEALPix order
         # This follows the HEALPix formula: npix = 12 * nside^2
@@ -82,6 +83,9 @@ class DirectionalPercentileNormalizer(nn.Module):
         # Track whether parameters have been estimated
         self.is_fitted = False
 
+        self.so3_grid = SO3OutputGrid(lmax=2, hp_order=hp_order, symmetry=self.symmetry) #lmax is not going to be used, hence the low value selected
+
+
     def so3_to_cone_ids(self, so3_indices: torch.Tensor) -> torch.Tensor:
         """
         Convert SO(3) indices to cone indices using integer division.
@@ -99,13 +103,20 @@ class DirectionalPercentileNormalizer(nn.Module):
         Returns:
             Tensor of cone indices
         """
+        # #TODO: This is broken if  I change from ZYZ to XYX
+        #Current situation is ZYZ, so this should work
         return so3_indices // self.n_psi
 
+    def rotmats_to_cone_id(self, rotmats):
+        _, so3_indices = self.so3_grid.nearest_rotmat_idx(rotmats, reduce_sym=True)
+        cone_indices = self.so3_to_cone_ids(so3_indices)
+        return cone_indices
+
     def fit(self,
-            so3_indices: torch.Tensor,
+            pred_rotmats: torch.Tensor,
             scores: torch.Tensor,
-            gt_so3_indices: Optional[torch.Tensor] = None,
-            good_particles_percentile: float = 0.9,
+            gt_rotmats: Optional[torch.Tensor] = None,
+            good_particles_percentile: float = 0.5,
             min_particles_per_cone: int = 5) -> None:
         """
         Estimate normalization parameters for each cone from a reference dataset.
@@ -118,29 +129,25 @@ class DirectionalPercentileNormalizer(nn.Module):
         they are more likely to be correct.
 
         Args:
-            so3_indices: Predicted SO(3) indices for particles
+            pred_rotmats: Predicted SO(3) rotmats for particles
             scores: Prediction scores for particles
-            gt_so3_indices: Ground truth SO(3) indices (if available for training)
+            gt_rotmats: Ground truth SO(3) rotmats (if available for training)
             good_particles_percentile: Percentile of particles to use when no ground truth
                                       Higher values mean only considering top-scored particles
             min_particles_per_cone: Minimum number of particles required for reliable statistics
                                    Cones with fewer particles will use global statistics
         """
         # Convert to cone indices
-        cone_indices = self.so3_to_cone_ids(so3_indices)
+        cone_indices = self.rotmats_to_cone_id(pred_rotmats)
 
         # If ground truth indices are provided, convert to cone indices too
-        if gt_so3_indices is not None:
-            gt_cone_indices = self.so3_to_cone_ids(gt_so3_indices)
+        if gt_rotmats is not None:
+            gt_cone_indices = self.rotmats_to_cone_id(gt_rotmats).cpu().numpy()
         else:
             gt_cone_indices = None
 
-        # Move to CPU for statistics calculation
         cone_indices_cpu = cone_indices.cpu().numpy()
         scores_cpu = scores.cpu().numpy()
-
-        if gt_cone_indices is not None:
-            gt_cone_indices_cpu = gt_cone_indices.cpu().numpy()
 
         # Collect statistics for each cone
         cone_stats = defaultdict(lambda: {"good_scores": [], "bad_scores": [], "all_scores": []})
@@ -154,7 +161,7 @@ class DirectionalPercentileNormalizer(nn.Module):
 
             # If ground truth is available, separate good from bad predictions
             if gt_cone_indices is not None:
-                gt_cone_idx = gt_cone_indices_cpu[i]
+                gt_cone_idx = gt_cone_indices[i]
                 if cone_idx == gt_cone_idx:
                     cone_stats[cone_idx]["good_scores"].append(score)
                 else:
@@ -192,9 +199,9 @@ class DirectionalPercentileNormalizer(nn.Module):
                 mad = np.median(np.abs(scores_to_use - median))
 
                 # Store parameters
-                self.medians[cone_idx] = median
+                self.medians[cone_idx] = torch.FloatTensor([median])
                 # Add small epsilon to avoid division by zero
-                self.mads[cone_idx] = max(mad, 1e-6)
+                self.mads[cone_idx] = torch.FloatTensor([max(mad, 1e-6)])
 
                 # Collect for global statistics calculation
                 all_medians.append(median)
@@ -236,18 +243,17 @@ class DirectionalPercentileNormalizer(nn.Module):
         # Make a deep copy of the input dictionary
         output = {k: v.clone() if isinstance(v, torch.Tensor) else v for k, v in data.items()}
 
-        # Get SO(3) indices and scores
-        so3_indices = output.get('so3_indices')
+        rotmats = output.get('pred_rotmat')
         scores = output.get(self.score_name)
 
-        if so3_indices is None or scores is None:
+        if rotmats is None or scores is None:
             raise ValueError(f"Missing required fields: so3_indices or {self.score_name}")
 
         if not self.is_fitted:
             raise RuntimeError("Model is not fitted. Call fit() before forward()")
 
         # Convert to cone indices
-        cone_indices = self.so3_to_cone_ids(so3_indices)
+        cone_indices = self.rotmats_to_cone_id(rotmats)
 
         # Get statistics for each cone
         medians = self.medians[cone_indices]
@@ -308,7 +314,6 @@ class DirectionalPercentileNormalizer(nn.Module):
             symmetry=state_dict['symmetry'],
             score_name=state_dict['score_name'],
             normalized_score_name=state_dict['normalized_score_name'],
-            device=device
         )
 
         # Load parameters
@@ -412,38 +417,56 @@ class SO3PredictorWithNormalization(nn.Module): #TODO: Check if this works
         self.normalizer = loaded_normalizer
 
 
-# Example usage
-if __name__ == "__main__":
+def _test0():
     # Create some dummy data
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     hp_order = 2
     n_cones = hp.nside2npix(2 ** hp_order)
     n_psi = 24  # Based on so3_healpix_grid_equiangular for hp_order=2
     n_so3_pixels = n_cones * n_psi
 
+    from scipy.spatial.transform import Rotation
+
     # Pretend we have predictions for 1000 particles
     n_particles = 1000
-    so3_indices = torch.randint(0, n_so3_pixels, (n_particles,))
+    # so3_indices = torch.randint(0, n_so3_pixels, (n_particles,))
+    so3_rotmats = torch.FloatTensor(Rotation.random(n_particles).as_matrix()).to(device)
     scores = torch.randn(n_particles)
-    gt_so3_indices = torch.randint(0, n_so3_pixels, (n_particles,))
+    # gt_so3_indices = torch.randint(0, n_so3_pixels, (n_particles,))
+    so3_gtrotmats = so3_rotmats.clone()
 
     # Create normalizer and fit
     normalizer = DirectionalPercentileNormalizer(hp_order=hp_order, n_psi=n_psi, symmetry="d2")
-    normalizer.fit(so3_indices, scores, gt_so3_indices)
+    normalizer = normalizer.to(device)
+    normalizer.fit(so3_rotmats, scores, so3_gtrotmats)
 
     # Apply normalization
     data = {
-        'so3_indices': so3_indices,
-        'score': scores
+        'pred_rotmat': so3_rotmats.to(device),
+        'score': scores.to(device)
     }
 
     normalized_data = normalizer.forward(data)
     print(f"Normalized scores shape: {normalized_data['normalized_score'].shape}")
 
-    # Save and load
-    normalizer.save("normalizer_params.pkl")
-    loaded_normalizer = DirectionalPercentileNormalizer.load("normalizer_params.pkl")
+    # # Save and load
+    # normalizer.save("/tmp/normalizer_params.pkl")
+    # loaded_normalizer = DirectionalPercentileNormalizer.load("/tmp/normalizer_params.pkl")
 
+    torch.save(normalizer, "/tmp/normalizer_params.torch")
+    loaded_normalizer = torch.load("/tmp/normalizer_params.torch", weights_only=False)
+    loaded_normalizer = loaded_normalizer.to(device)
     # Test loaded normalizer
     normalized_data2 = loaded_normalizer.forward(data)
     print("Original and loaded normalizers produce identical results:",
           torch.allclose(normalized_data['normalized_score'], normalized_data2['normalized_score']))
+
+def _test1():
+    eulerDegs = 180 * (torch.rand(5, 3, generator=torch.Generator().manual_seed(42)) - 0.5)
+    normalizer = DirectionalPercentileNormalizer(hp_order=2, symmetry="C1")
+    rotmats = torch.deg2rad(euler_angles_to_matrix(eulerDegs, "ZYZ"))
+    normalizer.rotmats_to_cone_id(rotmats)
+    breakpoint()
+
+if __name__ == "__main__":
+    _test1()

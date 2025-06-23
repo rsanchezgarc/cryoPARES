@@ -1,10 +1,15 @@
+import os.path
 import warnings
 
+from starstack.constants import RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES
+
+from cryoPARES import constants
 from cryoPARES.constants import RELION_EULER_CONVENTION
 from torch import Tensor, nn, ScriptModule
 from torch.utils.data import DataLoader
 
 from cryoPARES.geometry.convert_angles import matrix_to_euler_angles
+from cryoPARES.models.directionalNormalizer.DirectionalNormalizer import DirectionalPercentileNormalizer
 
 warnings.filterwarnings('ignore', category=UserWarning, module='torch.optim.lr_scheduler')
 import torch
@@ -195,7 +200,7 @@ class PlModel(pl.LightningModule):
         wD, rotMat_logits, pred_rotmat_id, pred_rotmats, maxprobs = self(imgs, batch_idx)
         all_angles_probs = rotMat_logits.softmax(-1)
 
-        pred_shifts = pred_rotmats.new_full((pred_rotmats.shape[0], self.top_k, 2), torch.nan)
+        pred_shifts = pred_rotmats.new_full((pred_rotmats.shape[0], self.top_k, 2), torch.nan) #TODO: Predict this as well
         shifts_probs = maxprobs * torch.nan
 
         if poses is not None:
@@ -270,10 +275,9 @@ class PlModel(pl.LightningModule):
         return conf
 
     def on_fit_end(self) -> None:
-        #TODO: You need to get the predictions of all the testing set and store the
-        # ground truth and predicted rotation matrices, together with the prediction confidence.
-        #Then, you need to compute the stats according to the other code I am pasting. The stats try to estimate
-        #Robust z-scores for each of the projection directions of the cryo-em particles.
+
+        device = self.trainer.strategy.root_device
+        self.model.to(device)
 
         if self.trainer is None or self.trainer.val_dataloaders is None:
             print("No val_data dataloaders found. Skipping prediction and stats computation.")
@@ -282,93 +286,54 @@ class PlModel(pl.LightningModule):
         if isinstance(self.trainer.val_dataloaders, DataLoader):
             val_dataloaders = [self.trainer.val_dataloaders]
 
-        eulerDegs = []
+        predRotMats = []
+        gtRotmats = []
+        scores = []
         self.eval()
         with (torch.inference_mode()):
             for dataloader_idx, dataloader in enumerate(val_dataloaders):
                 for batch_idx, batch in enumerate(dataloader):
+                    batch = self.transfer_batch_to_device(batch, device, dataloader_idx)
                     predictions = self.predict_step(batch, batch_idx, dataloader_idx)
                     idd, (pred_rotmats, maxprobs, all_angles_probs), \
-                    (pred_shifts, shifts_probs), errors, metadata = predictions
-                    eulerDegs.append(torch.rad2deg(matrix_to_euler_angles(pred_rotmats, convention=RELION_EULER_CONVENTION)))
+                         (pred_shifts, shifts_probs), errors, metadata = predictions
 
-        # Aggregate results from all predictions
-        all_ids = []
-        all_pred_eulers = []
-        all_maxprobs = []
-        all_gt_eulers = []
-        all_errors_deg = []
-        all_metadata = []
+                    # predEulers = torch.rad2deg(matrix_to_euler_angles(pred_rotmats, convention=RELION_EULER_CONVENTION).cpu())
+                    predRotMats.append(pred_rotmats[:,0,...].cpu()) # I am only using topK=1
 
-        for pred_batch in all_preds:
-            all_ids.extend(pred_batch['idd'])
-            all_pred_eulers.extend(pred_batch['pred_rotmats_euler'])
-            all_maxprobs.extend(pred_batch['maxprobs'])
-            if pred_batch['gt_rotmats_euler'] is not None:
-                all_gt_eulers.extend(pred_batch['gt_rotmats_euler'])
-            if pred_batch['errors_deg'] is not None:
-                all_errors_deg.extend(pred_batch['errors_deg'].tolist()) # Convert tensor to list for extend
-            all_metadata.extend(pred_batch['metadata'])
+                    topKscore = all_angles_probs.topk(10, dim=-1, largest=True).values.cpu()
+                    scores.append(topKscore)
+
+                    gt_rotmats = batch[self.BATCH_POSE_NAME][0]
+                    gtRotmats.append(gt_rotmats.cpu())
+
+                    # for ai, angname in enumerate(RELION_ANGLES_NAMES):
+                    #     metadata[angname] = predEulers[:,0,ai].cpu().numpy()
+                    # for si, siname in enumerate(RELION_SHIFTS_NAMES):
+                    #     metadata[siname] = pred_shifts[:,0,si].cpu().numpy()
 
 
-        # Create a DataFrame for STAR file
-        pred_df = pd.DataFrame({
-            '_rlnParticleName': [f'{_id:06}' for _id in all_ids], # Example particle name
-            '_rlnAngleRot': [euler[0] for euler in all_pred_eulers],
-            '_rlnAngleTilt': [euler[1] for euler in all_pred_eulers],
-            '_rlnAnglePsi': [euler[2] for euler in all_pred_eulers],
-            NNET_PRED_SCORE_NAME: all_maxprobs, # Use the defined score name
-            '_rlnAngleRot_ori': [euler[0] for euler in all_gt_eulers] if all_gt_eulers else np.nan,
-            '_rlnAngleTilt_ori': [euler[1] for euler in all_gt_eulers] if all_gt_eulers else np.nan,
-            '_rlnAnglePsi_ori': [euler[2] for euler in all_gt_eulers] if all_gt_eulers else np.nan,
-            'error_degs': all_errors_deg if all_errors_deg else np.nan
-        })
+            predRotMats = torch.concat(predRotMats)
+            gtRotmats = torch.concat(gtRotmats)
+            scores = torch.concat(scores)
 
-        # Add other metadata fields if present and relevant, assuming they are dicts
-        if all_metadata and isinstance(all_metadata[0], dict):
-            # Flatten metadata dicts into columns
-            for key in all_metadata[0].keys():
-                # Check if the key exists in metadata and if it's a tensor, convert to numpy
-                if isinstance(all_metadata[0][key], torch.Tensor):
-                    pred_df[key] = [md[key].item() if isinstance(md[key], torch.Tensor) and md[key].numel() == 1 else md[key].numpy() for md in all_metadata]
-                else:
-                     pred_df[key] = [md[key] for md in all_metadata]
+            NORMALIZER_HP_ORDER = 2 #TODO: Move to config
+            dirname = os.path.dirname(self.trainer.checkpoint_callback.best_model_path)
+            precentile_model_savename = os.path.join(dirname, constants.BEST_CHECKPOINT_BASENAME)
 
-        # Define output STAR file path
-        output_star_fname = os.path.join(self.trainer.log_dir, f"predictions_epoch_{self.trainer.current_epoch}.star")
-        starfile.write({'particles': pred_df}, output_star_fname, overwrite=True)
-        print(f"Predictions saved to {output_star_fname}")
+            if self.trainer.world_size > 1:
+                gathered_predRotMats = self.all_gather(predRotMats)
+                gathered_gtRotmats = self.all_gather(gtRotmats)
+                gathered_scores = self.all_gather(scores)
 
-        # Compute and apply robust z-scores
-        print("Computing and applying robust z-scores...")
-        try:
-            # Need a reference STAR file for estimate_parameters.
-            # For this example, we can use the generated prediction file itself as reference,
-            # or you might have a dedicated validation set predictions file.
-            # If using a separate validation set, ensure it's logged earlier.
-            # For simplicity, using the generated prediction file as the reference.
-            ref_star_fname = output_star_fname # Using the generated file as reference
-
-            # Make sure this works with DDP by having the main process handle the file I/O
-            if self.trainer.global_rank == 0:
-                params = estimate_parameters(ref_star_fname, self.symmetry,
-                                             pred_score_name=NNET_PRED_SCORE_NAME,
-                                             show_plots=False) # Set show_plots to True for debugging if needed
-
-                rescored_star_out_fname = os.path.join(self.trainer.log_dir, f"rescored_predictions_epoch_{self.trainer.current_epoch}.star")
-                apply_parameters(output_star_fname, rescored_star_out_fname, params, self.symmetry,
-                                 ori_score_name=NNET_PRED_SCORE_NAME,
-                                 new_score_name=NEW_SCORE_NNET_NAME,
-                                 show_plots=False, # Set show_plots to True for debugging if needed
-                                 overwrite=True)
-                print(f"Rescored predictions saved to {rescored_star_out_fname}")
-
-        except Exception as e:
-            print(f"Error during z-score computation: {e}")
-            # If running with DDP, ensure this doesn't cause issues if only rank 0 tries to write files
-            # You might want to handle this more robustly depending on your DDP setup.
-
-        raise NotImplementedError()
+                if self.trainer.is_global_zero:
+                    normalizer = DirectionalPercentileNormalizer(hp_order=NORMALIZER_HP_ORDER, symmetry=self.symmetry)
+                    normalizer.fit(gathered_predRotMats, gathered_scores, gathered_gtRotmats)
+                    torch.save(normalizer, precentile_model_savename)
+            else:
+                normalizer = DirectionalPercentileNormalizer(hp_order=NORMALIZER_HP_ORDER, symmetry=self.symmetry)
+                normalizer.fit(predRotMats, scores, gtRotmats)
+                torch.save(normalizer, precentile_model_savename)
 
 def _update_config_for_test():
     from cryoPARES.configs.mainConfig import main_config
@@ -382,7 +347,7 @@ def _update_config_for_test():
 def _test0():
     b = 3
     batch = get_example_random_batch(b)
-    model_kwargs = dict(lr=1e-5, symmetry="c2", num_augmented_copies_per_batch=1, top_k=1)
+    model_kwargs = dict(lr=1e-5, symmetry="c1", num_augmented_copies_per_batch=1, top_k=1)
     plmodel = PlModel(**model_kwargs)
     _, imgs, poses, _ = plmodel.resolve_batch(batch)
     plmodel.training_step(batch, batch_idx=0)

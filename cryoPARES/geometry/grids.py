@@ -65,13 +65,14 @@ def so3_healpix_grid_equiangular(hp_order: int = 3):
     zyz_grid = torch.cat((alpha_beta_expanded, gamma_expanded), dim=0)
 
     zyz_grid = zyz_grid.reshape(3, n_cones * n_psis)
+    result = torch.as_tensor(zyz_grid, dtype=torch.float)
 
-    #If we were doing things with the angles we would NEED TO GO FROM ZYZ TO YXY to keep it consistent with e3nn, but
-    #since we are not doing it, it is not necessary
-    from scipy.spatial.transform import Rotation as R
-    r = R.from_euler("ZYZ", zyz_grid.T, degrees=False)
-    result = torch.FloatTensor(r.as_euler("YXY", degrees=False)).T.contiguous() #TODO. Is his needed after all?
-    # result = torch.as_tensor(zyz_grid, dtype=torch.float)
+    # #If we were doing things with the angles we would NEED TO GO FROM ZYZ TO YXY to keep it consistent with e3nn, but
+    # #since we are not doing it, it is not necessary
+    # from scipy.spatial.transform import Rotation as R
+    # r = R.from_euler("ZYZ", zyz_grid.T, degrees=False)
+    # result = torch.FloatTensor(r.as_euler("YXY", degrees=False)).T.contiguous() #TODO. Is his needed after all?
+
     return result, n_cones
 
 # try:

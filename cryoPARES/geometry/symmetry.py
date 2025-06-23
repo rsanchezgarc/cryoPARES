@@ -6,9 +6,7 @@ from scipy.spatial.transform import Rotation as R
 cache = get_cache(cache_name=None)
 @cache.cache
 def getSymmetryGroup(symmetry, as_matrix=False, device:str="cpu"):
-    # from cryoUtils.geometry.symmetry import getSymmetryMatrices
-    # group = getSymmetryMatrices(self.symmetrize_contraction)
-    # group = torch.FloatTensor(group)
+
     group = R.create_group(symmetry.upper())
     if as_matrix:
         group = torch.stack([torch.FloatTensor(x)

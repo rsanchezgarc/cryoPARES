@@ -11,7 +11,8 @@ BATCH_POSE_NAME: str = "pose"
 BATCH_MD_NAME: str = "md"
 
 #Name for directories or files
-DATA_SPLITS_BASENAME= "data_splits"
-TRAINING_DONE_TEMPLATE = "DONE_TRAINING.txt" #f"DONE-pid_%(pid)d.txt"
-BEST_CHECKPOINT_BASENAME="best.ckpt"
-BEST_MODEL_SCRIPT_BASENAME= "best_script.pt"
+DATA_SPLITS_BASENAME: str = "data_splits"
+TRAINING_DONE_TEMPLATE: str = "DONE_TRAINING.txt" #f"DONE-pid_%(pid)d.txt"
+BEST_CHECKPOINT_BASENAME: str = "best.ckpt"
+BEST_MODEL_SCRIPT_BASENAME: str = "best_script.pt"
+BEST_DIRECTIONAL_NORMALIZER: str = "best_directional_normalizer.pt"

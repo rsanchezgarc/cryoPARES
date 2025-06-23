@@ -16,7 +16,6 @@ from typing import List, Optional
 
 import mrcfile
 import torch
-import torch.fft as _fft
 import tqdm
 from starstack import ParticlesStarSet
 from starstack.constants import RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES, RELION_EULER_CONVENTION
@@ -30,6 +29,8 @@ from cryoPARES.geometry.convert_angles import euler_angles_to_matrix
 from cryoPARES.geometry.symmetry import getSymmetryGroup
 from cryoPARES.utils.paths import FnameType
 
+compiled_insert_central_slices_rfft_3d_multichannel = torch.compile(insert_central_slices_rfft_3d_multichannel)
+# compiled_insert_central_slices_rfft_3d_multichannel = insert_central_slices_rfft_3d_multichannel
 
 class Reconstructor():
     def __init__(self, symmetry: str, device:str,
@@ -40,7 +41,7 @@ class Reconstructor():
         self.device = device
 
         self.correct_ctf = correct_ctf
-        self.eps = eps # The Tikhonov constant. Should be 1/SNR
+        self.eps = eps # The Tikhonov constant. Should be 1/SNR, we might want to estimate it per frequency
         self.min_denominator_value = min_denominator_value
 
         self.box_size = None
@@ -73,7 +74,7 @@ class Reconstructor():
 
     def backproject_particles(self, particles_star_fname: FnameType,
                               particles_dir: Optional[FnameType] = None,
-                              batch_size=1, num_workers=0,):
+                              batch_size=1, num_workers=0, use_only_n_first_batches=None):
         particlesDataset = ReconstructionParticlesDataset(particles_star_fname, particles_dir,
                                                           correct_ctf=self.correct_ctf)
 
@@ -86,7 +87,7 @@ class Reconstructor():
 
         symMat = getSymmetryGroup(self.symmetry, as_matrix=True, device=self.device)
         zyx_matrices = False
-        for imgs, ctf, rotMats, hwShiftAngs in tqdm.tqdm(dl, desc="backprojecting", disable=False):
+        for bidx, (imgs, ctf, rotMats, hwShiftAngs) in enumerate(tqdm.tqdm(dl, desc="backprojecting", disable=False)):
 
             imgs = imgs.to(self.device, non_blocking=True)
             rotMats = rotMats.to(self.device, non_blocking=True)
@@ -114,21 +115,29 @@ class Reconstructor():
                                        )
 
             if self.correct_ctf:
+                ctf = ctf.to(imgs.device)
                 imgs *= ctf
                 # #The following is for phase-flip only
                 # imgs *= ctf.sign()
                 # ctf = torch.ones_like(ctf)
 
-                dft_ctf, weights = insert_central_slices_rfft_3d_multichannel(
-                    image_rfft=torch.stack([imgs, ctf**2], dim=1),
+                imgs = torch.stack([imgs.real, imgs.imag, ctf**2], dim=1)
+                # imgs = torch.stack([imgs, ctf**2], dim=1)
+
+                dft_ctf, weights = compiled_insert_central_slices_rfft_3d_multichannel(
+                    image_rfft=imgs,
                     volume_shape=(self.box_size,) * 3,
                     rotation_matrices=rotMats,
                     fftfreq_max=None,
                     zyx_matrices=zyx_matrices,
                 )
 
-                self.f_num += dft_ctf[0, ...]
-                self.ctfs += dft_ctf[1, ...].real
+                # self.f_num += dft_ctf[0, ...]
+                # self.ctfs += dft_ctf[1, ...].real
+
+                self.f_num += torch.view_as_complex(dft_ctf[:2, ...].permute(1,2,3,0).contiguous())
+                self.ctfs += dft_ctf[-1, ...]
+
                 self.weights += weights
             else:
                 dft_3d, weights = insert_central_slices_rfft_3d(
@@ -152,6 +161,8 @@ class Reconstructor():
             #     )
             #     self.ctfs += ctf_sq_3d
 
+            if use_only_n_first_batches and bidx > use_only_n_first_batches: #TODO: Remove this debug code
+                break
 
     def generate_volume(self, fname: Optional[FnameType] = None, overwrite_fname: bool = True,
                         device: Optional[str] = "cpu"):
@@ -228,7 +239,8 @@ class ReconstructionParticlesDataset(Dataset):
 
 def reconstruct_starfile(particles_star_fname: str, symmetry: str, output_fname: str, particles_dir:Optional[str]=None,
                          num_workers: int = 1, batch_size: int = 64, use_cuda: bool = False,
-                         correct_ctf: bool = True, eps: float = 1e-3, min_denominator_value: float = 1e-4):
+                         correct_ctf: bool = True, eps: float = 1e-3, min_denominator_value: float = 1e-4,
+                         use_only_n_first_batches: Optional[int] = None):
     """
 
     :param particles_star_fname: The particles to reconstruct
@@ -241,13 +253,15 @@ def reconstruct_starfile(particles_star_fname: str, symmetry: str, output_fname:
     :param correct_ctf:
     :param eps: The regularization constant (ideally, this is 1/SNR)
     :param min_denominator_value: Used to prevent division by 0
+    :param use_only_n_first_batches: Use only the n first batches to reconstruct
     :return:
     """
 
     device = "cpu" if not use_cuda else "cuda"
     reconstructor = Reconstructor(symmetry=symmetry, device=device, correct_ctf=correct_ctf, eps=eps,
                                   min_denominator_value=min_denominator_value)
-    reconstructor.backproject_particles(particles_star_fname, particles_dir, batch_size, num_workers)
+    reconstructor.backproject_particles(particles_star_fname, particles_dir, batch_size, num_workers,
+                                  use_only_n_first_batches=use_only_n_first_batches)
     reconstructor.generate_volume(output_fname)
 
 
@@ -257,7 +271,7 @@ def _test():
     reconstructor.backproject_particles(
         particles_star_fname="/home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/projections/1000proj_with_ctf.star",
         particles_dir="/home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/",
-        batch_size=96, num_workers=0,)
+        batch_size=96, num_workers=0, )
 
     vol = reconstructor.generate_volume(fname="/tmp/reconstructed_volume.mrc", device="cpu")
 
@@ -281,7 +295,38 @@ def _test():
     plt.show()
     print()
 
+def _test_real_insertion():
+    from scipy.spatial.transform import Rotation
+    from lightning import seed_everything
+    seed_everything(32)
+
+    b, h, w = 32, 8, 5
+    img_rfft = torch.rand(b, h, w, dtype=torch.complex64)
+    ctf = torch.rand(b, h, w, dtype=torch.float32)
+    rotmats = torch.FloatTensor(Rotation.random(b).as_matrix())
+    img_as_real = torch.stack([img_rfft.real, img_rfft.imag, ctf], dim=1)
+    dft_ctf0, weights = insert_central_slices_rfft_3d_multichannel(
+        image_rfft=img_as_real,
+        volume_shape=(h,) * 3,
+        rotation_matrices=rotmats,
+        fftfreq_max=None,
+        zyx_matrices=False,
+    )
+
+    img_ctf = torch.stack([img_rfft, ctf], dim=1)
+    dft_ctf1, weights = insert_central_slices_rfft_3d_multichannel(
+        image_rfft=img_ctf,
+        volume_shape=(h,) * 3,
+        rotation_matrices=rotmats,
+        fftfreq_max=None,
+        zyx_matrices=False,
+    )
+    print(dft_ctf0[0].allclose(dft_ctf1[0].real, atol=1e-4))
+    print(dft_ctf0[1].allclose(dft_ctf1[0].imag, atol=1e-4))
+    print("DONE")
+
 if __name__ == "__main__":
     # _test()
+    # _test_real_insertion()
     from argParseFromDoc import parse_function_and_call
     parse_function_and_call(reconstruct_starfile)

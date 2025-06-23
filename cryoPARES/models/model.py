@@ -9,7 +9,7 @@ from torch import Tensor, nn, ScriptModule
 from torch.utils.data import DataLoader
 
 from cryoPARES.geometry.convert_angles import matrix_to_euler_angles
-from cryoPARES.models.directionalNormalizer.DirectionalNormalizer import DirectionalPercentileNormalizer
+from cryoPARES.models.directionalNormalizer.directionalNormalizer import DirectionalPercentileNormalizer
 
 warnings.filterwarnings('ignore', category=UserWarning, module='torch.optim.lr_scheduler')
 import torch

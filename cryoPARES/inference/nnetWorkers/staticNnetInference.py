@@ -62,7 +62,6 @@ class PartitionInferencer:
 
     def __init__(self,
                  star_fnames: List[str],
-                 symmetry: str,
                  checkpoint_path: str,
                  results_dir: str,
                  halfset: Literal["half1", "half2", "allParticles"] = None,
@@ -74,7 +73,6 @@ class PartitionInferencer:
                  top_k: int =1):
         """Initialize inference for a partition."""
         self.star_fnames = star_fnames
-        self.symmetry = symmetry
         self.checkpoint_path = checkpoint_path
         self.particles_dir = particles_dir
         self.batch_size = batch_size
@@ -200,7 +198,7 @@ class PartitionInferencer:
                 pbar.set_total_steps(len(dataloader))
 
             with (pbar):
-                device = torch.device(rank if rank is not None else 'cuda:0')
+                device = torch.device(rank if rank is not None else 'cuda:0') #TODO: enable cpu only
 
                 # Ensure all processes have access to shared memory
                 if rank is not None:
@@ -306,7 +304,6 @@ if __name__ == "__main__":
 
     parser = ArgumentParser(description="Run inference with cryoPARES model")
     parser.add_argument("--star_fnames", type=str, nargs="+", required=True)
-    parser.add_argument("--symmetry", type=str, required=True)
     parser.add_argument("--results_dir", type=str, required=True)
     parser.add_argument("--checkpoint_path", type=str, required=True)
     parser.add_argument("--particles_dir", type=str, nargs="+")
@@ -320,7 +317,6 @@ if __name__ == "__main__":
 
     inferencer = PartitionInferencer(
         star_fnames=args.star_fnames,
-        symmetry=args.symmetry,
         checkpoint_path=args.checkpoint_path,
         results_dir=args.results_dir,
         particles_dir=args.particles_dir,
@@ -334,6 +330,6 @@ if __name__ == "__main__":
 
 """
 
-python -m cryoPARES.inference.nnetWorkers.staticNnetInference --star_fnames /home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/1000particles.star --symmetry C1 --checkpoint_path /tmp/train_cryoPARES/version_0/half1/checkpoints/best.ckpt
+python -m cryoPARES.inference.nnetWorkers.staticNnetInference --star_fnames /home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/1000particles.star --checkpoint_path /tmp/train_cryoPARES/version_0/half1/checkpoints/best.ckpt --results_dir /tmp/cryoParesInfer/
 
 """

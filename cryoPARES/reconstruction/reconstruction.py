@@ -220,17 +220,6 @@ class Reconstructor():
                 self.f_num += dft_3d
                 self.weights += weights
 
-            # if self.correct_ctf:
-            #     pass
-            #     ctf_sq_3d, _ = insert_central_slices_rfft_3d(
-            #         image_rfft=ctf ** 2,
-            #         volume_shape=(self.box_size,) * 3,
-            #         rotation_matrices=rotMats,
-            #         fftfreq_max=None,
-            #         zyx_matrices=zyx_matrices,
-            #     )
-            #     self.ctfs += ctf_sq_3d
-
             if use_only_n_first_batches and bidx > use_only_n_first_batches: #TODO: Remove this debug code
                 break
             yield imgs.shape[0]
@@ -258,6 +247,7 @@ class Reconstructor():
 
         # correct for convolution with linear interpolation kernel
         grid = fftfreq_grid( image_shape=dft.shape, rfft=False, fftshift=True, norm=True, device=dft.device)
+        #TODO: Store the sinc volume to avoid overhead
         vol = dft / torch.sinc(grid) ** 2
         vol = vol.to(device)
 

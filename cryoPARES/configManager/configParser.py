@@ -2,10 +2,11 @@ import argparse
 import yaml
 import json
 from dataclasses import dataclass, fields, is_dataclass
-from typing import Any, Dict, List, Optional, Union, Callable
+from typing import Any, Dict, List, Optional, Union, Callable, get_origin, get_args
 from pathlib import Path
 import re
 import sys
+from enum import Enum
 
 # Import the placeholder for AutoArgumentParser
 from argParseFromDoc import AutoArgumentParser
@@ -95,6 +96,47 @@ class ConfigOverrideSystem:
             return yaml.safe_load(f) or {}
 
     @staticmethod
+    def convert_to_enum_if_needed(value: Any, field_type: Any) -> Any:
+        """Convert string values to enum if the field type is an enum."""
+        # Check if it's a Union type (which includes Optional)
+        if get_origin(field_type) is Union:
+            # For Optional[EnumType], get the non-None type
+            enum_type = None
+            for arg in get_args(field_type):
+                if arg is not type(None) and hasattr(arg, '__bases__'):
+                    if any(issubclass(base, Enum) for base in arg.__bases__ if isinstance(base, type)):
+                        enum_type = arg
+                        break
+            if enum_type:
+                field_type = enum_type
+
+        # Check if field_type is an enum class
+        if (hasattr(field_type, '__bases__') and
+                any(issubclass(base, Enum) for base in field_type.__bases__ if isinstance(base, type))):
+
+            # If value is already an instance of the enum, return it
+            if isinstance(value, field_type):
+                return value
+
+            # If value is a string, try to convert it to the enum
+            if isinstance(value, str):
+                try:
+                    # Try direct conversion first
+                    return field_type(value)
+                except ValueError:
+                    # Try to find enum member by value
+                    for member in field_type:
+                        if member.value == value:
+                            return member
+                    # Try case-insensitive matching
+                    for member in field_type:
+                        if member.value.lower() == value.lower():
+                            return member
+                    raise ValueError(f"'{value}' is not a valid {field_type.__name__}")
+
+        return value
+
+    @staticmethod
     def apply_overrides(config: Any, overrides: Dict[str, Any], path: str = "") -> None:
         """Recursively apply overrides to a config object."""
         for key, value in overrides.items():
@@ -120,6 +162,10 @@ class ConfigOverrideSystem:
                                     field_type = f.type
                                     break
 
+                        # Handle enum conversion
+                        if field_type:
+                            value = ConfigOverrideSystem.convert_to_enum_if_needed(value, field_type)
+
                         if field_type == Path or (isinstance(current_value, Path) and not isinstance(value, Path)):
                             value = Path(value)
 
@@ -128,7 +174,8 @@ class ConfigOverrideSystem:
                     except Exception as e:
                         print(f"Warning: Failed to set {current_path} to {value} (type {type(value).__name__}): {e}")
             else:
-                print(f"Warning: Config object '{path or config.__class__.__name__}' has no attribute '{key}'. Full path: '{current_path}'")
+                print(
+                    f"Warning: Config object '{path or config.__class__.__name__}' has no attribute '{key}'. Full path: '{current_path}'")
 
     @staticmethod
     def print_config(config: Any, indent: int = 0, name: str = "config") -> None:
@@ -251,17 +298,19 @@ class ConfigArgumentParser(AutoArgumentParser):
             # Determine the actual config attribute name from CONFIG_PARAM's _name or parameter name
             config_attr_name_for_mapping = config_param._name
             # Find the config path
-            if hasattr(config_param, '_config') or config_param._name: # If explicit config or name is given
+            if hasattr(config_param, '_config') or config_param._name:  # If explicit config or name is given
                 # Prefer the config object specified within CONFIG_PARAM itself
                 # Fallback to self.config_obj if not explicitly set in CONFIG_PARAM
                 config_obj_for_param = config_param._config or self.config_obj
 
                 if config_obj_for_param:
-                    config_path = self._find_config_path(self.config_obj, config_obj_for_param, config_attr_name_for_mapping)
+                    config_path = self._find_config_path(self.config_obj, config_obj_for_param,
+                                                         config_attr_name_for_mapping)
                     if config_path:
                         self._config_param_mappings[argname] = config_path
                 else:
-                    print(f"Warning: CONFIG_PARAM for '{argname}' is not bound to any config object and no default config_obj is set for ConfigArgumentParser.")
+                    print(
+                        f"Warning: CONFIG_PARAM for '{argname}' is not bound to any config object and no default config_obj is set for ConfigArgumentParser.")
             else:
                 # If not bound yet (e.g., CONFIG_PARAM() used without explicit config),
                 # assume it will use the default config (self.config_obj) and the parameter name.
@@ -269,8 +318,8 @@ class ConfigArgumentParser(AutoArgumentParser):
                 if config_path:
                     self._config_param_mappings[argname] = config_path
                 else:
-                    print(f"Warning: Could not find config path for parameter '{argname}' (looking for '{config_attr_name_for_mapping}') in the default config object.")
-
+                    print(
+                        f"Warning: Could not find config path for parameter '{argname}' (looking for '{config_attr_name_for_mapping}') in the default config object.")
 
         # Now call the parent method to add standard arguments
         return super().add_args_from_function(
@@ -346,7 +395,7 @@ class ConfigArgumentParser(AutoArgumentParser):
             print("\n=== Configuration Paths ===")
             print("Use these paths with --config to override values:\n")
             for path_info in ConfigOverrideSystem.get_all_config_paths(self.config_obj):
-                print(f"  {path_info}") # path_info already includes value and type
+                print(f"  {path_info}")  # path_info already includes value and type
             print("\nExample: --config train.n_epochs=100 train.batch_size=64")
             print("Or use a YAML file: --config my_config.yaml")
             sys.exit(0)
@@ -368,7 +417,6 @@ class ConfigArgumentParser(AutoArgumentParser):
         # Apply direct argument overrides to config. This should happen AFTER --config files,
         # ensuring direct command-line arguments have highest precedence.
         self._apply_direct_arg_overrides(parsed_args, _original_sys_argv)
-
 
         # Remove config arguments from parsed_args so they don't interfere with downstream logic
         # that might not expect them (e.g., if train_model tried to use parsed_args directly for 'config').
@@ -416,7 +464,7 @@ class ConfigArgumentParser(AutoArgumentParser):
                 # (e.g., if 'n_epochs' maps to 'train.n_epochs', check if '--n-epochs' was on CLI)
                 if self._was_arg_provided(param_name_in_func, sys_argv):
                     # Find the actual CLI arg name that maps to this param_name_in_func
-                    cli_arg_name = param_name_in_func.replace('_', '-') # Default
+                    cli_arg_name = param_name_in_func.replace('_', '-')  # Default
                     for action in self._actions:
                         if action.dest == param_name_in_func:
                             # Use the first long option string if available, otherwise just dest
@@ -459,7 +507,6 @@ class ConfigArgumentParser(AutoArgumentParser):
                     return True
         return False
 
-
     def _flatten_dict_keys(self, d: Dict[str, Any], prefix: str = "") -> List[str]:
         """Flatten nested dictionary to get all key paths."""
         paths = []
@@ -500,14 +547,20 @@ class ConfigArgumentParser(AutoArgumentParser):
                                     break
 
                         value_to_set = arg_value
+
+                        # Handle enum conversion
+                        if field_type:
+                            value_to_set = ConfigOverrideSystem.convert_to_enum_if_needed(value_to_set, field_type)
+
                         if field_type == Path and not isinstance(arg_value, Path):
                             value_to_set = Path(arg_value)
 
                         setattr(target, keys[-1], value_to_set)
-                        print(f"Set {config_path} = {value_to_set} (from direct arg --{arg_name.replace('_', '-')})") #TODO: Enable verbosity
+                        print(
+                            f"Set {config_path} = {value_to_set} (from direct arg --{arg_name.replace('_', '-')})")  # TODO: Enable verbosity
                     except Exception as e:
-                        print(f"Warning: Failed to set config attribute '{config_path}' from direct argument '--{arg_name.replace('_', '-')}' to '{arg_value}': {e}")
-
+                        print(
+                            f"Warning: Failed to set config attribute '{config_path}' from direct argument '--{arg_name.replace('_', '-')}' to '{arg_value}': {e}")
 
     def _process_config_args(self, args: argparse.Namespace) -> None:
         """Process config-related arguments and apply overrides from --config."""
@@ -538,5 +591,5 @@ class ConfigArgumentParser(AutoArgumentParser):
                         print(f"Warning: Invalid config assignment '{config_item}'. Skipping. Error: {e}")
 
             if overrides:
-                print("\nApplying config overrides from --config argument:") #TODO: add a verbose flag
+                print("\nApplying config overrides from --config argument:")  # TODO: add a verbose flag
                 ConfigOverrideSystem.apply_overrides(self.config_obj, overrides)

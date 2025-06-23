@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from functools import wraps
 import inspect
+from enum import Enum
 from typing import Any, get_type_hints, Optional, Callable, Tuple, get_origin, get_args, Union, Literal, List, Dict
 
 
@@ -36,6 +37,21 @@ class CONFIG_PARAM:
             return value
         return self.transform(value)
 
+    def convert_to_enum_if_needed(self, value: Any, expected_type: Any) -> Any:
+        """Convert string values to enum if the expected type is an enum."""
+        if (inspect.isclass(expected_type) and
+            issubclass(expected_type, Enum) and
+            isinstance(value, str)):
+            try:
+                return expected_type(value)
+            except ValueError:
+                # Try to find enum member by value
+                for member in expected_type:
+                    if member.value == value:
+                        return member
+                raise ValueError(f"'{value}' is not a valid {expected_type.__name__}")
+        return value
+
     def __call__(self) -> Any:
         """Get the current value from the config."""
         return self.get()
@@ -64,6 +80,21 @@ def _check_type_match(expected_type: Any, actual_value: Any) -> bool:
         # If expected_type is a Union or Optional, check if None is allowed
         if get_origin(expected_type) is Union:
             return type(None) in get_args(expected_type)
+        return False
+
+    if inspect.isclass(expected_type) and issubclass(expected_type, Enum):
+        # If actual_value is already an instance of the enum, it's valid
+        if isinstance(actual_value, expected_type):
+            return True
+        # If actual_value is a string that matches an enum value, it's valid
+        if isinstance(actual_value, str):
+            try:
+                # Try to create enum from string value
+                expected_type(actual_value)
+                return True
+            except ValueError:
+                # Check if the string matches any enum member's value
+                return actual_value in [member.value for member in expected_type]
         return False
 
     # Handle special case where expected_type is Any
@@ -181,6 +212,8 @@ def inject_defaults_from_config(default_config: Any, update_config_with_args: bo
                     value = args[i]
                     if param.name in param_processors:
                         processor = param_processors[param.name]
+                        expected_type = hints.get(param.name)
+                        value = processor.convert_to_enum_if_needed(value, expected_type)
                         value = processor.transform_value(value)
                         if not processor.validate(value):
                             raise ValueError(f"Validation failed for parameter {param.name}")
@@ -198,6 +231,8 @@ def inject_defaults_from_config(default_config: Any, update_config_with_args: bo
                     value = kwargs[name]
                     if name in param_processors:
                         processor = param_processors[name]
+                        expected_type = hints.get(param.name)
+                        value = processor.convert_to_enum_if_needed(value, expected_type)
                         value = processor.transform_value(value)
                         if not processor.validate(value):
                             raise ValueError(f"Validation failed for parameter {name}")

@@ -17,7 +17,7 @@ class ResNet(nn.Module):
         num = re.findall(r"Resnet(\d+)", resnetName, re.IGNORECASE)[0]
 
         base_Resnet = cls(weights=None if not load_imagenetweights \
-            else getattr(torchvision.models, f"ResNet{num}_Weights").IMAGENET1K_V2)
+            else getattr(torchvision.models, f"ResNet{num}_Weights").IMAGENET1K_V1)
 
         layers = [
             nn.Conv2d(in_channels=in_channels, out_channels=3, kernel_size=1),

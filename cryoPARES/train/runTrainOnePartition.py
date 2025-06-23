@@ -8,6 +8,7 @@ import os.path as osp
 from typing import Optional, List, Literal
 
 import pytorch_lightning as pl
+from argParseFromDoc import generate_command_for_argparseFromDoc
 from pytorch_lightning.trainer.states import TrainerStatus
 from pytorch_lightning.loggers import TensorBoardLogger, CSVLogger
 from pytorch_lightning.callbacks import (
@@ -227,9 +228,27 @@ class TrainerPartition:
                                                                 else os.path.dirname(self.particles_star_fname[fnameIdx])
 
                     output_fname = os.path.join(reconstructions_dir, "%d.mrc" % fnameIdx)
-                    reconstruct_starfile(fname, self.symmetry, output_fname, particles_dir,  # TODO: Add to CONFIG
-                                         num_workers=1, batch_size=64, use_cuda=False,
-                                         correct_ctf=True, eps=1e-3, min_denominator_value=1e-4)
+                    kwargs = dict(particles_star_fname=fname, symmetry=self.symmetry,
+                                  output_fname=output_fname,      # TODO: Add things to CONFIG
+                                  particles_dir=particles_dir,
+                                  num_workers=1, batch_size=64,
+                                  use_cuda=False, #TODO: How to use the GPU without getting out of memory
+                                  correct_ctf=True, eps=1e-3, min_denominator_value=1e-4)
+                    if self.overfit_batches is not None:
+                        kwargs["use_only_n_first_batches"] = self.overfit_batches
+
+                    cmd = generate_command_for_argparseFromDoc(
+                        "cryoPARES.reconstruction.reconstruction",
+                        fun=reconstruct_starfile,
+                        use_module=True,
+                        python_executable=sys.executable,
+                        **kwargs
+                    )
+                    print(cmd)  # TODO: Use loggers
+                    subprocess.run(
+                        cmd.split(),
+                        cwd=os.path.abspath(os.path.join(__file__, "..", "..", "..")), check=True
+                    )
 
     def _save_training_completion(self, checkpointer):
         dirname = osp.dirname(checkpointer.best_model_path)
@@ -284,7 +303,7 @@ def check_if_training_partion_done(dirname: str, partition: str):
 
 
 def execute_trainOnePartition(**kwargs):
-    from argParseFromDoc import generate_command_for_argparseFromDoc
+
     if check_if_training_partion_done(kwargs['train_save_dir'], kwargs['partition']):
         print(f"Training for partition {kwargs['partition']} already completed")
         return

@@ -20,6 +20,7 @@ from cryoPARES import constants
 from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
 
+# This is a port of the original code.
 
 class Inferencer:
     @inject_defaults_from_config(main_config.inference, update_config_with_args=True)
@@ -151,7 +152,6 @@ class Inferencer:
                             accel: str, dev_count: int) -> tuple[pd.DataFrame, Dict[str, Any]]:
         """Run neural network inference on particles."""
 
-        infer_config = main_config.inference
         df_list = []
 
         for i, (model_fname, particles_star_fname) in enumerate(zip(self.model_fnames, star_fnames)):
@@ -162,8 +162,8 @@ class Inferencer:
                 "--particles_star_fname", particles_star_fname,
                 "--model_fname", model_fname,
                 "--star_out_fname", star_out_fname,
-                "--n_dataworkers", str(infer_config.N_DATAWORKERS),
-                "--batch_size", str(infer_config.BATCH_SIZE),
+                "--n_dataworkers", str(main_config.inference.N_DATAWORKERS),
+                "--batch_size", str(main_config.inference.BATCH_SIZE),
             ]
 
             if self.particles_dir:
@@ -217,7 +217,7 @@ class Inferencer:
             "--reference_map_fnames", *reference_map_fnames,
             "--symmetry", self.symmetry,
             "--star_out_fname", star_out_fname,
-            "--n_dataworkers", str(infer_config.N_DATAWORKERS),
+            "--n_dataworkers", str(main_config.inference.N_DATAWORKERS),
         ]
 
         if self.particles_dir:
@@ -262,8 +262,8 @@ class Inferencer:
             "--symmetry", self.symmetry,
             "--use_per_particle_weight",
             "--n_workers", str(
-                infer_config.N_DATAWORKERS * dev_count
-                if accel == "gpu" else infer_config.N_DATAWORKERS
+                main_config.inference.N_DATAWORKERS * dev_count
+                if accel == "gpu" else main_config.inference.N_DATAWORKERS
             ),
         ]
 

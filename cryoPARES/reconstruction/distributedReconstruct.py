@@ -43,6 +43,13 @@ def main():
         num_dataworkers=2
     )
 
+
+    # os.environ["OMP_NUM_THREADS"] = str(threads_per_worker)
+    # os.environ["MKL_NUM_THREADS"] = str(threads_per_worker)
+    # os.environ["OPENBLAS_NUM_THREADS"] = str(threads_per_worker)
+    # os.environ["VECLIB_MAXIMUM_THREADS"] = str(threads_per_worker)
+    # os.environ["NUMEXPR_NUM_THREADS"] = str(threads_per_worker)
+
     reconstructor = Reconstructor(**reconstructor_init_kwargs)
     particles = reconstructor._get_reconstructionParticlesDataset(reconstructor_run_kwargs["particles_star_fname"],
                                                                   reconstructor_run_kwargs["particles_dir"]).particles

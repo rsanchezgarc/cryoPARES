@@ -16,7 +16,9 @@ from cryoPARES.configs.mainConfig import main_config
 class Trainer:
     @inject_defaults_from_config(main_config.train, update_config_with_args=True)
     def __init__(self, symmetry: str, particles_star_fname: List[str], train_save_dir: str,
-                 particles_dir: Optional[List[str]] = None, n_epochs: int = CONFIG_PARAM(), split_halfs: bool = True,
+                 particles_dir: Optional[List[str]] = None, n_epochs: int = CONFIG_PARAM(),
+                 batch_size: int = CONFIG_PARAM(),
+                 split_halfs: bool = True,
                  continue_checkpoint_dir: Optional[str] = None, finetune_checkpoint_dir: Optional[str] = None,
                  compile_model: bool = False, val_check_interval: Optional[float] = None,
                  overfit_batches: Optional[int] = None,
@@ -30,6 +32,7 @@ class Trainer:
             train_save_dir: The root directory where models and logs are saved.
             particles_dir: The directory where the particles of the particlesStarFname are located. If not, it is assumed os.dirname(particlesStarFname)
             n_epochs: The number of epochs
+            batch_size: The batch size
             split_halfs: If True, it trains a model for each half of the data
             continue_checkpoint_dir: The path of a pre-trained model to continue training.
             finetune_checkpoint_dir: The path of a pre-trained model to do finetunning
@@ -160,9 +163,9 @@ class Trainer:
                     continue
                 if self.map_fname_for_simulated_pretraining:
                     # TODO: Implement simulate_particles
-                    simulatedParticles = simulate_particles(self.map_fname_for_simulated_pretraining, tmpdir)
+                    # simulatedParticles = simulate_particles(self.map_fname_for_simulated_pretraining, tmpdir)
+                    # execute_trainOnePartition() #TODO: Fill in this call
                     raise NotImplementedError()
-                    execute_trainOnePartition() #TODO: Fill in this call
                 print(f"\nExecuting training for partition {partition}")
                 execute_trainOnePartition(
                     symmetry=self.symmetry,
@@ -206,3 +209,8 @@ if __name__ == "__main__":
     parser.add_args_from_function(Trainer.__init__)
     args, config_args = parser.parse_args()
     Trainer(**vars(args)).run(config_args)
+
+    """
+
+python -m cryoPARES.train.train  --symmetry C1 --particles_star_fname /home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles.star  --train_save_dir /tmp/cryoPARES_train/ --n_epochs 1 --overfit_batches 20 --batch_size 4 --config models.image2sphere.lmax=6 models.image2sphere.so3components.i2sprojector.hp_order=2 models.image2sphere.so3components.s2conv.hp_order=2 models.image2sphere.so3components.so3outputgrid.hp_order=2  models.image2sphere.encoderArtchitecture="resnet" models.image2sphere.imageencoder.resnet.resnetName="resnet18" datamanager.num_data_workers=1 
+    """

@@ -5,9 +5,9 @@ from typing import Optional, Literal
 @dataclass
 class Inference_config:
 
-    batch_size: int = 2
+    batch_size: int = 32
     use_cuda: bool = True
-    n_cpus_if_no_cuda: int = 2
+    n_cpus_if_no_cuda: int = 4
     random_seed: int = 12313
 
     top_k: int = 1

@@ -201,11 +201,9 @@ if __name__ == "__main__":
     print("---------------------------------------")
     print(" ".join(sys.argv))
     print("---------------------------------------")
-
-    # from argParseFromDoc import AutoArgumentParser
     from cryoPARES.configManager.configParser import ConfigArgumentParser, export_config_to_yaml
 
-    parser = ConfigArgumentParser(prog="train cryoPARES", config_obj=main_config)
+    parser = ConfigArgumentParser(prog="train_cryoPARES", config_obj=main_config)
     parser.add_args_from_function(Trainer.__init__)
     args, config_args = parser.parse_args()
     Trainer(**vars(args)).run(config_args)

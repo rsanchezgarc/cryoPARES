@@ -8,16 +8,47 @@ import re
 import sys
 from enum import Enum
 
-# Import the placeholder for AutoArgumentParser
 from argParseFromDoc import AutoArgumentParser
 
-# Import the config-related classes and objects
 from cryoPARES.configs.mainConfig import main_config
-from cryoPARES.configManager.inject_defaults import CONFIG_PARAM
 
 
 class ConfigOverrideSystem:
     """System for overriding config values from command line or YAML files."""
+
+    @staticmethod
+    def print_config(config: Any, indent: int = 0, name: str = "config") -> None:
+        """Recursively print config structure and values."""
+        indent_str = "  " * indent
+
+        if is_dataclass(config):
+            print(f"{indent_str}{name}:")
+            for field in fields(config):
+                field_value = getattr(config, field.name)
+                if is_dataclass(field_value):
+                    ConfigOverrideSystem.print_config(field_value, indent + 1, field.name)
+                else:
+                    print(f"{indent_str}  {field.name}: {field_value} ({type(field_value).__name__})")
+        else:
+            print(f"{indent_str}{name}: {config} ({type(config).__name__})")
+
+    @staticmethod
+    def get_all_config_paths(config: Any, prefix: str = "") -> List[str]:
+        """Get all valid config paths for documentation."""
+        paths = []
+
+        if is_dataclass(config):
+            for field in fields(config):
+                field_value = getattr(config, field.name)
+                field_path = f"{prefix}.{field.name}" if prefix else field.name
+
+                if is_dataclass(field_value):
+                    paths.extend(ConfigOverrideSystem.get_all_config_paths(field_value, field_path))
+                else:
+                    # Format as key=value (type) for display
+                    paths.append(f"{field_path} = {repr(field_value)} ({type(field_value).__name__})")
+
+        return paths
 
     @staticmethod
     def parse_value(value_str: str) -> Any:
@@ -93,7 +124,7 @@ class ConfigOverrideSystem:
     def load_yaml_config(yaml_path: str) -> Dict[str, Any]:
         """Load config overrides from a YAML file."""
         with open(yaml_path, 'r') as f:
-            return yaml.safe_load(f) or {}
+            return yaml.unsafe_load(f) or {}
 
     @staticmethod
     def convert_to_enum_if_needed(value: Any, field_type: Any) -> Any:
@@ -137,7 +168,7 @@ class ConfigOverrideSystem:
         return value
 
     @staticmethod
-    def apply_overrides(config: Any, overrides: Dict[str, Any], path: str = "") -> None:
+    def apply_overrides(config: Any, overrides: Dict[str, Any], path: str = "", verbose=True) -> None:
         """Recursively apply overrides to a config object."""
         for key, value in overrides.items():
             current_path = f"{path}.{key}" if path else key
@@ -170,47 +201,17 @@ class ConfigOverrideSystem:
                             value = Path(value)
 
                         setattr(config, key, value)
-                        print(f"Set {current_path} = {value}")
+                        if verbose: print(f"Set {current_path} = {value}")
                     except Exception as e:
-                        print(f"Warning: Failed to set {current_path} to {value} (type {type(value).__name__}): {e}")
+                        if verbose: print(f"Warning: Failed to set {current_path} to {value} (type {type(value).__name__}): {e}")
             else:
-                print(
+                if verbose: print(
                     f"Warning: Config object '{path or config.__class__.__name__}' has no attribute '{key}'. Full path: '{current_path}'")
 
     @staticmethod
-    def print_config(config: Any, indent: int = 0, name: str = "config") -> None:
-        """Recursively print config structure and values."""
-        indent_str = "  " * indent
-
-        if is_dataclass(config):
-            print(f"{indent_str}{name}:")
-            for field in fields(config):
-                field_value = getattr(config, field.name)
-                if is_dataclass(field_value):
-                    ConfigOverrideSystem.print_config(field_value, indent + 1, field.name)
-                else:
-                    print(f"{indent_str}  {field.name}: {field_value} ({type(field_value).__name__})")
-        else:
-            print(f"{indent_str}{name}: {config} ({type(config).__name__})")
-
-    @staticmethod
-    def get_all_config_paths(config: Any, prefix: str = "") -> List[str]:
-        """Get all valid config paths for documentation."""
-        paths = []
-
-        if is_dataclass(config):
-            for field in fields(config):
-                field_value = getattr(config, field.name)
-                field_path = f"{prefix}.{field.name}" if prefix else field.name
-
-                if is_dataclass(field_value):
-                    paths.extend(ConfigOverrideSystem.get_all_config_paths(field_value, field_path))
-                else:
-                    # Format as key=value (type) for display
-                    paths.append(f"{field_path} = {repr(field_value)} ({type(field_value).__name__})")
-
-        return paths
-
+    def update_config_from_file(config, config_fname, verbose=True):
+        overrides = ConfigOverrideSystem.load_yaml_config(config_fname)
+        ConfigOverrideSystem.apply_overrides(config, overrides, verbose=verbose)
 
 def merge_dicts(d1: Dict[str, Any], d2: Dict[str, Any]) -> Dict[str, Any]:
     """Recursively merge two dictionaries."""

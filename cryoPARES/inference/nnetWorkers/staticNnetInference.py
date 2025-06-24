@@ -1,79 +1,63 @@
+import glob
 import os
+import sys
 import torch
-import torch.distributed as dist
-import torch.multiprocessing as mp
-import tqdm
+import threading
+import queue
+import traceback
+import yaml
+from tqdm import tqdm
+from typing import Optional, List, Literal, Dict, Any, Tuple
+
 from starstack.constants import RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES, RELION_PRED_POSE_CONFIDENCE_NAME, \
     RELION_EULER_CONVENTION
-from torch.nn.parallel import DistributedDataParallel as DDP
-import os.path as osp
-import socket
-import contextlib
-from typing import Optional, List, Literal, Dict, Any
-from progressBarDistributed import SharedMemoryProgressBarWorker, SharedMemoryProgressBar
 
+from cryoPARES import constants
+from cryoPARES.configManager.configParser import ConfigOverrideSystem
+from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
+from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.geometry.convert_angles import matrix_to_euler_angles
 from cryoPARES.models.model import PlModel
 from cryoPARES.datamanager.datamanager import DataManager
 
 
-class SharedMemoryManager:
-    """Manages shared memory tensors across processes."""
-
-    def __init__(self, world_size: int, n_items: int, top_k: int):
-        self.world_size = world_size
-        self.n_items = n_items
-        self.top_k = top_k
-        self.arrays: List[Dict[str, torch.Tensor]] = [{} for _ in range(self.world_size)]
-
-    def create_shared_arrays(self):
-        """Create shared memory arrays based on sample outputs."""
-        with torch.inference_mode():
-            for worker in range(self.world_size):
-                self.arrays[worker] = {
-                                    'eulerdegs': torch.zeros(
-                                        (self.n_items, self.top_k, 3),
-                                        dtype=torch.float32),
-                                    'rotprobs': torch.zeros(
-                                        (self.n_items, self.top_k),
-                                        dtype=torch.float32),
-                                    'shifts': torch.zeros(
-                                        (self.n_items, self.top_k, 2),
-                                        dtype=torch.float32),
-                                    'shiftprobs': torch.zeros(
-                                        (self.n_items, self.top_k),
-                                        dtype=torch.float32),
-                                    'idxs': torch.zeros(
-                                        (self.n_items,),
-                                        dtype=torch.int64)
-                }
-                if self.world_size > 1:
-                    for k in self.arrays[worker].keys():
-                        self.arrays[worker][k] = self.arrays[worker][k].share_memory_()
-
-    def cleanup(self):
-        """Clear shared memory arrays."""
-        for worker_arrays in self.arrays:
-            worker_arrays.clear()
-        self.arrays.clear()
-
-class PartitionInferencer:
+class AsyncPartitionInferencer:
     UPDATE_PROGRESS_BAR_N_BATCHES = 10
 
+    @inject_defaults_from_config(main_config.inference, update_config_with_args=True)
     def __init__(self,
                  star_fnames: List[str],
-                 checkpoint_path: str,
+                 checkpoint_dir: str,
                  results_dir: str,
-                 halfset: Literal["half1", "half2", "allParticles"] = None,
+                 halfset: Literal["half1", "half2", "allParticles"] = "allParticles",
                  particles_dir: Optional[List[str]] = None,
-                 batch_size: int = 32,
-                 use_cuda: bool = True,
-                 n_cpus_if_no_cuda: int = 4,
+                 batch_size: int = CONFIG_PARAM(),
+                 num_data_workers: int = CONFIG_PARAM(config=main_config.datamanager),
+                 use_cuda: bool = CONFIG_PARAM(),
+                 n_cpus_if_no_cuda: int = CONFIG_PARAM(),
                  compile_model: bool = False,
-                 top_k: int =1):
-        """Initialize inference for a partition."""
+                 top_k: int = CONFIG_PARAM()
+                 ):
+        """
+
+        :param star_fnames:
+        :param checkpoint_dir:
+        :param results_dir:
+        :param halfset:
+        :param particles_dir:
+        :param batch_size:
+        :param num_data_workers:
+        :param use_cuda:
+        :param n_cpus_if_no_cuda:
+        :param compile_model:
+        :param top_k:
+        """
+
         self.star_fnames = star_fnames
-        self.checkpoint_path = checkpoint_path
+        self.checkpoint_dir = checkpoint_dir
+
+        main_config.datamanager.num_augmented_copies_per_batch = 1 # We have not implemented test-time augmentation
+
         self.particles_dir = particles_dir
         self.batch_size = batch_size
         self.use_cuda = use_cuda
@@ -85,7 +69,17 @@ class PartitionInferencer:
         os.makedirs(results_dir, exist_ok=True)
 
         self.accelerator, self.device_count = self._setup_accelerator()
-        self.pbar_shm_name = None
+
+        # For async processing
+        self.models = []
+        self.streams = []
+        self.devices = []
+        self.input_queues = []
+        self.output_queue = queue.Queue()
+        self.stop_processing = threading.Event()
+        self.error_occurred = threading.Event()
+        self.error_message = None
+        self.processing_threads = []
 
     def _setup_accelerator(self):
         """Setup the computation device and count."""
@@ -97,31 +91,40 @@ class PartitionInferencer:
             device_count = self.n_cpus_if_no_cuda
 
         print(f'devices={device_count} accelerator={accelerator}', flush=True)
-        torch.set_num_threads(min(1, mp.cpu_count() // device_count))
+        torch.set_num_threads(min(1, torch.get_num_threads() // device_count))
         return accelerator, device_count
-
-    def _find_free_port(self):
-        """Find a free port for distributed communication."""
-        with contextlib.closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
-            s.bind(('', 0))
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            return s.getsockname()[1]
 
     def _setup_model(self, rank: Optional[int] = None):
         """Setup the model for inference."""
+
+        scriptmodel_fname = os.path.join(self.checkpoint_dir, self.halfset, "checkpoints", "best_script.pt")
+        if os.path.isfile(scriptmodel_fname):
+            scriptmodel = torch.jit.load(scriptmodel_fname)
+        else:
+            scriptmodel = None
+        checkpoint_fname = os.path.join(self.checkpoint_dir, self.halfset, "checkpoints", "best.ckpt")
         model = PlModel.load_from_checkpoint(
-            self.checkpoint_path,
+            checkpoint_fname,
             map_location="cpu",
-            symmetry=self.symmetry
+            model=scriptmodel
         )
-        device = rank if rank is not None else 'cuda:0'
+
+        # Handle missing symmetry attribute
+        if not hasattr(model, 'symmetry'):
+            # Try to get from hyperparameters or set default
+            if hasattr(model, 'hparams') and hasattr(model.hparams, 'symmetry'):
+                model.symmetry = model.hparams.symmetry
+            else:
+                raise RuntimeError("Symmetry not found in model")
+
+        device = f'cuda:{rank}' if rank is not None else 'cuda:0'
+        if self.accelerator == "cpu":
+            device = "cpu"
+
         model = model.to(device)
 
-        if rank is not None:  # Distributed mode
-            model = DDP(model, device_ids=[rank])
-
         if self.compile_model:
-            print("Compiling model")
+            print(f"Compiling model on device {device}")
             model = torch.compile(model)
 
         model.eval()
@@ -135,9 +138,12 @@ class PartitionInferencer:
         elif self.halfset == "half2":
             halfset = 2
 
+        hparams = os.path.join(self.checkpoint_dir, self.halfset, "hparams.yaml")
+        with open(hparams) as f:
+            symmetry = yaml.safe_load(f)["symmetry"]
         datamanager = DataManager(
             star_fnames=self.star_fnames,
-            symmetry=self.symmetry,
+            symmetry=symmetry,
             particles_dir=self.particles_dir,
             batch_size=self.batch_size,
             augment_train=False,  # No augmentation during inference
@@ -146,190 +152,292 @@ class PartitionInferencer:
             save_train_val_partition_dir=None  # Not needed for inference
         )
 
-        if rank is not None:
+        if rank is not None and world_size is not None:
             datamanager.setup_distributed(world_size, rank)
 
         return datamanager.predict_dataloader()
 
-    def _setup_shared_memory(self, world_size: int, n_items: int, top_k: int):
-        """Setup shared memory arrays for results."""
-        return SharedMemoryManager(world_size, n_items, top_k)
-
     def _process_batch(self, model: PlModel, batch: Dict[str, Any], batch_idx: int, device: torch.device):
-        """Process a single batch of data."""
-        batch = model.transfer_batch_to_device(batch, device, dataloader_idx=0)
+        """Process a single batch of data using predict_step."""
+
+        if hasattr(model, 'transfer_batch_to_device'):
+            batch = model.transfer_batch_to_device(batch, device, dataloader_idx=0)
+        else:
+            # Fallback: manually transfer tensors
+            for key, value in batch.items():
+                if isinstance(value, torch.Tensor):
+                    batch[key] = value.to(device, non_blocking=True)
+                elif isinstance(value, (list, tuple)) and len(value) > 0 and isinstance(value[0], torch.Tensor):
+                    batch[key] = [v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for v in value]
+
+        # Use predict_step as requested
+        result = model.predict_step(batch, batch_idx=batch_idx, dataloader_idx=0)
         (idd, (pred_rotmats, maxprobs, all_angles_probs),
-         (pred_shifts, shifts_probs), errors, metadata) = model.predict_step(batch, batch_idx=batch_idx)
+         (pred_shifts, shifts_probs), errors, metadata) = result
+
+        # Convert rotation matrices to euler angles
         euler_degs = torch.rad2deg(matrix_to_euler_angles(pred_rotmats, RELION_EULER_CONVENTION))
+
+        # Set shifts to zero as in original code
         pred_shifts.fill_(0.)
         shifts_probs.fill_(1.)
 
         return idd, (euler_degs, maxprobs), (pred_shifts, shifts_probs), metadata
 
+    def _gpu_worker(self, gpu_id: int, dataloader):
+        """Async worker for a single GPU - processes subset of batches."""
+        try:
+            if self.accelerator == "cuda":
+                torch.cuda.set_device(gpu_id)
+                device = torch.device(f'cuda:{gpu_id}')
+                stream = torch.cuda.Stream(device=device)
+            else:
+                device = torch.device("cpu")
+                stream = None
 
-    def _run_inference_worker(self, rank: Optional[int], world_size: Optional[int],
-                              port: Optional[int] = None, shared_mem: Optional[SharedMemoryManager] = None,
-                              pbar_shm_name: Optional[str] = None):
-        """Run inference on a single worker."""
-        if rank is not None:
-            dist.init_process_group(
-                "nccl",
-                init_method=f"tcp://localhost:{port}",
-                world_size=world_size,
-                rank=rank
-            )
-            torch.cuda.set_device(rank)
+            # Setup model for this GPU
+            model = self._setup_model(gpu_id if self.accelerator == "cuda" else None)
+
+            batch_results = []
+            batch_count = 0
+
+            # Process batches assigned to this GPU
+            for batch_idx, batch in enumerate(dataloader):
+                if batch_idx % self.device_count != gpu_id:
+                    continue  # Skip batches not assigned to this GPU
+
+                if self.error_occurred.is_set():
+                    break
+
+                if stream is not None:
+                    with torch.cuda.stream(stream):
+                        with torch.inference_mode():
+                            result = self._process_batch(model, batch, batch_idx, device)
+                    stream.synchronize()
+                else:
+                    with torch.inference_mode():
+                        result = self._process_batch(model, batch, batch_idx, device)
+
+                batch_results.append((batch_idx, result))
+                batch_count += 1
+
+                # Report progress periodically
+                if batch_count % self.UPDATE_PROGRESS_BAR_N_BATCHES == 0:
+                    self.output_queue.put(("PROGRESS", gpu_id, self.UPDATE_PROGRESS_BAR_N_BATCHES))
+
+            # Send remaining progress
+            remaining = batch_count % self.UPDATE_PROGRESS_BAR_N_BATCHES
+            if remaining > 0:
+                self.output_queue.put(("PROGRESS", gpu_id, remaining))
+
+            # Send results
+            self.output_queue.put(("RESULTS", gpu_id, batch_results))
+
+        except Exception as e:
+            self.error_message = f"GPU {gpu_id} worker error: {str(e)}\n{traceback.format_exc()}"
+            self.error_occurred.set()
+            print(self.error_message)
+        finally:
+            self.output_queue.put(("WORKER_DONE", gpu_id, None))
+
+    def _collect_results(self, total_batches: int) -> Tuple[Dict[int, Any], int]:
+        """Collect results from all GPU workers."""
+        all_results = {}
+        workers_done = 0
+        total_progress = 0
+
+        # Setup progress bar
+        pbar = tqdm(total=total_batches, desc="Processing batches")
 
         try:
-            # Setup for this worker
-            model = self._setup_model(rank)
-            dataloader = self._setup_dataloader(rank, world_size)
+            while workers_done < self.device_count:
+                if self.error_occurred.is_set():
+                    break
 
-            if rank is None:
-                shared_mem = shared_mem.arrays[0]
-            else:
-                shared_mem = shared_mem.arrays[rank]
+                try:
+                    message_type, gpu_id, data = self.output_queue.get(timeout=1.0)
 
-            if pbar_shm_name is None:
-                pbar = tqdm.tqdm(total=len(dataloader))
-            else:
-                pbar = SharedMemoryProgressBarWorker(worker_id=rank if rank is not None else 0,
-                                               shm_name=pbar_shm_name)
-                pbar.set_total_steps(len(dataloader))
+                    if message_type == "PROGRESS":
+                        total_progress += data
+                        pbar.update(data)
 
-            with (pbar):
-                device = torch.device(rank if rank is not None else 'cuda:0') #TODO: enable cpu only
+                    elif message_type == "RESULTS":
+                        for batch_idx, result in data:
+                            all_results[batch_idx] = result
 
-                # Ensure all processes have access to shared memory
-                if rank is not None:
-                    dist.barrier()
-                with torch.inference_mode():
-                    current_idx = 0
-                    for batch_idx, batch in enumerate(dataloader):
-                        # Process batch
-                        ids, (euler_degs, maxprobs), \
-                        (pred_shifts, shifts_probs), metadata = self._process_batch(model, batch, batch_idx, device)
+                    elif message_type == "WORKER_DONE":
+                        workers_done += 1
 
-                        # Write results directly to shared memory
-                        batch_size = len(ids)
-                        end_idx = current_idx + batch_size
+                except queue.Empty:
+                    continue
 
-                        shared_mem['eulerdegs'][current_idx:end_idx] = euler_degs.cpu()
-                        shared_mem['rotprobs'][current_idx:end_idx] = maxprobs.cpu()
-                        shared_mem['shifts'][current_idx:end_idx] = pred_shifts.cpu()
-                        shared_mem['shiftprobs'][current_idx:end_idx] = shifts_probs.cpu()
-                        shared_mem['idxs'][current_idx:end_idx] = torch.arange(current_idx, end_idx)
-                        current_idx = end_idx
+            return all_results, total_progress
 
-                        if (batch_idx + 1) % self.UPDATE_PROGRESS_BAR_N_BATCHES == 0:
-                            pbar.update(self.UPDATE_PROGRESS_BAR_N_BATCHES)
-
-                pbar.update(len(dataloader) - batch_idx - 1 )
-            # Ensure all processes have finished writing
-            if rank is not None:
-                dist.barrier()
         finally:
-            if rank is not None:
-                dist.destroy_process_group()
+            pbar.close()
 
     def run(self):
-        """Main entry point for running inference."""
+        """Main entry point for running async inference."""
+
 
         try:
-            dataloader = self._setup_dataloader(None, world_size=self.device_count)
+            # Get total dataset info
+            dataloader = self._setup_dataloader()
             dataset = dataloader.dataset
-            shared_mem = self._setup_shared_memory(self.device_count, len(dataset), top_k=self.top_k)
-            shared_mem.create_shared_arrays()
+            total_batches = len(dataloader)
+
+            print(f"Processing {len(dataset)} particles in {total_batches} batches")
+
+            # Reset async state
+            self.stop_processing.clear()
+            self.error_occurred.clear()
+            self.error_message = None
 
             if self.device_count > 1:
+                print(f"Using async multi-GPU processing with {self.device_count} GPUs")
 
-                # Start distributed processes
-                port = self._find_free_port()
-                mp.spawn(
-                    self._run_inference_worker,
-                    args=(self.device_count, port, shared_mem, self.pbar_shm_name),
-                    nprocs=self.device_count,
-                    join=True
-                )
+                # Start GPU worker threads
+                self.processing_threads = []
+                for gpu_id in range(self.device_count):
+                    thread = threading.Thread(
+                        target=self._gpu_worker,
+                        args=(gpu_id, dataloader),
+                        daemon=True
+                    )
+                    thread.start()
+                    self.processing_threads.append(thread)
+
+                # Collect results
+                all_results, total_progress = self._collect_results(total_batches)
+
+                # Wait for all workers to finish
+                for thread in self.processing_threads:
+                    thread.join(timeout=5.0)
+
             else:
-                self._run_inference_worker(None, None, shared_mem=shared_mem,
-                                           pbar_shm_name=self.pbar_shm_name)
+                print("Using single GPU processing")
+                # Single GPU processing
+                model = self._setup_model()
+                device = torch.device('cuda:0' if self.accelerator == "cuda" else "cpu")
 
-            for _dataset in dataset.datasets:
-                particlesSet = _dataset.particles
-                particles_md = particlesSet.particles_md
-                for k in range(self.top_k):
-                    suffix = "" if k == 0 else f"_top{k}"
-                    angles_names = [x + suffix for x in RELION_ANGLES_NAMES]
-                    shifts_names = [x + suffix for x in RELION_SHIFTS_NAMES]
-                    confide_name = RELION_PRED_POSE_CONFIDENCE_NAME + suffix
-                    particles_md[angles_names] = 0.
-                    particles_md[shifts_names] = 0.
-                    particles_md[confide_name] = 0.
-                    for worker in range(self.device_count):
-                        _worker_data = shared_mem.arrays[worker]
-                        idxs = shared_mem.arrays[worker]["idxs"]
-                        ids = particles_md.index[idxs]
-                        particles_md.loc[ids, angles_names] = _worker_data["eulerdegs"][..., k, :].numpy()
-                        particles_md.loc[ids, shifts_names] = _worker_data["shifts"][..., k, :].numpy()
-                        particles_md.loc[ids, confide_name] = (_worker_data["rotprobs"][..., k] *
-                                                               _worker_data["shiftprobs"][..., k]).numpy()
+                all_results = {}
+                pbar = tqdm(total=total_batches, desc="Processing batches")
 
-                out_fname = os.path.join(self.results_dir,
-                                         os.path.basename(particlesSet.starFname).removesuffix(".star")+"_nnet.star")
-                print(f"Results were saved at {out_fname}")
-                particlesSet.save(out_fname)
+                try:
+                    with torch.inference_mode():
+                        for batch_idx, batch in enumerate(dataloader):
+                            result = self._process_batch(model, batch, batch_idx, device)
+                            all_results[batch_idx] = result
+                            pbar.update(1)
+                finally:
+                    pbar.close()
+
+            if self.error_occurred.is_set():
+                raise RuntimeError(f"Error during processing: {self.error_message}")
+
+            # Aggregate results and save to STAR files (same logic as original)
+            self._save_results(all_results, dataset)
+
+        except Exception as e:
+            print(f"Inference failed: {e}")
+            raise
         finally:
-            if hasattr(self, 'shared_mem'):
-                self.shared_mem.cleanup()
+            self._cleanup()
 
-    def create_shared_bar(self):
-        if self.device_count == 1:
-            return MokupProgressBar()
-        else:
-            shmPbar = SharedMemoryProgressBar(self.device_count)
-            self.pbar_shm_name = shmPbar.shm_name
-            return shmPbar
+    def _save_results(self, all_results: Dict[int, Any], dataset):
+        """Save results to STAR files using original aggregation logic."""
+        print("Aggregating results and saving to STAR files...")
 
-class MokupProgressBar():
-    def __init__(self):
-        pass
-    def __enter__(self):
-        pass
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
+        # Create result tensors
+        n_particles = len(dataset)
+        result_arrays = {
+            'eulerdegs': torch.zeros((n_particles, self.top_k, 3), dtype=torch.float32),
+            'rotprobs': torch.zeros((n_particles, self.top_k), dtype=torch.float32),
+            'shifts': torch.zeros((n_particles, self.top_k, 2), dtype=torch.float32),
+            'shiftprobs': torch.zeros((n_particles, self.top_k), dtype=torch.float32),
+            'idxs': torch.arange(n_particles, dtype=torch.int64)
+        }
+
+        # Fill result arrays
+        current_idx = 0
+        for batch_idx in sorted(all_results.keys()):
+            idd, (euler_degs, maxprobs), (pred_shifts, shifts_probs), metadata = all_results[batch_idx]
+
+            batch_size = len(idd)
+            end_idx = current_idx + batch_size
+
+            result_arrays['eulerdegs'][current_idx:end_idx] = euler_degs.cpu()
+            result_arrays['rotprobs'][current_idx:end_idx] = maxprobs.cpu()
+            result_arrays['shifts'][current_idx:end_idx] = pred_shifts.cpu()
+            result_arrays['shiftprobs'][current_idx:end_idx] = shifts_probs.cpu()
+
+            current_idx = end_idx
+
+        # Save to STAR files (same logic as original)
+        for datIdx, _dataset in enumerate(dataset.datasets):
+            particlesSet = _dataset.particles
+            particles_md = particlesSet.particles_md
+
+            for k in range(self.top_k):
+                suffix = "" if k == 0 else f"_top{k}"
+                angles_names = [x + suffix for x in RELION_ANGLES_NAMES]
+                shifts_names = [x + suffix for x in RELION_SHIFTS_NAMES]
+                confide_name = RELION_PRED_POSE_CONFIDENCE_NAME + suffix
+
+                particles_md[angles_names] = 0.
+                particles_md[shifts_names] = 0.
+                particles_md[confide_name] = 0.
+
+                # Get indices for this dataset
+                idxs = result_arrays["idxs"]
+                ids = particles_md.index[idxs]
+
+                particles_md.loc[ids, angles_names] = result_arrays["eulerdegs"][..., k, :].numpy()
+                particles_md.loc[ids, shifts_names] = result_arrays["shifts"][..., k, :].numpy()
+                particles_md.loc[ids, confide_name] = (result_arrays["rotprobs"][..., k] *
+                                                       result_arrays["shiftprobs"][..., k]).numpy()
+
+            if particlesSet.starFname is not None:
+                basename =  os.path.basename(particlesSet.starFname).removesuffix(".star")
+            else:
+                basename = "particles%d"%datIdx
+            out_fname = os.path.join(self.results_dir, basename + "_nnet.star")
+            print(f"Results were saved at {out_fname}")
+            particlesSet.save(out_fname)
+
+    def _cleanup(self):
+        """Clean up resources."""
+        self.stop_processing.set()
+
+        # Clear queues
+        while not self.output_queue.empty():
+            try:
+                self.output_queue.get_nowait()
+            except queue.Empty:
+                break
+
+
+# Backwards compatibility - keep the same class name and interface
+class PartitionInferencer(AsyncPartitionInferencer):
+    """Backwards compatible class name."""
+    pass
+
 
 if __name__ == "__main__":
-    from argparse import ArgumentParser
-
-    parser = ArgumentParser(description="Run inference with cryoPARES model")
-    parser.add_argument("--star_fnames", type=str, nargs="+", required=True)
-    parser.add_argument("--results_dir", type=str, required=True)
-    parser.add_argument("--checkpoint_path", type=str, required=True)
-    parser.add_argument("--particles_dir", type=str, nargs="+")
-    parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--compile_model", action="store_true")
-    parser.add_argument("--halfset", type=str, choices=["half1", "half2", "allParticles"])
-    parser.add_argument("--top_k", type=int, default=1)
+    os.environ[constants.PROJECT_NAME + "__ENTRY_POINT"] = "staticNnetInference.py"
+    print("---------------------------------------")
+    print(" ".join(sys.argv))
+    print("---------------------------------------")
+    from cryoPARES.configManager.configParser import ConfigArgumentParser
 
 
-    args = parser.parse_args()
+    parser = ConfigArgumentParser(prog="infer_cryoPARES", description="Run inference with cryoPARES model",
+                                  config_obj=main_config)
+    parser.add_args_from_function(PartitionInferencer.__init__)
+    args, config_args = parser.parse_args()
 
-    inferencer = PartitionInferencer(
-        star_fnames=args.star_fnames,
-        checkpoint_path=args.checkpoint_path,
-        results_dir=args.results_dir,
-        particles_dir=args.particles_dir,
-        batch_size=args.batch_size,
-        compile_model=args.compile_model,
-        halfset=args.halfset,
-        top_k=args.top_k
-    )
-    with inferencer.create_shared_bar() as pbar:
-        inferencer.run()
+    # Update config #TODO: This needs to happen before being added to config
+    config_fname = max(glob.glob(os.path.join(args.checkpoint_dir, "configs_*.yml")), key=os.path.getmtime)
+    ConfigOverrideSystem.update_config_from_file(main_config, config_fname, )
 
-"""
-
-python -m cryoPARES.inference.nnetWorkers.staticNnetInference --star_fnames /home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/1000particles.star --checkpoint_path /tmp/train_cryoPARES/version_0/half1/checkpoints/best.ckpt --results_dir /tmp/cryoParesInfer/
-
-"""
+    PartitionInferencer(**vars(args)).run()

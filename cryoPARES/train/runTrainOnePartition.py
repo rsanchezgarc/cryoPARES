@@ -228,7 +228,8 @@ class TrainerPartition:
                                                                 else os.path.dirname(self.particles_star_fname[fnameIdx])
 
                     output_fname = os.path.join(reconstructions_dir, "%d.mrc" % fnameIdx)
-                    kwargs = dict(particles_star_fname=fname, symmetry=self.symmetry,
+                    kwargs = dict(particles_star_fname=fname,
+                                  symmetry=self.symmetry,
                                   output_fname=output_fname,      # TODO: Add things to CONFIG
                                   particles_dir=particles_dir,
                                   num_workers=1, batch_size=64,
@@ -249,7 +250,8 @@ class TrainerPartition:
                         cmd.split(),
                         cwd=os.path.abspath(os.path.join(__file__, "..", "..", "..")), check=True
                     )
-
+            else:
+                warnings.warn("No validation particles found, directional precentiles were not computed")
     def _save_training_completion(self, checkpointer):
         dirname = osp.dirname(checkpointer.best_model_path)
         if dirname is None:

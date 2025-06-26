@@ -188,16 +188,8 @@ class Image2Sphere(nn.Module):
         maxprob = probs.gather(dim=-1, index=pred_rotmat_id)
         return wD, rotMat_logits, pred_rotmat_id, pred_rotmat, maxprob
 
-    def _get_batch_indices(self, batch_size: int, device: torch.device) -> torch.Tensor:
-        """Replace _forward_with_neigs_batch_dim_selector with direct computation"""
-        if self._cached_batch_size_range != batch_size or self._cached_batch_indices.device != device:
-            # Update cache
-            indices = torch.arange(batch_size, device=device)
-            self._cached_batch_indices = indices
-            self._cached_batch_size_range.copy_(torch.tensor(batch_size, device=device))
-        return self._cached_batch_indices
 
-    def forward_with_neigs(self, img:torch.Tensor, top_k:int):
+    def forward_with_neigs(self, img:torch.Tensor, top_k:int): #TODO: FORWARD WITH NEIGS NEEDS TO BE EXPOSED
 
         wD = self.predict_wignerDs(img)
         rotMat_logits, pred_rotmat_id, pred_rotmat = self.from_wignerD_to_topKMats(wD, top_k)
@@ -218,7 +210,21 @@ class Image2Sphere(nn.Module):
             # print(R.from_matrix(pred_rotmat).as_euler("ZYZ", degrees=True).round(3))
         return wD, rotMat_logits, pred_rotmat_id, pred_rotmat, maxprob.squeeze(-1)
 
-    def _get_neigs_matrix(self, k=10):
+    def _get_batch_indices(self, batch_size: int, device: torch.device) -> torch.Tensor:
+        """
+        Used for indexing in forward_with_neigs
+        :param batch_size:
+        :param device:
+        :return:
+        """
+        if self._cached_batch_size_range != batch_size or self._cached_batch_indices.device != device:
+            # Update cache
+            indices = torch.arange(batch_size, device=device)
+            self._cached_batch_indices = indices
+            self._cached_batch_size_range.copy_(torch.tensor(batch_size, device=device))
+        return self._cached_batch_indices
+
+    def _get_neigs_matrix(self, k=10): #TOOO: k should be in the config
         """
 
         :param k: The number of nearest neighbours to compute
@@ -317,70 +323,6 @@ class Image2Sphere(nn.Module):
         loss = loss + contrast_loss
 
         return (wD, rotMat_logits, pred_rotmat_ids, pred_rotmats, maxprobs), loss, error_rads
-
-# i2s_sym_equiv_cache = get_cache("i2s_sym_equiv_cache")
-# @i2s_sym_equiv_cache.cache()
-# def compute_symmetry_indices(lmax: int, hp_order: int, symmetry: str) -> Tuple[SO3OutputGrid, torch.Tensor,
-#                                                                             torch.Tensor, torch.Tensor, torch.Tensor]:
-#     """Compute symmetry indices for the rotation matrices."""
-#
-#     so3_grid = SO3OutputGrid(lmax=lmax, hp_order=hp_order)
-#     n_rotmats = so3_grid.output_rotmats.shape[0]
-#     symmetryGroupMatrix = getSymmetryGroup(symmetry, as_matrix=True)
-#
-#     sym_equiv_idxs = torch.empty(n_rotmats, symmetryGroupMatrix.shape[0], dtype=torch.int64)
-#     ori_device = so3_grid.output_rotmats.device
-#     so3_grid = so3_grid.cuda()
-#     output_rotmats = so3_grid.output_rotmats
-#
-#     batch_size = 512 if not torch.cuda.is_available() else (
-#         64 if torch.cuda.get_device_properties(0).total_memory / 1e9 > 23.0 else 32
-#     )
-#
-#     if torch.cuda.is_available():
-#         symmetryGroupMatrix = symmetryGroupMatrix.cuda()
-#         sym_equiv_idxs = sym_equiv_idxs.cuda()
-#
-#     for start_idx in tqdm(range(0, n_rotmats, batch_size), desc="Computing symmetry indices"):
-#         end_idx = min(start_idx + batch_size, n_rotmats)
-#         batch_rotmats = output_rotmats[start_idx:end_idx]
-#         expanded_rotmats = torch.einsum("gij,pjk->gpik", symmetryGroupMatrix, batch_rotmats)
-#
-#         for i in range(symmetryGroupMatrix.shape[0]):
-#             _, batch_matched_idxs = so3_grid.nearest_rotmat_idx(expanded_rotmats[i, ...])
-#             sym_equiv_idxs[start_idx:end_idx, i] = batch_matched_idxs
-#
-#     so3_grid= so3_grid.to(ori_device)
-#
-#     magnitudes = rotation_magnitude(output_rotmats)
-#
-#     seen = set()
-#     selected_idxs = []
-#     old_idx_to_new_idx = -999999 * torch.ones(n_rotmats, dtype=torch.int64)
-#     current_n_added = -1
-#
-#     for i in range(n_rotmats):
-#         added = False
-#         candidates = sorted(sym_equiv_idxs[i].tolist(),
-#                             key=lambda ei: (magnitudes[ei].round(decimals=5), ei))
-#
-#         for ei in candidates:
-#             if ei in seen:
-#                 continue
-#             elif not added:
-#                 selected_idxs.append(ei)
-#                 added = True
-#                 current_n_added += 1
-#             seen.add(ei)
-#
-#         if added:
-#             for ei in candidates:
-#                 old_idx_to_new_idx[ei] = current_n_added
-#
-#     selected_rotmat_idxs = torch.as_tensor(selected_idxs, device=output_rotmats.device)
-#
-#     return (so3_grid.cpu(), symmetryGroupMatrix.cpu(), sym_equiv_idxs.unsqueeze(0).cpu(),
-#             selected_rotmat_idxs.cpu(), old_idx_to_new_idx.cpu())
 
 
 @functools.lru_cache(maxsize=None)
@@ -518,10 +460,9 @@ def _test():
     with torch.inference_mode():
         from scipy.spatial.transform import Rotation
         gt_rot = torch.from_numpy(Rotation.random(b, random_state=42).as_matrix().astype(np.float32))
-        # wD, rotMat_logits, pred_rotmat, maxprob = model.forward(imgs, top_k=1)
-        # wD, rotMat_logits, pred_rotmat_idxs, pred_rotmat, maxprob = model.forward(imgs, top_k=1)
-        # wD, rotMat_logits, pred_rotmat_idxs, pred_rotmat, maxprob = model.forward_with_neigs(imgs, top_k=1)
-        (wD, rotMat_logits, pred_rotmat_ids, pred_rotmat, maxprobs), loss, error_rads = model.forward_and_loss(imgs, gt_rot)
+        wD, rotMat_logits, pred_rotmat_idxs, pred_rotmat, maxprob = model.forward(imgs, top_k=2)
+        wD, rotMat_logits, pred_rotmat_idxs, pred_rotmat, maxprob = model.forward_with_neigs(imgs, top_k=2)
+        # (wD, rotMat_logits, pred_rotmat_ids, pred_rotmat, maxprobs), loss, error_rads = model.forward_and_loss(imgs, gt_rot)
 
 
         print("logits", rotMat_logits.shape)

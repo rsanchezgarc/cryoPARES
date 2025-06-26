@@ -28,5 +28,7 @@ class Train_config:
     default_optimizer: str = "RAdam"
     warmup_n_epochs: Optional[int] = None
 
+    cuda_for_reconstruct: bool = False
+
     pl_plugin: Literal["LightningEnvironment", "none"] = "LightningEnvironment"  #Try none to submit to slurm
     num_computer_nodes: int  = 1 #It has not been tried with values different from 1

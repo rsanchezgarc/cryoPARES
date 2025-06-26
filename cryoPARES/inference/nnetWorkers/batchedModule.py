@@ -223,10 +223,11 @@ class StreamingKStagePipeline(nn.Module):
         config = self.stage_configs[stage_idx]
 
         # Prepare input data for the model
-        # First stage gets raw input data, subsequent stages get processed data
         if 'stage_outputs' in data:
-            # This is data from a previous stage - pass it as-is to the model
-            model_input = data
+            # This is data from a previous stage - extract the stage_outputs
+            # The model should receive the actual outputs from the previous stage,
+            # not the entire pipeline data structure
+            model_input = data['stage_outputs']
         else:
             # This is initial input data - pass it directly
             model_input = data
@@ -258,21 +259,16 @@ class StreamingKStagePipeline(nn.Module):
         """
         print(
             f"DEBUG: _process_data_through_stages called with start_stage={start_stage}, num_stages={self.num_stages}")
-        print(f"  Data keys: {list(data.keys())}")
-        if 'stage_outputs' in data:
-            print(f"  Stage outputs keys: {list(data['stage_outputs'].keys())}")
-
         current_stage_data = [data]  # List of data items to process
         final_results = []
 
         # Process through each stage from start_stage to end
+        print(f"DEBUG: Processing stages {start_stage} to {self.num_stages - 1}")
         for stage_idx in range(start_stage, self.num_stages):
             config = self.stage_configs[stage_idx]
             next_stage_data = []
-
-            print(f"DEBUG: Processing stage {stage_idx} ({config.stage_name})")
-            print(f"  Stage has threshold: {config.threshold is not None}")
-            print(f"  Processing {len(current_stage_data)} data items through this stage")
+            print(
+                f"DEBUG: Processing stage {stage_idx}, has_threshold={config.threshold is not None}, data_items={len(current_stage_data)}")
 
             # Process each data item through current stage
             for data_item in current_stage_data:
@@ -325,28 +321,33 @@ class StreamingKStagePipeline(nn.Module):
 
                             # If buffer processing occurred, continue through remaining stages
                             if processed_results:
-                                print(f"DEBUG: Stage {stage_idx} buffer produced {len(processed_results)} results")
-                                print(f"  Checking if more stages: {stage_idx + 1} < {self.num_stages}")
-
                                 if stage_idx + 1 < self.num_stages:
                                     # Continue processing through remaining stages
-                                    print(f"  Continuing to remaining stages starting from {stage_idx + 1}")
-                                    for i, result in enumerate(processed_results):
-                                        print(f"    Processing buffer result {i} through remaining stages")
+                                    print(
+                                        f"DEBUG: Continuing to stage {stage_idx + 1} with {len(processed_results)} results")
+                                    for result in processed_results:
                                         continuation_results = self._process_data_through_stages(
                                             result, start_stage=stage_idx + 1, batch_idx=batch_idx
                                         )
                                         if continuation_results:
-                                            print(f"      Got {len(continuation_results)} continuation results")
+                                            print(f"DEBUG: Got {len(continuation_results)} continuation results")
                                             final_results.extend(continuation_results)
-                                        else:
-                                            print(f"      No continuation results from remaining stages")
                                 else:
                                     # This was the last stage, these are final results
-                                    print(f"  Stage {stage_idx} was final stage, using buffer results directly")
-                                    final_results.extend(processed_results)
+                                    print(
+                                        f"DEBUG: Stage {stage_idx} is last stage, adding {len(processed_results)} final results")
+                                    # Ensure they maintain proper structure
+                                    for result in processed_results:
+                                        if isinstance(result, dict) and 'stage_outputs' in result:
+                                            final_results.append(result)
+                                        else:
+                                            print(f"Warning: Buffer result missing stage_outputs: {type(result)}")
+                                            print(
+                                                f"  Result keys: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}")
                     else:
                         # No filtering - data flows directly to next stage
+                        print(
+                            f"DEBUG: Stage {stage_idx} (non-filtering) produced outputs: {list(stage_outputs.keys())}")
                         next_stage_data.append(processed_data)
 
                 except Exception as e:
@@ -355,32 +356,52 @@ class StreamingKStagePipeline(nn.Module):
 
             # Update data for next stage (only if no filtering in current stage)
             if config.threshold is None:
+                print(f"DEBUG: Stage {stage_idx} non-filtering - updating current_stage_data for next iteration")
                 current_stage_data = next_stage_data
             else:
                 # With filtering, data continuation is handled above via recursion
+                print(f"DEBUG: Stage {stage_idx} filtering - breaking from loop")
                 break
 
-        # If we processed through all stages without filtering, return the final data
-        if start_stage < self.num_stages and len(current_stage_data) > 0:
-            # Check if we reached the end without filtering on the last stage
-            last_stage_idx = self.num_stages - 1
-            if last_stage_idx >= start_stage and self.stage_configs[last_stage_idx].threshold is None:
-                # Convert final stage data to proper result format
-                print(f"DEBUG: Processing final stage data. Current stage data count: {len(current_stage_data)}")
-                for i, data_item in enumerate(current_stage_data):
-                    print(f"  Final data item {i} keys: {list(data_item.keys())}")
+        # Handle final results ONLY if we've processed through ALL stages
+        # Don't add intermediate results from non-filtering stages
+        if len(current_stage_data) > 0:
+            print(f"DEBUG: End of loop - checking if {len(current_stage_data)} items should be added as final results")
+            # Check if we've actually processed through all stages
+            all_stages_processed = True
+            for stage_idx in range(start_stage, self.num_stages):
+                config = self.stage_configs[stage_idx]
+                if config.threshold is not None:
+                    # If there's any filtering stage ahead, we haven't finished
+                    print(f"DEBUG: Found filtering stage {stage_idx} ahead - not adding intermediate results")
+                    all_stages_processed = False
+                    break
+
+            if all_stages_processed:
+                print(f"DEBUG: Adding {len(current_stage_data)} items from final non-filtering stages")
+                # Ensure all final results have proper structure
+                for data_item in current_stage_data:
                     if isinstance(data_item, dict) and 'stage_outputs' in data_item:
-                        print(f"    Final stage_outputs keys: {list(data_item['stage_outputs'].keys())}")
+                        # Already properly structured
                         final_results.append(data_item)
                     else:
-                        # Handle case where data_item might not be properly structured
+                        # This should not happen with the corrected logic, but handle just in case
                         print(f"Warning: Unexpected final stage data format: {type(data_item)}")
-                        print(f"  Data item contents: {data_item}")
-                        if isinstance(data_item, dict):
-                            final_results.append({
-                                'stage_outputs': data_item.get('stage_outputs', data_item),
-                                'metadata': data_item.get('metadata', None)
-                            })
+                        # DO NOT use fallback logic that caused the original bug
+                        # Instead, skip malformed results
+                        continue
+            else:
+                print(f"DEBUG: Not adding {len(current_stage_data)} intermediate results - more filtering stages ahead")
+
+        # Debug: Check what we're returning
+        print(f"DEBUG: _process_data_through_stages (start_stage={start_stage}) returning {len(final_results)} results")
+        if final_results:
+            sample = final_results[0]
+            print(f"  Sample result type: {type(sample)}")
+            if isinstance(sample, dict):
+                print(f"  Sample result keys: {list(sample.keys())}")
+                if 'stage_outputs' in sample:
+                    print(f"  Sample stage_outputs keys: {list(sample['stage_outputs'].keys())}")
 
         return final_results if final_results else None
 
@@ -450,14 +471,14 @@ def create_simple_two_stage_pipeline(stage1_model, stage2_model,
     """
     Helper function to create a simple two-stage pipeline (backward compatibility).
 
-    Stage 1: Filtering stage (with threshold)
-    Stage 2: Non-filtering stage (processes filtered results)
+    After the fix: stage2_model now receives the stage_outputs from stage1_model directly,
+    not wrapped in the pipeline data structure. This is more intuitive and backward compatible.
 
-    Note: stage2_model should expect input data in the format:
+    stage2_model should expect input data in the format:
     {
-        'stage_outputs': {outputs_from_stage1},
-        'metadata': metadata,
-        'batch_idx': batch_idx
+        'pred_rotmats': tensor,  # or whatever outputs stage1 produces
+        'norm_score': tensor,
+        # ... other stage1 outputs
     }
     """
 
@@ -472,8 +493,6 @@ def create_simple_two_stage_pipeline(stage1_model, stage2_model,
         PipelineStageConfig(
             model=stage2_model,
             threshold=None,  # No filtering after final stage
-            score_output_key=None,  # No score needed for non-filtering stage
-            buffer_size=None,  # No buffer needed for non-filtering stage
             stage_name='stage2_refine'
         )
     ]
@@ -634,7 +653,7 @@ if __name__ == "__main__":
     # BASIC FUNCTIONALITY TESTS (Adapted from 2-stage)
     # ========================================================================
 
-    def test_basic_k_stage_functionality():
+    def _test_basic_k_stage_functionality():
         """Test basic k-stage pipeline functionality"""
         print("\n=== Test 1: Basic K-Stage Functionality ===")
 
@@ -671,7 +690,7 @@ if __name__ == "__main__":
             print("✓ Result structure is correct")
 
 
-    def test_k_stage_buffer_overflow():
+    def _test_k_stage_buffer_overflow():
         """Test buffer overflow handling in k-stage pipeline"""
         print("\n=== Test 2: K-Stage Buffer Overflow Handling ===")
 
@@ -714,7 +733,7 @@ if __name__ == "__main__":
         assert len(all_results) > 0, "Should have processed some samples"
 
 
-    def test_no_filtered_samples_k_stage():
+    def _test_no_filtered_samples_k_stage():
         """Test k-stage handling when no samples pass filters"""
         print("\n=== Test 3: No Filtered Samples (K-Stage) ===")
 
@@ -738,7 +757,7 @@ if __name__ == "__main__":
         assert len(results) == 0, f"Should have no results with high threshold, got {len(results)}"
 
 
-    def test_exact_buffer_size_k_stage():
+    def _test_exact_buffer_size_k_stage():
         """Test when filtered samples exactly match buffer sizes"""
         print("\n=== Test 4: Exact Buffer Size Match (K-Stage) ===")
 
@@ -764,7 +783,7 @@ if __name__ == "__main__":
         print(f"✓ Processed {len(results)} samples with controlled filtering")
 
 
-    def test_k_stage_buffer_statistics():
+    def _test_k_stage_buffer_statistics():
         """Test buffer statistics and monitoring in k-stage pipeline"""
         print("\n=== Test 5: K-Stage Buffer Statistics ===")
 
@@ -809,7 +828,7 @@ if __name__ == "__main__":
         print("✓ Clear all buffers functionality works")
 
 
-    def test_threshold_adjustment_k_stage():
+    def _test_threshold_adjustment_k_stage():
         """Test dynamic threshold adjustment in k-stage pipeline"""
         print("\n=== Test 6: Threshold Adjustment (K-Stage) ===")
 
@@ -842,7 +861,7 @@ if __name__ == "__main__":
         print("✓ Threshold adjustment works")
 
 
-    def test_device_handling_k_stage():
+    def _test_device_handling_k_stage():
         """Test device handling in k-stage pipeline"""
         print("\n=== Test 7: Device Handling (K-Stage) ===")
 
@@ -873,7 +892,7 @@ if __name__ == "__main__":
             print("✓ Device consistency maintained")
 
 
-    def test_large_batch_overflow_k_stage():
+    def _test_large_batch_overflow_k_stage():
         """Test handling very large batches in k-stage pipeline"""
         print("\n=== Test 8: Large Batch Overflow (K-Stage) ===")
 
@@ -909,7 +928,7 @@ if __name__ == "__main__":
     # ADVANCED K-STAGE SPECIFIC TESTS
     # ========================================================================
 
-    def test_mixed_filtering_pipeline():
+    def _test_mixed_filtering_pipeline():
         """Test pipeline with mixed filtering/non-filtering stages"""
         print("\n=== Test 9: Mixed Filtering Pipeline ===")
 
@@ -950,7 +969,7 @@ if __name__ == "__main__":
         print(f"✓ Mixed pipeline processed {len(results)} samples")
 
 
-    def test_multi_stage_cascade_overflow():
+    def _test_multi_stage_cascade_overflow():
         """Test cascading buffer overflows across multiple stages"""
         print("\n=== Test 10: Multi-Stage Cascade Overflow ===")
 
@@ -996,7 +1015,7 @@ if __name__ == "__main__":
         print(f"✓ Total processed through cascade: {len(all_results)} samples")
 
 
-    def test_different_buffer_sizes():
+    def _test_different_buffer_sizes():
         """Test stages with different buffer sizes"""
         print("\n=== Test 11: Different Buffer Sizes ===")
 
@@ -1039,7 +1058,7 @@ if __name__ == "__main__":
         print(f"✓ Stage 1 buffer size: {buffer_stats[1]['buffer_size']}")
 
 
-    def test_extreme_pipeline_configurations():
+    def _test_extreme_pipeline_configurations():
         """Test extreme pipeline configurations"""
         print("\n=== Test 12: Extreme Pipeline Configurations ===")
 
@@ -1081,7 +1100,7 @@ if __name__ == "__main__":
         print(f"✓ Buffers in 5-stage: {len(five_pipeline.stage_buffers)}")
 
 
-    def test_pipeline_error_propagation():
+    def _test_pipeline_error_propagation():
         """Test error handling and propagation in k-stage pipeline"""
         print("\n=== Test 13: Pipeline Error Propagation ===")
 
@@ -1142,7 +1161,7 @@ if __name__ == "__main__":
         print("✓ Pipeline continues processing despite internal errors")
 
 
-    def test_nan_inf_handling_k_stage():
+    def _test_nan_inf_handling_k_stage():
         """Test NaN/Inf handling in k-stage pipeline"""
         print("\n=== Test 14: NaN/Inf Handling (K-Stage) ===")
 
@@ -1189,7 +1208,7 @@ if __name__ == "__main__":
             print("✓ Exception handling working (NaN/Inf detected)")
 
 
-    def test_empty_batches_k_stage():
+    def _test_empty_batches_k_stage():
         """Test empty batches and edge cases in k-stage pipeline"""
         print("\n=== Test 15: Empty Batches (K-Stage) ===")
 
@@ -1223,7 +1242,7 @@ if __name__ == "__main__":
         print("✓ Multiple empty batches handled safely")
 
 
-    def test_buffer_state_consistency_k_stage():
+    def _test_buffer_state_consistency_k_stage():
         """Test buffer state consistency across complex operations"""
         print("\n=== Test 16: Buffer State Consistency (K-Stage) ===")
 
@@ -1288,7 +1307,7 @@ if __name__ == "__main__":
         print("✓ Buffer state consistency maintained throughout operations")
 
 
-    def test_pipeline_configuration_validation():
+    def _test_pipeline_configuration_validation():
         """Test pipeline configuration validation"""
         print("\n=== Test 17: Pipeline Configuration Validation ===")
 
@@ -1337,7 +1356,7 @@ if __name__ == "__main__":
         print("✓ Valid configuration accepted")
 
 
-    def test_complex_data_flow():
+    def _test_complex_data_flow():
         """Test complex data flow scenarios"""
         print("\n=== Test 18: Complex Data Flow ===")
 
@@ -1391,7 +1410,7 @@ if __name__ == "__main__":
             print(f"✓ Complex outputs preserved: {list(stage_outputs.keys())}")
 
 
-    def test_performance_stress():
+    def _test_performance_stress():
         """Stress test with many stages and large data"""
         print("\n=== Test 19: Performance Stress Test ===")
 
@@ -1430,7 +1449,7 @@ if __name__ == "__main__":
         print(f"✓ Stress test stats: {stats['total_stages']} stages, {stats['stages_with_filtering']} filtering")
 
 
-    def test_backward_compatibility_comprehensive():
+    def _test_backward_compatibility_comprehensive():
         """Comprehensive backward compatibility test"""
         print("\n=== Test 20: Comprehensive Backward Compatibility ===")
 
@@ -1446,37 +1465,27 @@ if __name__ == "__main__":
             def _get_batch_size(self, data):
                 if 'inputs' in data:
                     return data['inputs'].shape[0]
-                elif 'stage_outputs' in data:
-                    for key, value in data['stage_outputs'].items():
+                elif isinstance(data, dict):
+                    for key, value in data.items():
                         if isinstance(value, torch.Tensor):
                             return value.shape[0]
                 return 1
 
         class BackwardCompatStage2(MockStageModel):
             def forward(self, data):
-                # Debug: Show what Stage 2 receives
-                print(f"DEBUG: Stage 2 received data keys: {list(data.keys())}")
-                if 'stage_outputs' in data:
-                    print(f"  Stage 2 received stage_outputs keys: {list(data['stage_outputs'].keys())}")
-
                 batch_size = self._get_batch_size(data)
-                print(f"  Stage 2 determined batch_size: {batch_size}")
-
-                # Stage 2 should produce its own outputs
-                result = {
+                return {
                     'refined_rotmats': torch.randn(batch_size, 5, 3, 3),
                     'refined_probs': torch.rand(batch_size, 5)
                 }
-                print(f"  Stage 2 producing outputs: {list(result.keys())}")
-                return result
 
             def _get_batch_size(self, data):
-                if 'stage_outputs' in data:
-                    for key, value in data['stage_outputs'].items():
+                # After the fix, stage 2 receives the actual outputs from stage 1
+                # which should be: {'pred_rotmats': tensor, 'norm_score': tensor}
+                if isinstance(data, dict):
+                    for key, value in data.items():
                         if isinstance(value, torch.Tensor):
                             return value.shape[0]
-                if 'inputs' in data:
-                    return data['inputs'].shape[0]
                 return 1
 
         stage1_model = BackwardCompatStage1("compat_stage1", {
@@ -1494,9 +1503,6 @@ if __name__ == "__main__":
             threshold1=0.4, buffer_size=8, device='cpu'
         )
 
-        # Enable debug mode for this test
-        compat_pipeline._debug_mode = True
-
         # Process data similar to original usage
         dataloader = create_mock_dataloader(num_batches=3, batch_size=4)
         results = process_dataset_k_stage(dataloader, compat_pipeline, log_stats=False)
@@ -1509,40 +1515,157 @@ if __name__ == "__main__":
             print(f"  Sample keys: {list(sample.keys())}")
             if 'stage_outputs' in sample:
                 print(f"  Stage outputs keys: {list(sample['stage_outputs'].keys())}")
-            else:
-                print(f"  ⚠️  No stage_outputs key found! Sample structure: {sample}")
 
-        # Verify structure matches expected format for TWO-STAGE pipeline
-        if results:
-            sample = results[0]
-
-            # Check if it has the expected structure
-            if 'stage_outputs' in sample:
+                # Verify structure matches expected format for TWO-STAGE pipeline
                 stage_outputs = sample['stage_outputs']
-
-                # Should have outputs from the SECOND stage (refined outputs)
                 expected_keys = ['refined_rotmats', 'refined_probs']
                 actual_keys = list(stage_outputs.keys())
 
-                missing_keys = [key for key in expected_keys if key not in actual_keys]
-                if missing_keys:
-                    print(f"  ⚠️  Missing expected keys: {missing_keys}")
-                    print(f"  Actual keys: {actual_keys}")
-                    # This might be OK if we got stage 1 outputs instead
-                    if 'pred_rotmats' in actual_keys and 'norm_score' in actual_keys:
-                        print("  ✓ Got stage 1 outputs (partial pipeline completion)")
-                    else:
-                        raise AssertionError(f"Unexpected output structure: {actual_keys}")
-                else:
+                if all(key in actual_keys for key in expected_keys):
                     print("✓ Output structure matches full two-stage pipeline requirements")
                     print(f"✓ Final stage outputs: {actual_keys}")
+                else:
+                    raise AssertionError(f"Expected keys {expected_keys}, got {actual_keys}")
             else:
-                # Results don't have expected structure - this indicates a pipeline issue
-                print(f"❌ Results missing 'stage_outputs' key: {list(sample.keys())}")
-                # Let's be more flexible for now and just verify we got some results
-                print("✓ Pipeline produced results (structure needs adjustment)")
+                raise AssertionError(f"Results missing 'stage_outputs' key: {list(sample.keys())}")
         else:
-            print("⚠️  No results produced - check filtering threshold")
+            raise AssertionError("No results produced - check filtering threshold")
+
+
+    def _test_multi_stage_filtering_fixed():
+        """Test that multi-stage filtering works correctly after the fix"""
+        print("\n=== Test 21: Multi-Stage Filtering Fixed ===")
+
+        # Create a 3-stage pipeline with filtering at stages 0 and 2
+        stage_configs = [
+            PipelineStageConfig(
+                model=ControlledScoreModel("stage1", {"pred1": (3,), "score1": (1,)},
+                                           [0.8, 0.6, 0.8, 0.6] * 5),  # Most pass
+                threshold=0.5,
+                score_output_key="score1",
+                buffer_size=4,
+                stage_name="multi_filter_stage_1"
+            ),
+            PipelineStageConfig(
+                model=MockStageModel("stage2", {"pred2": (5,)}),
+                threshold=None,  # No filtering
+                stage_name="multi_process_stage_2"
+            ),
+            PipelineStageConfig(
+                model=ControlledScoreModel("stage3", {"pred3": (2,), "score3": (1,)},
+                                           [0.9, 0.9, 0.9, 0.9] * 5),  # All pass
+                threshold=0.7,
+                score_output_key="score3",
+                buffer_size=3,
+                stage_name="multi_filter_stage_3"
+            )
+        ]
+
+        pipeline = StreamingKStagePipeline(stage_configs, device='cpu')
+
+        # Process multiple batches
+        total_results = []
+        for i in range(3):
+            batch_data = {'inputs': torch.randn(4, 10)}
+            results = pipeline.process_batch(batch_data, i)
+            if results:
+                total_results.extend(results)
+
+        # Flush remaining
+        final_results = pipeline.flush_all_buffers()
+        total_results.extend(final_results)
+
+        print(f"✓ Multi-stage filtering processed {len(total_results)} samples")
+
+        # Verify that results have the expected structure from the final stage
+        if total_results:
+            sample = total_results[0]
+            assert 'stage_outputs' in sample, "Missing stage_outputs"
+            stage_outputs = sample['stage_outputs']
+            expected_keys = ['pred3', 'score3']  # From stage 3
+            actual_keys = list(stage_outputs.keys())
+
+            print(f"✓ Final stage outputs: {actual_keys}")
+            assert all(key in actual_keys for key in
+                       expected_keys), f"Missing expected keys: {expected_keys}, got: {actual_keys}"
+            print("✓ Multi-stage filtering fix verified!")
+
+
+    def _test_complex_multi_stage_flow():
+        """Test complex flow with 5 stages and mixed filtering"""
+        print("\n=== Test 22: Complex Multi-Stage Flow ===")
+
+        # Create a 5-stage pipeline: Filter -> Process -> Filter -> Process -> Filter
+        stage_configs = [
+            PipelineStageConfig(
+                model=MockStageModel("stage1", {"data1": (4,), "confidence1": (1,)}, deterministic=True),
+                threshold=0.3,
+                score_output_key="confidence1",
+                buffer_size=3,
+                stage_name="complex_filter_1"
+            ),
+            PipelineStageConfig(
+                model=MockStageModel("stage2", {"data2": (6,)}),
+                threshold=None,
+                stage_name="complex_process_1"
+            ),
+            PipelineStageConfig(
+                model=MockStageModel("stage3", {"data3": (4,), "quality3": (1,)}, deterministic=True),
+                threshold=0.6,
+                score_output_key="quality3",
+                buffer_size=2,
+                stage_name="complex_filter_2"
+            ),
+            PipelineStageConfig(
+                model=MockStageModel("stage4", {"data4": (8,)}),
+                threshold=None,
+                stage_name="complex_process_2"
+            ),
+            PipelineStageConfig(
+                model=MockStageModel("stage5", {"final_data": (3,), "final_score": (1,)}, deterministic=True),
+                threshold=0.4,
+                score_output_key="final_score",
+                buffer_size=5,
+                stage_name="complex_final_filter"
+            )
+        ]
+
+        pipeline = StreamingKStagePipeline(stage_configs, device='cpu')
+
+        # Process data through all 5 stages
+        all_results = []
+        for batch_idx in range(4):
+            batch_data = {'inputs': torch.randn(3, 12)}
+            results = pipeline.process_batch(batch_data, batch_idx)
+            if results:
+                all_results.extend(results)
+
+        # Flush all stages
+        final_results = pipeline.flush_all_buffers()
+        all_results.extend(final_results)
+
+        print(f"✓ Complex 5-stage flow processed {len(all_results)} samples")
+
+        # Verify final results come from stage 5
+        if all_results:
+            sample = all_results[0]
+            stage_outputs = sample['stage_outputs']
+            expected_final_keys = ['final_data', 'final_score']
+            actual_keys = list(stage_outputs.keys())
+
+            print(f"✓ Complex flow final outputs: {actual_keys}")
+            assert all(
+                key in actual_keys for key in expected_final_keys), f"Expected {expected_final_keys}, got {actual_keys}"
+            print("✓ Complex multi-stage flow verified!")
+
+        # Check pipeline statistics
+        stats = pipeline.get_pipeline_stats()
+        filtering_stages = stats['stages_with_filtering']
+        total_stages = stats['total_stages']
+
+        assert filtering_stages == 3, f"Expected 3 filtering stages, got {filtering_stages}"
+        assert total_stages == 5, f"Expected 5 total stages, got {total_stages}"
+        print(f"✓ Pipeline stats correct: {filtering_stages} filtering stages out of {total_stages} total")
 
 
     # ========================================================================
@@ -1552,32 +1675,32 @@ if __name__ == "__main__":
     # Run all tests
     try:
         # Basic functionality tests (adapted from 2-stage)
-        test_basic_k_stage_functionality()
-        test_k_stage_buffer_overflow()
-        test_no_filtered_samples_k_stage()
-        test_exact_buffer_size_k_stage()
-        test_k_stage_buffer_statistics()
-        test_threshold_adjustment_k_stage()
-        test_device_handling_k_stage()
-        test_large_batch_overflow_k_stage()
+        _test_basic_k_stage_functionality()
+        _test_k_stage_buffer_overflow()
+        _test_no_filtered_samples_k_stage()
+        _test_exact_buffer_size_k_stage()
+        _test_k_stage_buffer_statistics()
+        _test_threshold_adjustment_k_stage()
+        _test_device_handling_k_stage()
+        _test_large_batch_overflow_k_stage()
 
         # Advanced k-stage specific tests
-        test_mixed_filtering_pipeline()
-        test_multi_stage_cascade_overflow()
-        test_different_buffer_sizes()
-        test_extreme_pipeline_configurations()
-        test_pipeline_error_propagation()
-        test_nan_inf_handling_k_stage()
-        test_empty_batches_k_stage()
-        test_buffer_state_consistency_k_stage()
-        test_pipeline_configuration_validation()
-        test_complex_data_flow()
-        test_performance_stress()
-        test_backward_compatibility_comprehensive()
+        _test_mixed_filtering_pipeline()
+        _test_multi_stage_cascade_overflow()
+        _test_different_buffer_sizes()
+        _test_extreme_pipeline_configurations()
+        _test_pipeline_error_propagation()
+        _test_nan_inf_handling_k_stage()
+        _test_empty_batches_k_stage()
+        _test_buffer_state_consistency_k_stage()
+        _test_pipeline_configuration_validation()
+        _test_complex_data_flow()
+        _test_performance_stress()
+        _test_backward_compatibility_comprehensive()
 
         # NEW CRITICAL TESTS - Prove the fix works!
-        test_multi_stage_filtering_fixed()
-        test_complex_multi_stage_flow()
+        _test_multi_stage_filtering_fixed()
+        _test_complex_multi_stage_flow()
 
         print("\n" + "=" * 60)
         print("🎉 ALL K-STAGE PIPELINE TESTS PASSED! 🎉")

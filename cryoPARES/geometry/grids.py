@@ -71,7 +71,8 @@ def so3_healpix_grid_equiangular(hp_order: int = 3):
     # #since we are not doing it, it is not necessary
     # from scipy.spatial.transform import Rotation as R
     # r = R.from_euler("ZYZ", zyz_grid.T, degrees=False)
-    # result = torch.FloatTensor(r.as_euler("YXY", degrees=False)).T.contiguous() #TODO. Is his needed after all?
+    # result = torch.FloatTensor(r.as_euler("YXY", degrees=False)).T.contiguous()
+    #IMPORTANT!!! At the moment, directionalNormalizer assumes ZYZ, DO NOT CHANGE IT
 
     return result, n_cones
 
@@ -100,16 +101,18 @@ def so3_healpix_grid_equiangular(hp_order: int = 3):
 so3_healpix_grid = so3_healpix_grid_equiangular #so3_healpix_grid_escnn
 
 cache.cache()
-def so3_near_identity_grid_cartesianprod(max_rads, n_angles): #TODO: It is probably better to use something like healpy rather than a cartesian product.
+def so3_near_identity_grid_cartesianprod(max_angle, n_angles, transposed=True): #TODO: It is probably better to use something like healpy rather than a cartesian product.
     """Spatial grid over SO3 used to parametrize localized filter
 
     :return: a local grid of SO(3) points
            size of the kernel = n_alpha**3
     """
 
-    angles_range = torch.linspace(-max_rads, max_rads, n_angles)
+    angles_range = torch.linspace(-max_angle, max_angle, n_angles)
     grid = torch.cartesian_prod(angles_range, angles_range, angles_range)
-    return grid.T.contiguous()
+    if transposed:
+        grid = grid.T.contiguous()
+    return grid
 
 
 def so3_near_identity_grid_ori(max_alpha=np.pi / 12, max_beta=np.pi / 12, max_gamma=np.pi / 12,

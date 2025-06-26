@@ -95,7 +95,7 @@ class Trainer:
             path_pattern=r'(command_)(\d+)(\.txt)$',
             extension="txt"
         )
-        fname = osp.join(self.experiment_root, basename + "_command.txt")
+        fname = osp.join(self.experiment_root, basename)
         current_process = psutil.Process()
         _command = " ".join(["'" + x + "'" if x.startswith('{"') else x
                              for x in current_process.cmdline()])
@@ -110,7 +110,7 @@ class Trainer:
             path_pattern=r'(envs_)(\d+)(\.json)$',
             extension="json"
         )
-        fname = osp.join(self.experiment_root, basename + "_env.json")
+        fname = osp.join(self.experiment_root, basename)
         with open(fname, 'w') as f:
             json.dump(dict(os.environ), f)
 
@@ -122,7 +122,7 @@ class Trainer:
             path_pattern=r'(configs_)(\d+)(\.yml)$',
             extension="yml"
         )
-        fname = osp.join(self.experiment_root, basename + "_configs.yml")
+        fname = osp.join(self.experiment_root, basename)
         export_config_to_yaml(main_config, fname)
 
 

@@ -1,15 +1,10 @@
 import os.path
 import warnings
 
-from starstack.constants import RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES
 
 from cryoPARES import constants
-from cryoPARES.constants import RELION_EULER_CONVENTION
 from torch import Tensor, nn, ScriptModule
 from torch.utils.data import DataLoader
-
-from cryoPARES.geometry.convert_angles import matrix_to_euler_angles
-from cryoPARES.models.directionalNormalizer.directionalNormalizer import DirectionalPercentileNormalizer
 
 warnings.filterwarnings('ignore', category=UserWarning, module='torch.optim.lr_scheduler')
 import torch
@@ -30,45 +25,14 @@ from cryoPARES.models.image2sphere.image2sphere import Image2Sphere
 from cryoPARES.utils.plUtils import is_pylig2
 
 
-class PlModel(pl.LightningModule):
-    def __init__(self, lr: float, symmetry: str, num_augmented_copies_per_batch: int,
-                 top_k: int, model: Optional[Union[nn.Module, ScriptModule]] = None):
-
-        super().__init__()
-
-        self.lr = lr
-        self.symmetry = symmetry
-        self.num_augmented_copies_per_batch = num_augmented_copies_per_batch
-        self.top_k = top_k
-
-        if model is None:
-            model = self.build_components(symmetry, num_augmented_copies_per_batch)
-        self.model = model
-
-        self.warmup_epochs = main_config.train.warmup_n_epochs
-        if is_pylig2:
-            self.optimizer_step = self.optimizer_step_v2
-        else:
-            self.optimizer_step = self.optimizer_step_v1
-        self.save_hyperparameters(ignore=['model'])
-
+class RotationPredictionMixin:
+    def __init_mixin__(self):
+        """Initialize mixin-specific attributes. Call this in the main class __init__."""
         from cryoPARES.constants import BATCH_IDS_NAME, BATCH_PARTICLES_NAME, BATCH_POSE_NAME, BATCH_MD_NAME
         self.BATCH_IDS_NAME = BATCH_IDS_NAME
         self.BATCH_PARTICLES_NAME = BATCH_PARTICLES_NAME
         self.BATCH_POSE_NAME = BATCH_POSE_NAME
         self.BATCH_MD_NAME = BATCH_MD_NAME
-
-    @staticmethod
-    def build_components(symmetry, num_augmented_copies_per_batch):
-        return Image2Sphere(symmetry=symmetry, num_augmented_copies_per_batch=num_augmented_copies_per_batch)
-
-    def _step(self, batch, batch_idx):
-
-        idd, imgs, (gt_rotMats, shifts, conf), metadata = self.resolve_batch(batch)
-        (wD, rotMat_logits, pred_rotmat_ids,
-         pred_rotmats, maxprobs), loss, error_rads = self.model.forward_and_loss(imgs, gt_rotMats, conf, top_k=self.top_k)
-        error_degs = torch.rad2deg(error_rads)
-        return loss, error_degs, pred_rotmats, maxprobs, gt_rotMats
 
     def _visualize_rotmats(self, pred_rotmats, gt_rotmats, error_degs, max_samples=8, partition="val"):
         """
@@ -121,7 +85,6 @@ class PlModel(pl.LightningModule):
             img = Image.open(buf)
             img_tensor = torch.tensor(np.array(img)).permute(2, 0, 1)  # Convert to CxHxW format
 
-
             # Log the visualization tensor
             if self.logger is not None:
                 if hasattr(self.logger, 'experiment') and hasattr(self.logger.experiment, 'add_image'):
@@ -135,7 +98,6 @@ class PlModel(pl.LightningModule):
                         key=f'rotmat_{partition}',
                         images=[img_tensor]
                     )
-
 
             return img_tensor
 
@@ -163,6 +125,57 @@ class PlModel(pl.LightningModule):
             return im
         finally:
             matplotlib.use(current_backend)
+
+    def resolve_batch(self, batch: Dict[str, Union[torch.Tensor, List[str],
+    Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    Dict[str, Any]]]
+                      ) -> Tuple[torch.Tensor, torch.Tensor,
+    Tuple[torch.Tensor, torch.Tensor, torch.Tensor], Dict[str, Any]]:
+        idd = batch[self.BATCH_IDS_NAME]
+        imgs = batch[self.BATCH_PARTICLES_NAME]
+        (rotMats, xyShiftAngs, conf) = batch[self.BATCH_POSE_NAME]
+        metadata = batch[self.BATCH_MD_NAME]
+        return idd, imgs, (rotMats, xyShiftAngs, conf), metadata
+
+
+class PlModel(RotationPredictionMixin, pl.LightningModule):
+    def __init__(self, lr: float, symmetry: str, num_augmented_copies_per_batch: int,
+                 top_k: int,
+                 so3model: Optional[Union[nn.Module, ScriptModule]] = None,
+                ):
+
+
+        #TODO: Forward with neigs needs to be exposed and selectable via config
+        super().__init__()
+        self.__init_mixin__()
+        self.lr = lr
+        self.symmetry = symmetry
+        self.num_augmented_copies_per_batch = num_augmented_copies_per_batch
+        self.top_k = top_k
+
+        if so3model is None:
+            so3model = self.build_components(symmetry, num_augmented_copies_per_batch)
+        self.so3model = so3model
+
+        self.warmup_epochs = main_config.train.warmup_n_epochs
+        if is_pylig2:
+            self.optimizer_step = self.optimizer_step_v2
+        else:
+            self.optimizer_step = self.optimizer_step_v1
+        self.save_hyperparameters(ignore=['so3model'])
+
+
+    @staticmethod
+    def build_components(symmetry, num_augmented_copies_per_batch):
+        return Image2Sphere(symmetry=symmetry, num_augmented_copies_per_batch=num_augmented_copies_per_batch)
+
+    def _step(self, batch, batch_idx):
+
+        idd, imgs, (gt_rotMats, shifts, conf), metadata = self.resolve_batch(batch)
+        (wD, rotMat_logits, pred_rotmat_ids,
+         pred_rotmats, maxprobs), loss, error_rads = self.so3model.forward_and_loss(imgs, gt_rotMats, conf, top_k=self.top_k)
+        error_degs = torch.rad2deg(error_rads)
+        return loss, error_degs, pred_rotmats, maxprobs, gt_rotMats
 
     def training_step(self, batch, batch_idx):
         loss, error_degs, pred_rotmats, maxprobs, gt_rotmats = self._step(batch, batch_idx)
@@ -195,12 +208,15 @@ class PlModel(pl.LightningModule):
 
         return loss
 
-    def predict_step(self, batch: Dict[str, Any], batch_idx: int, dataloader_idx: int = 0):
-        idd, imgs, poses, metadata = self.resolve_batch(batch)
-        wD, rotMat_logits, pred_rotmat_id, pred_rotmats, maxprobs = self(imgs, batch_idx)
-        all_angles_probs = rotMat_logits.softmax(-1)
+    def predict_step(self, batch: Dict[str, Any], batch_idx: int, dataloader_idx: int = 0, top_k: Optional[int] = None):
 
-        pred_shifts = pred_rotmats.new_full((pred_rotmats.shape[0], self.top_k, 2), torch.nan) #TODO: Predict this as well
+        if top_k is None:
+            top_k = self.top_k
+
+        idd, imgs, poses, metadata = self.resolve_batch(batch)
+        wD, rotMat_logits, pred_rotmat_id, pred_rotmats, maxprobs = self(imgs, batch_idx, top_k=top_k)
+
+        pred_shifts = pred_rotmats.new_full((pred_rotmats.shape[0], top_k, 2), torch.nan) #TODO: Predict this as well
         shifts_probs = maxprobs * torch.nan
 
         if poses is not None:
@@ -210,21 +226,13 @@ class PlModel(pl.LightningModule):
             errors = errors.detach().cpu()
         else:
             errors = None
-        return idd, (pred_rotmats, maxprobs, all_angles_probs), (pred_shifts, shifts_probs), errors, metadata
+        return idd, (pred_rotmats, maxprobs), (pred_shifts, shifts_probs), errors, metadata
 
-    def forward(self, imgs: torch.Tensor, batch_idx: int, dataloader_idx: int = 0) -> Any:
-        return self.model(imgs, top_k=self.top_k)
+    def forward(self, imgs: torch.Tensor, batch_idx: int, dataloader_idx: int = 0, top_k: Optional[int] = None) -> Any:
+        if top_k is None:
+            top_k = self.top_k
+        return self.so3model(imgs, top_k=top_k)
 
-    def resolve_batch(self, batch: Dict[str, Union[torch.Tensor, List[str],
-                                                   Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
-                                                   Dict[str, Any]]]
-                      ) -> Tuple[torch.Tensor, torch.Tensor,
-                                 Tuple[torch.Tensor, torch.Tensor, torch.Tensor], Dict[str, Any]]:
-        idd = batch[self.BATCH_IDS_NAME]
-        imgs = batch[self.BATCH_PARTICLES_NAME]
-        (rotMats, xyShiftAngs, conf) = batch[self.BATCH_POSE_NAME]
-        metadata = batch[self.BATCH_MD_NAME]
-        return idd, imgs, (rotMats, xyShiftAngs, conf), metadata
 
     def optimizer_step_v1(self, epoch: int, batch_idx: int,
                           optimizer: Union[Optimizer, LightningOptimizer],
@@ -277,7 +285,7 @@ class PlModel(pl.LightningModule):
     def on_fit_end(self) -> None:
 
         device = self.trainer.strategy.root_device
-        self.model.to(device)
+        self.so3model.to(device)
 
         if self.trainer is None or self.trainer.val_dataloaders is None:
             print("No val_data dataloaders found. Skipping prediction and stats computation.")
@@ -294,14 +302,14 @@ class PlModel(pl.LightningModule):
             for dataloader_idx, dataloader in enumerate(val_dataloaders):
                 for batch_idx, batch in enumerate(dataloader):
                     batch = self.transfer_batch_to_device(batch, device, dataloader_idx)
-                    predictions = self.predict_step(batch, batch_idx, dataloader_idx)
-                    idd, (pred_rotmats, maxprobs, all_angles_probs), \
+                    predictions = self.predict_step(batch, batch_idx, dataloader_idx, top_k=10)
+                    idd, (pred_rotmats, maxprobs), \
                          (pred_shifts, shifts_probs), errors, metadata = predictions
 
                     # predEulers = torch.rad2deg(matrix_to_euler_angles(pred_rotmats, convention=RELION_EULER_CONVENTION).cpu())
-                    predRotMats.append(pred_rotmats[:,0,...].cpu()) # I am only using topK=1
+                    predRotMats.append(pred_rotmats[:,0,...].cpu()) # I am only using topK=1 for the clusters in the normalizer
 
-                    topKscore = all_angles_probs.topk(10, dim=-1, largest=True).values.cpu()
+                    topKscore = maxprobs.sum(-1) #But we use top-10 for confidence
                     scores.append(topKscore)
 
                     gt_rotmats = batch[self.BATCH_POSE_NAME][0]
@@ -317,9 +325,10 @@ class PlModel(pl.LightningModule):
             gtRotmats = torch.concat(gtRotmats)
             scores = torch.concat(scores)
 
+            from cryoPARES.models.directionalNormalizer.directionalNormalizer import DirectionalPercentileNormalizer
             NORMALIZER_HP_ORDER = 2 #TODO: Move to config
             dirname = os.path.dirname(self.trainer.checkpoint_callback.best_model_path)
-            precentile_model_savename = os.path.join(dirname, constants.BEST_CHECKPOINT_BASENAME)
+            precentile_model_savename = os.path.join(dirname, constants.BEST_DIRECTIONAL_NORMALIZER)
 
             if self.trainer.world_size > 1:
                 gathered_predRotMats = self.all_gather(predRotMats)
@@ -334,6 +343,7 @@ class PlModel(pl.LightningModule):
                 normalizer = DirectionalPercentileNormalizer(hp_order=NORMALIZER_HP_ORDER, symmetry=self.symmetry)
                 normalizer.fit(predRotMats, scores, gtRotmats)
                 torch.save(normalizer, precentile_model_savename)
+
 
 def _update_config_for_test():
     from cryoPARES.configs.mainConfig import main_config
@@ -354,8 +364,8 @@ def _test0():
 
     plmodel(imgs, batch_idx=0)
     plmodel.predict_step(batch, batch_idx=0)
-    scripted_model = torch.jit.script(plmodel.model)
-    plmodel = PlModel(model=scripted_model, **model_kwargs)
+    scripted_model = torch.jit.script(plmodel.so3model)
+    plmodel = PlModel(so3model=scripted_model, **model_kwargs)
     out = plmodel(imgs, batch_idx=0)
     print([o.shape for o in out])
     out = plmodel.predict_step(batch, batch_idx=0)

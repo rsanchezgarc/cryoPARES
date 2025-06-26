@@ -233,7 +233,7 @@ class TrainerPartition:
                                   output_fname=output_fname,      # TODO: Add things to CONFIG
                                   particles_dir=particles_dir,
                                   num_workers=1, batch_size=64,
-                                  use_cuda=False, #TODO: How to use the GPU without getting out of memory
+                                  use_cuda=main_config.train.cuda_for_reconstruct, #TODO: How to use the GPU without getting out of memory
                                   correct_ctf=True, eps=1e-3, min_denominator_value=1e-4)
                     if self.overfit_batches is not None:
                         kwargs["use_only_n_first_batches"] = self.overfit_batches
@@ -252,6 +252,7 @@ class TrainerPartition:
                     )
             else:
                 warnings.warn("No validation particles found, directional precentiles were not computed")
+
     def _save_training_completion(self, checkpointer):
         dirname = osp.dirname(checkpointer.best_model_path)
         if dirname is None:
@@ -268,7 +269,7 @@ class TrainerPartition:
 
         from cryoPARES.models.model import PlModel
         best_module = PlModel.load_from_checkpoint(constants.BEST_CHECKPOINT_BASENAME, map_location="cpu")
-        best_model_script = torch.jit.script(best_module.model)
+        best_model_script = torch.jit.script(best_module.so3model)
         torch.jit.save(best_model_script, constants.BEST_MODEL_SCRIPT_BASENAME)
 
         os.chdir(cwd)
@@ -333,12 +334,13 @@ if __name__ == "__main__":
 
     from cryoPARES.configManager.configParser import ConfigArgumentParser, export_config_to_yaml
 
-    parser = ConfigArgumentParser(prog="train partition cryoPARES", config_obj=main_config)
+    parser = ConfigArgumentParser(prog="train_partition_cryoPARES", config_obj=main_config)
 
     parser.add_args_from_function(TrainerPartition.__init__)
     args, config_args = parser.parse_args()
     TrainerPartition(**vars(args)).run()
 
     """
-python -m cryoPARES.train.runTrainOnePartition --symmetry C1 --particlesStarFname ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/1000particles.star  --trainSaveDir /tmp/CryoParesTrain    
+python -m cryoPARES.train.runTrainOnePartition --symmetry C1 --particles_star_fname ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/1000particles.star  --train_save_dir /tmp/CryoParesTrain
+    
 """

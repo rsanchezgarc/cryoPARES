@@ -3,6 +3,9 @@ from os import PathLike
 from pathlib import Path
 from typing import Union
 
+import numpy as np
+import torch
+
 
 def _find_directory_with_marker(marker_file):
     """Find the project root by looking for setup.py"""
@@ -24,4 +27,5 @@ def find_project_root() -> Path:
     return _find_directory_with_marker('setup.py')
 
 
-FnameType = Union[PathLike, str]
+FNAME_TYPE = Union[PathLike, str]
+MAP_AS_ARRAY_OR_FNAME_TYPE = Union[FNAME_TYPE | torch.Tensor | np.ndarray]

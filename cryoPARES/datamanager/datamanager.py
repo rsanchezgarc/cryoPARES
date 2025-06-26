@@ -11,7 +11,7 @@ import pytorch_lightning as pl
 from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.constants import BATCH_PARTICLES_NAME, BATCH_IDS_NAME, BATCH_MD_NAME, BATCH_POSE_NAME
-from cryoPARES.utils.paths import FnameType
+from cryoPARES.utils.paths import FNAME_TYPE
 
 
 def get_number_image_channels():
@@ -40,12 +40,12 @@ class DataManager(pl.LightningDataModule):
     DataManager: A LightningDataModule that wraps a ParticlesDataset
     """
     @inject_defaults_from_config(main_config.datamanager, update_config_with_args=False)
-    def __init__(self, star_fnames: List[FnameType],
+    def __init__(self, star_fnames: List[FNAME_TYPE],
                  symmetry:str,
-                 particles_dir: Optional[List[FnameType]],
+                 particles_dir: Optional[List[FNAME_TYPE]],
                  halfset: Optional[Literal[1, 2]],
                  batch_size: int,
-                 save_train_val_partition_dir: Optional[FnameType],
+                 save_train_val_partition_dir: Optional[FNAME_TYPE],
                  is_global_zero: bool,
                  # The following arguments have a default config value
                  num_augmented_copies_per_batch: int = CONFIG_PARAM(),
@@ -170,6 +170,7 @@ class DataManager(pl.LightningDataModule):
                     batch_sampler=batch_sampler,
                     num_workers=self.num_data_workers,
                     persistent_workers=True if self.num_data_workers > 0 else False,
+                    pin_memory=True if self.num_data_workers > 0 else False,
                 )
             else:
                 dataset = val_dataset
@@ -181,7 +182,8 @@ class DataManager(pl.LightningDataModule):
             shuffle=False,
             num_workers=self.num_data_workers,
             persistent_workers=True if self.num_data_workers > 0 else False,
-            sampler=sampler
+            sampler=sampler,
+            pin_memory=True if self.num_data_workers > 0 else False,
         )
 
 

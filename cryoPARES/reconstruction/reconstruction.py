@@ -29,7 +29,7 @@ from torch_grid_utils import fftfreq_grid
 from cryoPARES.datamanager.ctf.rfft_ctf import compute_ctf_rfft
 from cryoPARES.geometry.convert_angles import euler_angles_to_matrix
 from cryoPARES.geometry.symmetry import getSymmetryGroup
-from cryoPARES.utils.paths import FnameType
+from cryoPARES.utils.paths import FNAME_TYPE
 
 
 # os.environ["CUDA_VISIBLE_DEVICES"] = "-1" # I noticed that it tries to compile in the GPU as well even if all the tensors are in the CPU
@@ -135,17 +135,17 @@ class Reconstructor():
 
 
 
-    def backproject_particles(self, particles_star_fname: FnameType,
-                              particles_dir: Optional[FnameType] = None,
+    def backproject_particles(self, particles_star_fname: FNAME_TYPE,
+                              particles_dir: Optional[FNAME_TYPE] = None,
                               batch_size=1, num_dataworkers=0, use_only_n_first_batches=None, subset_idxs=None):
 
         for _ in self._backproject_particles(particles_star_fname, particles_dir, batch_size,
                                                    num_dataworkers, use_only_n_first_batches, subset_idxs):
             pass
 
-    def _backproject_particles(self, particles_star_fname: FnameType,
-                              particles_dir: Optional[FnameType] = None,
-                              batch_size=1, num_dataworkers=0, use_only_n_first_batches=None, subset_idxs=None,
+    def _backproject_particles(self, particles_star_fname: FNAME_TYPE,
+                               particles_dir: Optional[FNAME_TYPE] = None,
+                               batch_size=1, num_dataworkers=0, use_only_n_first_batches=None, subset_idxs=None,
                                verbose=True):
 
 
@@ -191,7 +191,7 @@ class Reconstructor():
                 # imgs *= ctf.sign()
                 # ctf = torch.ones_like(ctf)
 
-                imgs = torch.stack([imgs.real, imgs.imag, ctf**2], dim=1)
+                imgs = torch.stack([imgs.real, imgs.imag, ctf**2], dim=1) #Stack is slow
                 # imgs = torch.stack([imgs, ctf**2], dim=1)
 
                 dft_ctf, weights = compiled_insert_central_slices_rfft_3d_multichannel(
@@ -224,7 +224,7 @@ class Reconstructor():
                 break
             yield imgs.shape[0]
 
-    def generate_volume(self, fname: Optional[FnameType] = None, overwrite_fname: bool = True,
+    def generate_volume(self, fname: Optional[FNAME_TYPE] = None, overwrite_fname: bool = True,
                         device: Optional[str] = "cpu"):
 
         dft = torch.zeros_like(self.f_num)
@@ -257,8 +257,8 @@ class Reconstructor():
         return vol
 
 class ReconstructionParticlesDataset(Dataset):
-    def __init__(self, particles_star_fname: FnameType,
-                 particles_dir: Optional[FnameType] = None,
+    def __init__(self, particles_star_fname: FNAME_TYPE,
+                 particles_dir: Optional[FNAME_TYPE] = None,
                  correct_ctf=True, subset_idxs=None):
         self.particles = ParticlesStarSet(starFname=particles_star_fname, particlesDir=particles_dir)
         if subset_idxs is not None:

@@ -9,27 +9,29 @@ import yaml
 from tqdm import tqdm
 from typing import Optional, List, Literal, Dict, Any, Tuple
 
-from starstack.constants import RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES, RELION_PRED_POSE_CONFIDENCE_NAME, \
-    RELION_EULER_CONVENTION
+from cryoPARES.constants import RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES, RELION_PRED_POSE_CONFIDENCE_NAME, \
+    RELION_EULER_CONVENTION, DIRECTIONAL_ZSCORE_NAME
 
 from cryoPARES import constants
 from cryoPARES.configManager.configParser import ConfigOverrideSystem
 from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
+from cryoPARES.constants import BEST_DIRECTIONAL_NORMALIZER, BEST_CHECKPOINT_BASENAME, BEST_MODEL_SCRIPT_BASENAME
 from cryoPARES.geometry.convert_angles import matrix_to_euler_angles
+from cryoPARES.inference.nnetWorkers.inferenceModel import InferenceModel
 from cryoPARES.models.model import PlModel
 from cryoPARES.datamanager.datamanager import DataManager
 
 
-class AsyncPartitionInferencer:
-    UPDATE_PROGRESS_BAR_N_BATCHES = 10
+class PartitionInferencer:
+    UPDATE_PROGRESS_BAR_N_BATCHES = 20
 
     @inject_defaults_from_config(main_config.inference, update_config_with_args=True)
     def __init__(self,
                  star_fnames: List[str],
                  checkpoint_dir: str,
                  results_dir: str,
-                 halfset: Literal["half1", "half2", "allParticles"] = "allParticles",
+                 halfset: Literal["half1", "half2", "allParticles"] = "allParticles", #TODO: Distinguish halfset for model and halfset for input data
                  particles_dir: Optional[List[str]] = None,
                  batch_size: int = CONFIG_PARAM(),
                  num_data_workers: int = CONFIG_PARAM(config=main_config.datamanager),
@@ -91,23 +93,19 @@ class AsyncPartitionInferencer:
             device_count = self.n_cpus_if_no_cuda
 
         print(f'devices={device_count} accelerator={accelerator}', flush=True)
-        torch.set_num_threads(min(1, torch.get_num_threads() // device_count))
+        torch.set_num_threads(max(1, torch.get_num_threads() // device_count))
         return accelerator, device_count
 
     def _setup_model(self, rank: Optional[int] = None):
         """Setup the model for inference."""
 
-        scriptmodel_fname = os.path.join(self.checkpoint_dir, self.halfset, "checkpoints", "best_script.pt")
-        if os.path.isfile(scriptmodel_fname):
-            scriptmodel = torch.jit.load(scriptmodel_fname)
-        else:
-            scriptmodel = None
-        checkpoint_fname = os.path.join(self.checkpoint_dir, self.halfset, "checkpoints", "best.ckpt")
-        model = PlModel.load_from_checkpoint(
-            checkpoint_fname,
-            map_location="cpu",
-            model=scriptmodel
-        )
+        scriptmodel_fname = os.path.join(self.checkpoint_dir, self.halfset, "checkpoints", BEST_MODEL_SCRIPT_BASENAME)
+        scriptmodel = torch.jit.load(scriptmodel_fname)
+
+        percentilemodel_fname = os.path.join(self.checkpoint_dir, self.halfset, "checkpoints", BEST_DIRECTIONAL_NORMALIZER)
+        percentilemodel = torch.load(percentilemodel_fname, weights_only=False)
+
+        model = InferenceModel(scriptmodel, percentilemodel, top_k=self.top_k)
 
         # Handle missing symmetry attribute
         if not hasattr(model, 'symmetry'):
@@ -139,8 +137,12 @@ class AsyncPartitionInferencer:
             halfset = 2
 
         hparams = os.path.join(self.checkpoint_dir, self.halfset, "hparams.yaml")
-        with open(hparams) as f:
-            symmetry = yaml.safe_load(f)["symmetry"]
+        try:
+            with open(hparams) as f:
+                symmetry = yaml.safe_load(f)["symmetry"]
+        except (FileNotFoundError, yaml.YAMLError, KeyError) as e:
+            raise RuntimeError(f"Failed to load symmetry from {hparams}: {e}")
+
         datamanager = DataManager(
             star_fnames=self.star_fnames,
             symmetry=symmetry,
@@ -172,17 +174,18 @@ class AsyncPartitionInferencer:
 
         # Use predict_step as requested
         result = model.predict_step(batch, batch_idx=batch_idx, dataloader_idx=0)
-        (idd, (pred_rotmats, maxprobs, all_angles_probs),
+        (idd, (pred_rotmats, maxprobs, norm_score),
          (pred_shifts, shifts_probs), errors, metadata) = result
 
         # Convert rotation matrices to euler angles
         euler_degs = torch.rad2deg(matrix_to_euler_angles(pred_rotmats, RELION_EULER_CONVENTION))
 
-        # Set shifts to zero as in original code
+        # Set shifts to zero. WE DO THAT BECAUSE WE ARE NOT PREDICTING THEM YET
+        #TODO: predict shifts
         pred_shifts.fill_(0.)
         shifts_probs.fill_(1.)
 
-        return idd, (euler_degs, maxprobs), (pred_shifts, shifts_probs), metadata
+        return idd, (euler_degs, maxprobs), (pred_shifts, shifts_probs), norm_score
 
     def _gpu_worker(self, gpu_id: int, dataloader):
         """Async worker for a single GPU - processes subset of batches."""
@@ -312,7 +315,7 @@ class AsyncPartitionInferencer:
 
                 # Wait for all workers to finish
                 for thread in self.processing_threads:
-                    thread.join(timeout=5.0)
+                    thread.join(timeout=3.0)
 
             else:
                 print("Using single GPU processing")
@@ -347,6 +350,8 @@ class AsyncPartitionInferencer:
     def _save_results(self, all_results: Dict[int, Any], dataset):
         """Save results to STAR files using original aggregation logic."""
         print("Aggregating results and saving to STAR files...")
+        #TODO: This assumes that the order of the dataset is always fixed. The assumtion is safe if only one
+        #starfile is provided
 
         # Create result tensors
         n_particles = len(dataset)
@@ -355,13 +360,14 @@ class AsyncPartitionInferencer:
             'rotprobs': torch.zeros((n_particles, self.top_k), dtype=torch.float32),
             'shifts': torch.zeros((n_particles, self.top_k, 2), dtype=torch.float32),
             'shiftprobs': torch.zeros((n_particles, self.top_k), dtype=torch.float32),
-            'idxs': torch.arange(n_particles, dtype=torch.int64)
+            'directional_zscore': torch.zeros((n_particles, self.top_k), dtype=torch.float32),
+            'ids': [None]*n_particles
         }
 
         # Fill result arrays
         current_idx = 0
         for batch_idx in sorted(all_results.keys()):
-            idd, (euler_degs, maxprobs), (pred_shifts, shifts_probs), metadata = all_results[batch_idx]
+            idd, (euler_degs, maxprobs), (pred_shifts, shifts_probs), directional_zscore = all_results[batch_idx]
 
             batch_size = len(idd)
             end_idx = current_idx + batch_size
@@ -370,7 +376,8 @@ class AsyncPartitionInferencer:
             result_arrays['rotprobs'][current_idx:end_idx] = maxprobs.cpu()
             result_arrays['shifts'][current_idx:end_idx] = pred_shifts.cpu()
             result_arrays['shiftprobs'][current_idx:end_idx] = shifts_probs.cpu()
-
+            result_arrays['directional_zscore'][current_idx:end_idx] = directional_zscore.cpu()
+            result_arrays['ids'][current_idx:end_idx]  =  idd
             current_idx = end_idx
 
         # Save to STAR files (same logic as original)
@@ -383,45 +390,186 @@ class AsyncPartitionInferencer:
                 angles_names = [x + suffix for x in RELION_ANGLES_NAMES]
                 shifts_names = [x + suffix for x in RELION_SHIFTS_NAMES]
                 confide_name = RELION_PRED_POSE_CONFIDENCE_NAME + suffix
-
+                zscore_name = DIRECTIONAL_ZSCORE_NAME + suffix
                 particles_md[angles_names] = 0.
                 particles_md[shifts_names] = 0.
                 particles_md[confide_name] = 0.
 
                 # Get indices for this dataset
-                idxs = result_arrays["idxs"]
-                ids = particles_md.index[idxs]
+                ids = result_arrays["ids"]
 
                 particles_md.loc[ids, angles_names] = result_arrays["eulerdegs"][..., k, :].numpy()
                 particles_md.loc[ids, shifts_names] = result_arrays["shifts"][..., k, :].numpy()
                 particles_md.loc[ids, confide_name] = (result_arrays["rotprobs"][..., k] *
                                                        result_arrays["shiftprobs"][..., k]).numpy()
+                particles_md.loc[ids, zscore_name] = (result_arrays["directional_zscore"][..., k]).numpy()
 
             if particlesSet.starFname is not None:
-                basename =  os.path.basename(particlesSet.starFname).removesuffix(".star")
+                basename = os.path.basename(particlesSet.starFname).removesuffix(".star")
             else:
                 basename = "particles%d"%datIdx
             out_fname = os.path.join(self.results_dir, basename + "_nnet.star")
             print(f"Results were saved at {out_fname}")
             particlesSet.save(out_fname)
 
-    def _cleanup(self):
-        """Clean up resources."""
+    # def _cleanup(self):
+    #     """Clean up resources."""
+    #     self.stop_processing.set()
+    #
+    #     # Clear queues
+    #     while not self.output_queue.empty():
+    #         try:
+    #             self.output_queue.get_nowait()
+    #         except queue.Empty:
+    #             break
+
+
+    def _cleanup(self, timeout: float = 10.0):
+        """
+        Clean up resources including threads, queues, and CUDA resources.
+
+        Args:
+            timeout: Maximum time to wait for threads to finish (seconds)
+        """
+        print("Starting cleanup...")
+
+        # 1. Signal all threads to stop
         self.stop_processing.set()
 
-        # Clear queues
-        while not self.output_queue.empty():
+        # 2. Wait for processing threads to finish
+        if hasattr(self, 'processing_threads') and self.processing_threads:
+            print(f"Waiting for {len(self.processing_threads)} worker threads to finish...")
+
+            for i, thread in enumerate(self.processing_threads):
+                if thread.is_alive():
+                    try:
+                        thread.join(timeout=timeout / len(self.processing_threads))
+                        if thread.is_alive():
+                            print(f"Warning: Thread {i} did not finish within timeout")
+                    except Exception as e:
+                        print(f"Error waiting for thread {i}: {e}")
+
+            # Clear the thread list
+            self.processing_threads.clear()
+
+        # 3. Drain the output queue safely
+        if hasattr(self, 'output_queue'):
+            drained_items = 0
+            max_drain_attempts = 1000  # Prevent infinite loop
+
             try:
-                self.output_queue.get_nowait()
-            except queue.Empty:
-                break
+                while drained_items < max_drain_attempts:
+                    try:
+                        # Use a very short timeout to avoid blocking
+                        self.output_queue.get(timeout=0.01)
+                        drained_items += 1
+                    except queue.Empty:
+                        # Queue is actually empty now
+                        break
+                    except Exception as e:
+                        print(f"Error draining queue: {e}")
+                        break
+
+                if drained_items >= max_drain_attempts:
+                    print(f"Warning: Stopped draining queue after {max_drain_attempts} items")
+                elif drained_items > 0:
+                    print(f"Drained {drained_items} items from output queue")
+
+            except Exception as e:
+                print(f"Error during queue cleanup: {e}")
+
+        # 4. Clear input queues if they exist
+        if hasattr(self, 'input_queues'):
+            for i, input_queue in enumerate(self.input_queues):
+                if input_queue is not None:
+                    try:
+                        while True:
+                            try:
+                                input_queue.get_nowait()
+                            except queue.Empty:
+                                break
+                    except Exception as e:
+                        print(f"Error cleaning input queue {i}: {e}")
+            self.input_queues.clear()
+
+        # 5. Clean up CUDA resources
+        if self.accelerator == "cuda" and torch.cuda.is_available():
+            try:
+                # Clear CUDA streams
+                if hasattr(self, 'streams'):
+                    for stream in self.streams:
+                        if stream is not None:
+                            try:
+                                stream.synchronize()
+                            except Exception as e:
+                                print(f"Error synchronizing CUDA stream: {e}")
+                    self.streams.clear()
+
+                # Clear CUDA cache
+                torch.cuda.empty_cache()
+
+                # Synchronize all devices that were used
+                for device_id in range(min(self.device_count, torch.cuda.device_count())):
+                    try:
+                        with torch.cuda.device(device_id):
+                            torch.cuda.synchronize()
+                    except Exception as e:
+                        print(f"Error synchronizing CUDA device {device_id}: {e}")
+
+            except Exception as e:
+                print(f"Error during CUDA cleanup: {e}")
+
+        # 6. Clear model references to help with memory cleanup
+        if hasattr(self, 'models'):
+            try:
+                for model in self.models:
+                    if model is not None:
+                        # Move to CPU to free GPU memory
+                        if hasattr(model, 'cpu'):
+                            try:
+                                model.cpu()
+                            except Exception as e:
+                                print(f"Error moving model to CPU: {e}")
+                self.models.clear()
+            except Exception as e:
+                print(f"Error cleaning up models: {e}")
+
+        # 7. Clear device references
+        if hasattr(self, 'devices'):
+            self.devices.clear()
+
+        # 8. Reset state flags
+        try:
+            self.error_occurred.clear()
+            self.error_message = None
+        except Exception as e:
+            print(f"Error resetting state: {e}")
+
+        # 9. Force garbage collection (optional, but can help with memory)
+        try:
+            import gc
+            gc.collect()
+        except Exception as e:
+            print(f"Error during garbage collection: {e}")
+
+        print("Cleanup completed")
 
 
-# Backwards compatibility - keep the same class name and interface
-class PartitionInferencer(AsyncPartitionInferencer):
-    """Backwards compatible class name."""
-    pass
+    def __del__(self):
+        """Destructor to ensure cleanup happens even if not called explicitly."""
+        try:
+            self._cleanup(timeout=5.0)  # Shorter timeout for destructor
+        except Exception as e:
+            # Don't raise exceptions in destructor
+            print(f"Error during destructor cleanup: {e}")
+            pass
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self._cleanup()
+        return False  # Don't suppress exceptions
 
 if __name__ == "__main__":
     os.environ[constants.PROJECT_NAME + "__ENTRY_POINT"] = "staticNnetInference.py"
@@ -440,4 +588,5 @@ if __name__ == "__main__":
     config_fname = max(glob.glob(os.path.join(args.checkpoint_dir, "configs_*.yml")), key=os.path.getmtime)
     ConfigOverrideSystem.update_config_from_file(main_config, config_fname, )
 
-    PartitionInferencer(**vars(args)).run()
+    with PartitionInferencer(**vars(args)) as inferencer:
+        inferencer.run()

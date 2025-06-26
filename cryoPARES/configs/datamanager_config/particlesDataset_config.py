@@ -23,4 +23,4 @@ class ParticlesDataset_config():
     min_maxProb: Optional[float] = None #Particles with maxProb smaller than this number will be ruled out
     perImg_normalization: ImgNormalizationType = ImgNormalizationType.noiseStats
     ctf_correction: CtfCorrectionType = CtfCorrectionType.concat_phase_flip
-    reduce_symmetry_label: bool = True
+    reduce_symmetry_in_label: bool = True

@@ -15,7 +15,8 @@ from cryoPARES.geometry.convert_angles import euler_angles_to_matrix
 from cryoPARES.geometry.grids import so3_near_identity_grid_cartesianprod
 from cryoPARES.utils.paths import MAP_AS_ARRAY_OR_FNAME_TYPE
 from cryoPARES.utils.reconstructionUtils import get_vol
-from cryoPARES.constants import RELION_EULER_CONVENTION, BATCH_PARTICLES_NAME, BATCH_POSE_NAME
+from cryoPARES.constants import RELION_EULER_CONVENTION, BATCH_PARTICLES_NAME, BATCH_POSE_NAME, BATCH_ORI_IMAGE_NAME, \
+    BATCH_ORI_CTF_NAME
 
 
 class ProjectionMatcher(nn.Module):
@@ -113,7 +114,7 @@ class ProjectionMatcher(nn.Module):
             projections = projections[..., self.pad_length: -self.pad_length, self.pad_length: -self.pad_length]
         return projections
 
-    def _real_to_fourier(self, imgs):
+    def _real_to_fourier(self, imgs):#TODO. I should be able to get the fimages from the rfft_ctf.correct_ctf. I would need to apply a phase shift to reproduce the real space fftshift
         imgs = torch.fft.fftshift(imgs, dim=(-2, -1))
         imgs = torch.fft.rfftn(imgs, dim=(-2, -1))
         imgs = torch.fft.fftshift(imgs, dim=(-2,))
@@ -216,20 +217,39 @@ class ProjectionMatcher(nn.Module):
 
         projs *= ctf[:, None, None, ...]
         perImgCorr, pixelShiftsXY = self._correlateCrossCorrelation(fimg[:, None, None, ...], projs)
-        b, topk, nrots = perImgCorr.shape[:3]
-        reshaped_perImgCorr = perImgCorr.reshape(b, -1)
-        maxCorrs, maxIdxs = reshaped_perImgCorr.topk(self.return_top_k, largest=True, sorted=True)
-        bestPixelShiftsXY = pixelShiftsXY.reshape(b, -1)[torch.arange(b).unsqueeze(1), maxIdxs]
-        mean_corr = torch.mean(reshaped_perImgCorr, dim=-1, keepdim=True)
-        std_corr = torch.std(reshaped_perImgCorr, dim=-1, keepdim=True)
-        comparedWeight = torch.distributions.Normal(mean_corr,std_corr).cdf(maxCorrs) #1-P(I_i > All_images)
+        # b, topk, nrots = perImgCorr.shape[:3]
+        # reshaped_perImgCorr = perImgCorr.reshape(b, -1)
+        # maxCorrs, maxIdxs = reshaped_perImgCorr.topk(self.return_top_k, largest=True, sorted=True)
+        # bestPixelShiftsXY = pixelShiftsXY.reshape(b, -1)[torch.arange(b).unsqueeze(1), maxIdxs]
+        # mean_corr = torch.mean(reshaped_perImgCorr, dim=-1, keepdim=True)
+        # std_corr = torch.std(reshaped_perImgCorr, dim=-1, keepdim=True)
+        # comparedWeight = torch.distributions.Normal(mean_corr,std_corr).cdf(maxCorrs) #1-P(I_i > All_images)
 
-        predShiftsAngs = -(bestPixelShiftsXY - self.half_particle_size) * self.vol_voxel_size
-        predRotMatsIdxs = maxIdxs%nrots
-        predRotMats = self.grid_rotmats[predRotMatsIdxs]
+        maxCorrs, predRotMats, predShiftsAngs, comparedWeight = _analyze_cross_correlation(perImgCorr, pixelShiftsXY,
+                                                                           grid_rotmats = self.grid_rotmats,
+                                                                           return_top_k=self.return_top_k,
+                                                                           half_particle_size=self.half_particle_size,
+                                                                           vol_voxel_size=self.vol_voxel_size)
 
         return maxCorrs, predRotMats, predShiftsAngs, comparedWeight
 
+
+@torch.compile(mode="max-autotune")
+def _analyze_cross_correlation(perImgCorr:torch.Tensor, pixelShiftsXY:torch.Tensor, grid_rotmats:torch.Tensor,
+                               return_top_k:int, half_particle_size:float,
+                               vol_voxel_size:int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    b, topk, nrots = perImgCorr.shape[:3]
+    reshaped_perImgCorr = perImgCorr.reshape(b, -1)
+    maxCorrs, maxIdxs = reshaped_perImgCorr.topk(return_top_k, largest=True, sorted=True)
+    bestPixelShiftsXY = pixelShiftsXY.reshape(b, -1)[torch.arange(b).unsqueeze(1), maxIdxs]
+    mean_corr = torch.mean(reshaped_perImgCorr, dim=-1, keepdim=True)
+    std_corr = torch.std(reshaped_perImgCorr, dim=-1, keepdim=True)
+    comparedWeight = torch.distributions.Normal(mean_corr, std_corr).cdf(maxCorrs)  # 1-P(I_i > All_images)
+    predShiftsAngs = -(bestPixelShiftsXY - half_particle_size) * vol_voxel_size
+    predRotMatsIdxs = maxIdxs % nrots
+    predRotMats = grid_rotmats[predRotMatsIdxs]
+
+    return maxCorrs, predRotMats, predShiftsAngs, comparedWeight
 
 def compute_dft(
     volume: torch.Tensor,
@@ -333,14 +353,16 @@ def _test1():
                            grid_distance_degs=12,
                            grid_step_degs=2,
                            pixel_size=None,
-                           filter_resolution_angst=5,
+                           filter_resolution_angst=6,
                            max_shift_fraction=0.2,
                            return_top_k=1)
 
-    from cryoPARES.configs.mainConfig import main_config
-    main_config.datamanager.particlesdataset.desired_image_size_px=360
-    main_config.datamanager.particlesdataset.desired_sampling_rate_angs=1.27
     from cryoPARES.datamanager.datamanager import DataManager
+    from tqdm import tqdm
+
+    from cryoPARES.configs.mainConfig import main_config
+    # main_config.datamanager.particlesdataset.desired_image_size_px=360
+    # main_config.datamanager.particlesdataset.desired_sampling_rate_angs=1.27
 
     datamanager = DataManager(star_fnames=["/home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles.star"],
                               symmetry="C1",
@@ -348,13 +370,17 @@ def _test1():
                               particles_dir=None,
                               halfset=None,
                               save_train_val_partition_dir=None,
-                              is_global_zero=True)
-
+                              is_global_zero=True,
+                              return_ori_imagen=True,
+                              num_augmented_copies_per_batch=1,
+                              num_data_workers=1)
+    pj.to(device)
     with torch.inference_mode():
-        for batch in datamanager._create_dataloader():
-            imgs = batch[BATCH_PARTICLES_NAME]
-            rotmats = batch[BATCH_POSE_NAME][0].unsqueeze(1)
-            fimages = pj._real_to_fourier(imgs)
+        for batch in tqdm(datamanager._create_dataloader()):
+            imgs = batch[BATCH_ORI_IMAGE_NAME].to(device, non_blocking=True)
+            ctfs = batch[BATCH_ORI_CTF_NAME].to(device, non_blocking=True)
+            rotmats = batch[BATCH_POSE_NAME][0].unsqueeze(1).to(device, non_blocking=True)
+            fimages = pj._real_to_fourier(imgs) #TODO. I should be able to get the fimages from the rfft_ctf.correct_ctf. I would need to apply a phase shift to reproduce the real space fftshift
             pj.align_particles(fimages, ctfs, rotmats)
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ warnings.filterwarnings('ignore', message='.*custom_fwd.*')
 import os.path as osp
 
 from dataclasses import asdict
-from typing import Optional, Dict, Tuple
+from typing import Optional, Dict, Tuple, Callable
 
 import numpy as np
 import torch
@@ -25,7 +25,9 @@ class AugmenterBase(abc.ABC):
     @abc.abstractmethod
     def applyAugmentation(self, imgs, degEulerList, shiftFractionList):
         raise NotImplementedError()
-
+    @abc.abstractmethod
+    def __call__(self, *args, **kwargs):
+        raise NotImplementedError()
 
 class Augmenter(AugmenterBase):
     @inject_defaults_from_config(main_config.datamanager.augmenter, update_config_with_args=False)

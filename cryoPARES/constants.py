@@ -11,6 +11,8 @@ BATCH_IDS_NAME: str = "idd"
 BATCH_PARTICLES_NAME: str = "particle"
 BATCH_POSE_NAME: str = "pose"
 BATCH_MD_NAME: str = "md"
+BATCH_ORI_IMAGE_NAME: str = "oriparticle"
+BATCH_ORI_CTF_NAME: str = "oriCTF"
 
 DIRECTIONAL_ZSCORE_NAME = "rlnDirectinalZscore"
 

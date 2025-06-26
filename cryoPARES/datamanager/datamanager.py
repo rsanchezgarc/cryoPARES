@@ -54,6 +54,7 @@ class DataManager(pl.LightningDataModule):
                  num_data_workers: int = CONFIG_PARAM(),
                  augment_train: bool = CONFIG_PARAM(),
                  only_first_dataset_for_validation: bool = CONFIG_PARAM(),
+                 return_ori_imagen: bool =False
                  ):
 
         super().__init__()
@@ -73,6 +74,7 @@ class DataManager(pl.LightningDataModule):
         self.save_train_val_partition_dir = save_train_val_partition_dir
         self.augment_train = augment_train
         self.only_first_dataset_for_validation = only_first_dataset_for_validation
+        self.return_ori_imagen = return_ori_imagen
 
         if self.augment_train:
             from cryoPARES.datamanager.augmentations import Augmenter
@@ -99,7 +101,8 @@ class DataManager(pl.LightningDataModule):
         datasets = []
         for i, (partFname, partDir) in enumerate(zip(self.star_fnames, self.particles_dir)):
             mrcsDataset = ParticlesRelionStarDataset(particles_star_fname=partFname, particles_dir=partDir,
-                                                     symmetry=self.symmetry, halfset=self.halfset)
+                                                     symmetry=self.symmetry, halfset=self.halfset,
+                                                     return_ori_imagen=self.return_ori_imagen)
 
             if self.is_global_zero and self.save_train_val_partition_dir is not None:
                 dirname = osp.join(self.save_train_val_partition_dir, partitionName if partitionName is not None else "full")

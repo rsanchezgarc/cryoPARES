@@ -18,7 +18,7 @@ from cryoPARES.configs.datamanager_config.particlesDataset_config import CtfCorr
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.constants import RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES, \
     RELION_PRED_POSE_CONFIDENCE_NAME, RELION_EULER_CONVENTION, RELION_ORI_POSE_CONFIDENCE_NAME, BATCH_PARTICLES_NAME, \
-    BATCH_IDS_NAME, BATCH_POSE_NAME, BATCH_MD_NAME
+    BATCH_IDS_NAME, BATCH_POSE_NAME, BATCH_MD_NAME, BATCH_ORI_IMAGE_NAME, BATCH_ORI_CTF_NAME
 
 warnings.filterwarnings("ignore", "Gimbal lock detected. Setting third angle to zero since it "
                                   "is not possible to uniquely determine all angles.")
@@ -44,7 +44,8 @@ class ParticlesDataset(Dataset, ABC):
                  perImg_normalization: Literal["none", "noiseStats", "subtractMean"] = CONFIG_PARAM(),
                  ctf_correction: Literal["none", "phase_flip", "ctf_multiply",
                                          "concat_phase_flip", "concat_ctf_multiply"] = CONFIG_PARAM(),
-                 reduce_symmetry_label:bool = CONFIG_PARAM(),
+                 reduce_symmetry_in_label:bool = CONFIG_PARAM(),
+                 return_ori_imagen: bool = False
                  ):
 
         super().__init__()
@@ -55,7 +56,9 @@ class ParticlesDataset(Dataset, ABC):
         self.mask_radius_angs = mask_radius_angs
         self.apply_mask_to_img = apply_mask_to_img
         self.min_maxProb = min_maxProb
-        self.reduce_symmetry_label = reduce_symmetry_label
+        self.reduce_symmetry_in_label = reduce_symmetry_in_label
+        self.return_ori_imagen = return_ori_imagen
+        
         self.symmetry = symmetry.upper()
         self.halfset = halfset
 
@@ -229,32 +232,33 @@ class ParticlesDataset(Dataset, ABC):
         return img, ctf
 
     def _correctCtfNone(self, img, md_row):
-        return img, torch.empty([])
+        return img, None
 
     def _getIdx(self, item: int) -> Tuple[str, torch.Tensor, Tuple[torch.Tensor,torch.Tensor,torch.Tensor],
-                                         Dict[str, Any]]:
+                                         Dict[str, Any], Tuple[torch.Tensor, Optional[torch.Tensor]]]:
 
         try:
-            img, md_row = self.particles[item]
+            img_ori, md_row = self.particles[item]
         except ValueError:
             print(f"Error retrieving item {item}")
             raise
 
-        iid = md_row[RELION_IMAGE_FNAME]
-        img = torch.FloatTensor(img).unsqueeze(0)
-        img, ctf = self._correctCtf(img, md_row)
 
-        if img.isnan().any():
+        iid = md_row[RELION_IMAGE_FNAME]
+        img_ori = torch.FloatTensor(img_ori).unsqueeze(0)
+        img_ori, ctf_ori = self._correctCtf(img_ori, md_row)
+
+        if img_ori.isnan().any():
             raise RuntimeError(f"Error, img with idx {item} is NAN")
 
-        img = self.resizeImage(img)
+        img = self.resizeImage(img_ori)
         img = self._normalize(img) #I changed the order of the normalization call, in cesped it was before ctf correction
 
         degEuler = torch.FloatTensor([md_row[name] for name in RELION_ANGLES_NAMES])
         xyShiftAngs = torch.FloatTensor([md_row[name] for name in RELION_SHIFTS_NAMES])
         confidence = torch.FloatTensor([md_row.get(RELION_ORI_POSE_CONFIDENCE_NAME, 1)])
 
-        return iid, img, (degEuler, xyShiftAngs, confidence), md_row.to_dict()
+        return iid, img, (degEuler, xyShiftAngs, confidence), md_row.to_dict(), (img_ori[0,...], ctf_ori)
 
     @cached_property
     def symmetry_group(self):
@@ -272,7 +276,7 @@ class ParticlesDataset(Dataset, ABC):
         return img
 
     def __getitem(self, item):
-        iid, prepro_img, (degEuler, xyShiftAngs, confidence), md_dict = self._getIdx(item)
+        iid, prepro_img, (degEuler, xyShiftAngs, confidence), md_dict, (img_ori, ctf_ori)= self._getIdx(item)
 
         if self.augmenter is not None:
             prepro_img, degEuler, shift, _ = self.augmenter(prepro_img,  # 1xSxS image expected
@@ -282,7 +286,7 @@ class ParticlesDataset(Dataset, ABC):
 
         r = R.from_euler(RELION_EULER_CONVENTION, degEuler, degrees=True)
 
-        if self.symmetry != "C1" and self.reduce_symmetry_label:
+        if self.symmetry != "C1" and self.reduce_symmetry_in_label:
             r = r.reduce(self.symmetry_group)
         rotMat = r.as_matrix()
         rotMat = torch.FloatTensor(rotMat)
@@ -296,6 +300,9 @@ class ParticlesDataset(Dataset, ABC):
                  BATCH_POSE_NAME: (rotMat, xyShiftAngs, confidence),
                  BATCH_MD_NAME: md_dict}
 
+        if self.return_ori_imagen:
+            batch[BATCH_ORI_IMAGE_NAME] = img_ori
+            batch[BATCH_ORI_CTF_NAME] = ctf_ori
 
         return batch
 

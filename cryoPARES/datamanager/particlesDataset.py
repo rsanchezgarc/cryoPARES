@@ -171,7 +171,7 @@ class ParticlesDataset(Dataset, ABC):
         self._augmenter = augmenterObj
 
     @staticmethod
-    @functools.lru_cache(1)
+    @functools.lru_cache(2)
     def _getParticleMask(image_size_px, sampling_rate, mask_radius_angs,
                                       device: Optional[Union[torch.device, str]] = None) -> Tuple[torch.Tensor,
                                                                                                   torch.Tensor]:
@@ -226,10 +226,10 @@ class ParticlesDataset(Dataset, ABC):
             img = torch.concat([img, wimg], dim=0)
         else:
             img = wimg
-        return img
+        return img, ctf
 
     def _correctCtfNone(self, img, md_row):
-        return img
+        return img, torch.empty([])
 
     def _getIdx(self, item: int) -> Tuple[str, torch.Tensor, Tuple[torch.Tensor,torch.Tensor,torch.Tensor],
                                          Dict[str, Any]]:
@@ -242,7 +242,7 @@ class ParticlesDataset(Dataset, ABC):
 
         iid = md_row[RELION_IMAGE_FNAME]
         img = torch.FloatTensor(img).unsqueeze(0)
-        img = self._correctCtf(img, md_row)
+        img, ctf = self._correctCtf(img, md_row)
 
         if img.isnan().any():
             raise RuntimeError(f"Error, img with idx {item} is NAN")
@@ -272,12 +272,12 @@ class ParticlesDataset(Dataset, ABC):
         return img
 
     def __getitem(self, item):
-        iid, img, (degEuler, xyShiftAngs, confidence), md_dict = self._getIdx(item)
+        iid, prepro_img, (degEuler, xyShiftAngs, confidence), md_dict = self._getIdx(item)
 
         if self.augmenter is not None:
-            img, degEuler, shift, _ = self.augmenter(img,  # 1xSxS image expected
-                                                     degEuler,
-                                                     shiftFraction=xyShiftAngs / (self.image_size_px * self.sampling_rate))
+            prepro_img, degEuler, shift, _ = self.augmenter(prepro_img,  # 1xSxS image expected
+                                                            degEuler,
+                                                            shiftFraction=xyShiftAngs / (self.image_size_px * self.sampling_rate))
             xyShiftAngs = shift * (self.image_size_px * self.sampling_rate)
 
         r = R.from_euler(RELION_EULER_CONVENTION, degEuler, degrees=True)
@@ -289,10 +289,10 @@ class ParticlesDataset(Dataset, ABC):
 
         if self.apply_mask_to_img:
             mask = self._getParticleMask(self.image_size_px, sampling_rate=self.sampling_rate, mask_radius_angs=self.mask_radius_angs)[1]
-            img *= mask
+            prepro_img *= mask
 
         batch = {BATCH_IDS_NAME: iid,
-                 BATCH_PARTICLES_NAME: img,
+                 BATCH_PARTICLES_NAME: prepro_img,
                  BATCH_POSE_NAME: (rotMat, xyShiftAngs, confidence),
                  BATCH_MD_NAME: md_dict}
 

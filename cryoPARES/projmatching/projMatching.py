@@ -9,13 +9,13 @@ from torch import nn
 from torch.nn import functional as F
 from torch_fourier_slice import extract_central_slices_rfft_3d
 from torch_grid_utils import fftfreq_grid
-from torch_grid_utils.shapes_2d import circle
+from torch_grid_utils.shapes_2d import circle #TODO we can use other things to limit frequencies
 
 from cryoPARES.geometry.convert_angles import euler_angles_to_matrix
 from cryoPARES.geometry.grids import so3_near_identity_grid_cartesianprod
 from cryoPARES.utils.paths import MAP_AS_ARRAY_OR_FNAME_TYPE
 from cryoPARES.utils.reconstructionUtils import get_vol
-from cryoPARES.constants import RELION_EULER_CONVENTION
+from cryoPARES.constants import RELION_EULER_CONVENTION, BATCH_PARTICLES_NAME, BATCH_POSE_NAME
 
 
 class ProjectionMatcher(nn.Module):
@@ -26,7 +26,7 @@ class ProjectionMatcher(nn.Module):
                  filter_resolution_angst: Optional[float] = None,
                  max_shift_fraction: float = 0.2, #TODO: Add this to CONFIG,
                  return_top_k: int = 2
-                 ):
+                 ): #TODO: Add downsampling of the volume
 
         super().__init__()
 
@@ -72,6 +72,7 @@ class ProjectionMatcher(nn.Module):
         assert set(self.ori_vol_shape).pop() % 2 == 0, "Only even boxsizes are allowed"
 
         self.ori_image_shape = tuple(self.ori_vol_shape[-2:])
+        self.half_particle_size = 0.5 * self.ori_image_shape[-2]
         self.vol_voxel_size = pixel_size
         reference_vol = torch.as_tensor(reference_vol.numpy(), device=reference_vol.device, dtype=reference_vol.dtype)
 
@@ -111,6 +112,12 @@ class ProjectionMatcher(nn.Module):
         if self.pad_length is not None:
             projections = projections[..., self.pad_length: -self.pad_length, self.pad_length: -self.pad_length]
         return projections
+
+    def _real_to_fourier(self, imgs):
+        imgs = torch.fft.fftshift(imgs, dim=(-2, -1))
+        imgs = torch.fft.rfftn(imgs, dim=(-2, -1))
+        imgs = torch.fft.fftshift(imgs, dim=(-2,))
+        return imgs
 
     def _apply_ctfF(self, projs, ctf):
         proj_ctfed = projs * ctf
@@ -194,8 +201,7 @@ class ProjectionMatcher(nn.Module):
 
         return h0, h1, w0, w1
 
-    @torch.inference_mode
-    def align_partilces(self, fimg, ctf, rotmats):
+    def align_particles(self, fimg, ctf, rotmats):
 
         expanded_rotmats = torch.einsum("gjk, btij -> btgij", self.grid_rotmats, rotmats)
         projs = self._projectF(expanded_rotmats)
@@ -210,13 +216,19 @@ class ProjectionMatcher(nn.Module):
 
         projs *= ctf[:, None, None, ...]
         perImgCorr, pixelShiftsXY = self._correlateCrossCorrelation(fimg[:, None, None, ...], projs)
-        b = perImgCorr.shape[0]
-        maxCorrs, maxIdxs = perImgCorr.reshape(b, -1).topk(self.return_top_k, largest=True, sorted=True)
+        b, topk, nrots = perImgCorr.shape[:3]
+        reshaped_perImgCorr = perImgCorr.reshape(b, -1)
+        maxCorrs, maxIdxs = reshaped_perImgCorr.topk(self.return_top_k, largest=True, sorted=True)
         bestPixelShiftsXY = pixelShiftsXY.reshape(b, -1)[torch.arange(b).unsqueeze(1), maxIdxs]
-        mean_corr = torch.mean(perImgCorr.reshape(b, -1), dim=-1, keepdim=True)
-        std_corr = torch.std(perImgCorr.reshape(b, -1), dim=-1, keepdim=True)
+        mean_corr = torch.mean(reshaped_perImgCorr, dim=-1, keepdim=True)
+        std_corr = torch.std(reshaped_perImgCorr, dim=-1, keepdim=True)
         comparedWeight = torch.distributions.Normal(mean_corr,std_corr).cdf(maxCorrs) #1-P(I_i > All_images)
-        return maxCorrs, bestPixelShiftsXY, comparedWeight
+
+        predShiftsAngs = -(bestPixelShiftsXY - self.half_particle_size) * self.vol_voxel_size
+        predRotMatsIdxs = maxIdxs%nrots
+        predRotMats = self.grid_rotmats[predRotMatsIdxs]
+
+        return maxCorrs, predRotMats, predShiftsAngs, comparedWeight
 
 
 def compute_dft(
@@ -289,7 +301,8 @@ def correlate_dft_2d(
     result = torch.fft.ifftshift(result, dim=(-2, -1))
     return torch.real(result)
 
-if __name__ == "__main__":
+
+def _test0():
     device = "cuda"
     batch_size = 16
     input_topk_mats = 2
@@ -309,5 +322,40 @@ if __name__ == "__main__":
                               ).unsqueeze(1).repeat(1, input_topk_mats, 1, 1)
     print("align", flush=True)
     t=time.time()
-    pj.align_partilces(fakefimage, fakeCtf, rotmats)
+    pj.align_particles(fakefimage, fakeCtf, rotmats)
     print("DONE", time.time()-t)
+
+def _test1():
+    device = "cuda"
+    batch_size = 4
+
+    pj = ProjectionMatcher(reference_vol="/home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles_reconstruct.mrc",
+                           grid_distance_degs=12,
+                           grid_step_degs=2,
+                           pixel_size=None,
+                           filter_resolution_angst=5,
+                           max_shift_fraction=0.2,
+                           return_top_k=1)
+
+    from cryoPARES.configs.mainConfig import main_config
+    main_config.datamanager.particlesdataset.desired_image_size_px=360
+    main_config.datamanager.particlesdataset.desired_sampling_rate_angs=1.27
+    from cryoPARES.datamanager.datamanager import DataManager
+
+    datamanager = DataManager(star_fnames=["/home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles.star"],
+                              symmetry="C1",
+                              batch_size=batch_size,
+                              particles_dir=None,
+                              halfset=None,
+                              save_train_val_partition_dir=None,
+                              is_global_zero=True)
+
+    with torch.inference_mode():
+        for batch in datamanager._create_dataloader():
+            imgs = batch[BATCH_PARTICLES_NAME]
+            rotmats = batch[BATCH_POSE_NAME][0].unsqueeze(1)
+            fimages = pj._real_to_fourier(imgs)
+            pj.align_particles(fimages, ctfs, rotmats)
+
+if __name__ == "__main__":
+    _test1()

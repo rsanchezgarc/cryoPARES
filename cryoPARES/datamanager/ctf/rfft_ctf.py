@@ -3,7 +3,6 @@ import sys
 
 import einops
 import torch
-from starstack import ParticlesStarSet
 
 from .common import _compute_ctf
 
@@ -30,11 +29,7 @@ def _get2DFreqsRFFT(imageSize, sampling_rate, fftshift: bool, device=None):
     # axes[1].imshow(freqs[...,1])
     # plt.show()
 
-
-
     freqs = freqs.reshape(-1, 2)
-
-
 
     if device is not None:
         freqs = freqs.to(device)
@@ -172,6 +167,8 @@ def _test_correct():
     # ctf1 = compute_ctf_rfft(image_size=img_size, sampling_rate=1.5, dfu=4000, dfv=4000, dfang=0,
     #                         volt=300, cs=2.7, w=0.1,
     #                         phase_shift=0, bfactor=0, fftshift=True, device="cpu")
+
+    from starstack import ParticlesStarSet
     parts = ParticlesStarSet(starFname="/home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/projections/1000proj_with_ctf.star",
                              particlesDir="/home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/")
     img, md = parts[0]

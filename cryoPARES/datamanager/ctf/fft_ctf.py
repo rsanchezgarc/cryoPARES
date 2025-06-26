@@ -5,7 +5,7 @@ import torch
 
 from .common import _compute_ctf
 
-
+#TODO: WE MIGHT WANT TO REMOVE THIS MODULE AND USE ONLY RFFT
 @functools.lru_cache(1)
 def _get2DFreqs(imageSize, sampling_rate, device=None):
     freqs1d = torch.fft.fftshift(torch.fft.fftfreq(imageSize))

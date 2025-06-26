@@ -125,7 +125,7 @@ class DataManager(pl.LightningDataModule):
         self.rank = rank
         self.is_global_zero = (rank == 0)
 
-    def _create_dataloader(self, partitionName: Optional[str]):
+    def _create_dataloader(self, partitionName: Optional[str]=None):
         dataset = self.create_dataset(partitionName)
         # If we're in distributed mode (world_size and rank are set)
         if hasattr(self, 'world_size') and hasattr(self, 'rank'):

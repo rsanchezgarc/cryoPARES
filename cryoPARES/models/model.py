@@ -144,7 +144,6 @@ class PlModel(RotationPredictionMixin, pl.LightningModule):
                  so3model: Optional[Union[nn.Module, ScriptModule]] = None,
                 ):
 
-
         #TODO: Forward with neigs needs to be exposed and selectable via config
         super().__init__()
         self.__init_mixin__()

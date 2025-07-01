@@ -56,8 +56,8 @@ def extract_central_slices_rfft_3d_multichannel(
                                                         valid_coords,
                                                         freq_grid_mask,
                                                         zyx_matrices)
-
-@torch.compile(fullgraph=True, disable=main_config.projmatching.compile_projectVol,
+#TODO: we should define a _extract_central_slices_rfft_3d_multichannel_FACTORY to use main_config.projmatching properly
+@torch.compile(fullgraph=True, disable=main_config.projmatching.disable_compile_projectVol,
                mode=main_config.projmatching.compile_projectVol_mode)
 def _extract_central_slices_rfft_3d_multichannel(
     volume_rfft: torch.Tensor,  # (c, d, d, d)

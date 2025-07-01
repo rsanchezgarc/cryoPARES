@@ -102,7 +102,7 @@ def so3_near_identity_grid_cartesianprod(max_angle, n_angles, transposed=True, d
     angles_range = torch.linspace(-max_angle, max_angle, n_angles)
     grid = torch.cartesian_prod(angles_range, angles_range, angles_range)
 
-    grid = _filter_duplicate_angles_in_grid(grid, degrees=degrees)
+    grid = _filter_duplicate_angles_in_grid(grid, degrees=degrees) #TODO: This breaks at some angles
     if transposed:
         grid = grid.T.contiguous()
     return grid

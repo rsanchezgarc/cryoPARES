@@ -12,6 +12,8 @@ import torch
 from scipy.spatial.transform import Rotation
 from torch import nn
 from torch.nn import functional as F
+
+from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.projmatching.extract_central_slices_as_real import extract_central_slices_rfft_3d_multichannel
 from torch_grid_utils import fftfreq_grid
 from torch_grid_utils.shapes_2d import circle #TODO we can use other things to limit frequencies
@@ -55,7 +57,7 @@ class ProjectionMatcher(nn.Module):
         self._store_so3_grid_rotmats()
 
         self._correlateF = self._correlateCrossCorrelation
-
+        self.background_stream = torch.cuda.Stream()
 
     def _store_reference_vol(self, reference_vol: MAP_AS_ARRAY_OR_FNAME_TYPE,
                              pixel_size: Optional[float] = None,
@@ -86,7 +88,8 @@ class ProjectionMatcher(nn.Module):
         self.vol_voxel_size = pixel_size
         reference_vol = torch.as_tensor(reference_vol.numpy(), device=reference_vol.device, dtype=reference_vol.dtype)
 
-        reference_vol, vol_shape, pad_length = compute_dft(reference_vol, pad=False) # reference_vol is computed with rfft=True, fftshift=True,
+        reference_vol, vol_shape, pad_length = compute_dft_3d(reference_vol,
+                                                              pad=False)  # reference_vol is computed with rfft=True, fftshift=True,
         self.pad_length = pad_length
 
 
@@ -125,7 +128,12 @@ class ProjectionMatcher(nn.Module):
         return projs
 
     def _projectF(self, rotmats):
-        return projectVol(self.reference_vol, self.vol_shape, rotmats, self.fftfreq_max)
+        projs = extract_central_slices_rfft_3d_multichannel(self.reference_vol, self.vol_shape,
+                                                            rotation_matrices=rotmats, fftfreq_max= self.fftfreq_max,
+                                                            zyx_matrices=False)
+        with torch.cuda.stream(self.background_stream):
+            projs = projs.permute([0, 1, 2, 4, 5, 3]).contiguous()
+        return projs
 
     def _correlateCrossCorrelation(self, parts: torch.Tensor, projs: torch.Tensor) -> Tuple[torch.Tensor,torch.Tensor]:
 
@@ -182,7 +190,7 @@ class ProjectionMatcher(nn.Module):
         # axes[1, 0].imshow(self._fourier_proj_to_real(cpu_projs)[1, 0, mat_idxs[0], ...])
         # axes[1, 1].imshow(self._fourier_proj_to_real(cpu_projs)[1, 0, mat_idxs[1], ...])
         # plt.show()
-
+        self.background_stream.synchronize()
         if self.correct_ctf:
             projs *= ctf[:, None, None, ..., None] #TODO. Multiply ctf in the particles
         del ctf
@@ -197,7 +205,9 @@ class ProjectionMatcher(nn.Module):
         return maxCorrs, predRotMats, predShiftsAngs, comparedWeight
 
 
-@torch.compile(mode="max-autotune", fullgraph=True)
+#TODO: we should define a _analyze_cross_correlation_FACTORY to use main_config.projmatching properly
+@torch.compile(fullgraph=True, disable=main_config.projmatching.disable_compile_analyze_cc,
+               mode=main_config.projmatching.compile_analyze_cc_mode)
 def _analyze_cross_correlation(perImgCorr:torch.Tensor, pixelShiftsXY:torch.Tensor, grid_rotmats:torch.Tensor,
                                return_top_k:int, half_particle_size:float,
                                vol_voxel_size:float) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -231,7 +241,9 @@ def _get_begin_end_from_max_shift(image_shape, max_shift):
 
     return h0, h1, w0, w1
 
-@torch.compile()
+#TODO: we should define a _extract_ccor_maxFACTORY to use main_config.projmatching properly
+@torch.compile(fullgraph=True, disable=main_config.projmatching.disable_compile_analyze_cc,
+               mode=main_config.projmatching.compile_analyze_cc_mode)
 def _extract_ccor_max(corrs, max_shift_fraction):
     pixelShiftsXY = torch.empty(corrs.shape[:-2] + (2,), device=corrs.device, dtype=torch.int64)
 
@@ -247,7 +259,9 @@ def _extract_ccor_max(corrs, max_shift_fraction):
 
     return perImgCorr, pixelShiftsXY
 
-# @torch.compile(mode="max-autotune", fullgraph=True)
+#TODO: we should define a correlate_dft_2d_FACTORY to use main_config.projmatching properly
+@torch.compile(fullgraph=True, disable=main_config.projmatching.disable_compile_correlate_dft_2d,
+               mode=main_config.projmatching.compile_correlate_dft_2d_mode)
 def correlate_dft_2d(
     parts: torch.Tensor,
     projs: torch.Tensor,
@@ -276,15 +290,8 @@ def correlate_dft_2d(
     # plt.show()
     return result
 
-# @torch.compile(mode="reduce-overhead", fullgraph=False) #mode="max-autotune"
-def projectVol(reference_vol, vol_shape, rotmats, fftfreq_max):
-    projs = extract_central_slices_rfft_3d_multichannel(reference_vol, vol_shape,
-                                                        rotation_matrices=rotmats, fftfreq_max=fftfreq_max,
-                                                        zyx_matrices=False)
-    projs = projs.permute([0, 1, 2, 4, 5, 3]).contiguous()
-    return projs
 
-def compute_dft(
+def compute_dft_3d(
     volume: torch.Tensor,
     pad: bool = True,
     pad_length: int | None = None
@@ -357,7 +364,7 @@ def _test0():
 
 def _test1():
     device = "cuda"
-    batch_size = 64
+    batch_size = 32
 
     torch.set_float32_matmul_precision('high')
     pj = ProjectionMatcher(reference_vol=os.path.expanduser("~/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles_reconstruct.mrc"),
@@ -398,6 +405,7 @@ def _test1():
             ctfs = batch[BATCH_ORI_CTF_NAME].to(device, non_blocking=True)
             rotmats = batch[BATCH_POSE_NAME][0].unsqueeze(1).to(device, non_blocking=True)
             md = batch[BATCH_MD_NAME]
+            # torch.compiler.cudagraph_mark_step_begin()  #<- This is needed for compilation.  #!!!!!!!!!!!!!!!!!!
             fimages = pj._real_to_fourier(imgs) #TODO. I should be able to get the fimages from the rfft_ctf.correct_ctf. I would need to apply a phase shift to reproduce the real space fftshift
             maxCorrs, predRotMats, predShiftsAngs, comparedWeight = pj.align_particles(fimages, ctfs, rotmats)
             break
@@ -407,7 +415,8 @@ def _test1():
             ctfs = batch[BATCH_ORI_CTF_NAME].to(device, non_blocking=True)
             rotmats = batch[BATCH_POSE_NAME][0].unsqueeze(1).to(device, non_blocking=True)
             md = batch[BATCH_MD_NAME]
-            fimages = pj._real_to_fourier(imgs) #TODO. I should be able to get the fimages from the rfft_ctf.correct_ctf. I would need to apply a phase shift to reproduce the real space fftshift
+            with torch.cuda.stream(pj.background_stream):
+                fimages = pj._real_to_fourier(imgs) #TODO. I should be able to get the fimages from the rfft_ctf.correct_ctf. I would need to apply a phase shift to reproduce the real space fftshift
             maxCorrs, predRotMats, predShiftsAngs, comparedWeight = pj.align_particles(fimages, ctfs, rotmats)
         #     print("GT Rots\n", torch.rad2deg(matrix_to_euler_angles(rotmats, RELION_EULER_CONVENTION)).squeeze(1)) #TODO: I don't trust matrix_to_euler
         #     print("Pred Rots\n",torch.rad2deg(matrix_to_euler_angles(predRotMats, RELION_EULER_CONVENTION)).squeeze(1))
@@ -425,8 +434,9 @@ def _test1():
         #             md[angName+suffix] = eulers[:,i]
         #         for i, shiftName in enumerate(RELION_SHIFTS_NAMES):
         #             md[shiftName+suffix] = predShiftsAngs[:,topk,i].cpu().numpy()
-        #         md[PROJECTION_MATCHING_SCORE] = comparedWeight[:,topk,...]
+        #         md[PROJECTION_MATCHING_SCORE] = comparedWeight[:,topk,...].cpu().numpy()
         #     pd_list.append(pd.DataFrame(md))
+        #     del predRotMats, eulers, predShiftsAngs, comparedWeight
         # optics = getattr(dl.dataset, "particles", dl.dataset.datasets[0].particles).optics_md
         # parts = pd.concat(pd_list)
         # starfile.write(dict(optics=optics, particles=parts), filename="/tmp/particles.star")

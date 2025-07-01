@@ -2,7 +2,7 @@ from typing import Union, Any, Dict, Tuple, List
 
 import torch
 from torch import nn, ScriptModule
-
+from tensorDataBuffer import StreamingBuffer
 from cryoPARES.geometry.metrics_angles import rotation_error_rads
 from cryoPARES.models.model import RotationPredictionMixin
 
@@ -11,7 +11,9 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
     def __init__(self,
                  so3model: Union[nn.Module, ScriptModule],
                  scoreNormalizer: Union[nn.Module, ScriptModule],
+                 noramlizedScore_thr: float,
                  top_k: int,
+                 buffer_size: int = 64
                  ):
         super().__init__()
         self.__init_mixin__()
@@ -19,6 +21,7 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
         self.symmetry = self.so3model.symmetry
         self.scoreNormalizer = scoreNormalizer
         self.top_k = top_k
+        self.buffer_size = buffer_size
 
     def forward(self, imgs, top_k):
         wD, rotMat_logits, pred_rotmat_id, pred_rotmats, maxprobs = self.so3model(imgs, top_k)

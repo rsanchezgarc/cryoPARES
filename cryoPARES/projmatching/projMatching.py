@@ -197,7 +197,7 @@ class ProjectionMatcher(nn.Module):
         return maxCorrs, predRotMats, predShiftsAngs, comparedWeight
 
 
-# @torch.compile(mode="max-autotune", fullgraph=True)
+@torch.compile(mode="max-autotune", fullgraph=True)
 def _analyze_cross_correlation(perImgCorr:torch.Tensor, pixelShiftsXY:torch.Tensor, grid_rotmats:torch.Tensor,
                                return_top_k:int, half_particle_size:float,
                                vol_voxel_size:float) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -231,7 +231,7 @@ def _get_begin_end_from_max_shift(image_shape, max_shift):
 
     return h0, h1, w0, w1
 
-# @torch.compile()
+@torch.compile()
 def _extract_ccor_max(corrs, max_shift_fraction):
     pixelShiftsXY = torch.empty(corrs.shape[:-2] + (2,), device=corrs.device, dtype=torch.int64)
 
@@ -356,8 +356,8 @@ def _test0():
     print("DONE", time.time()-t)
 
 def _test1():
-    device = "cpu"
-    batch_size = 16
+    device = "cuda"
+    batch_size = 64
 
     torch.set_float32_matmul_precision('high')
     pj = ProjectionMatcher(reference_vol=os.path.expanduser("~/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles_reconstruct.mrc"),
@@ -392,6 +392,15 @@ def _test1():
     with torch.inference_mode():
         pd_list = []
         dl = datamanager._create_dataloader()
+        for bix, batch in enumerate(dl): #WARMUP
+            # print(batch[BATCH_IDS_NAME])
+            imgs = batch[BATCH_ORI_IMAGE_NAME].to(device, non_blocking=True)
+            ctfs = batch[BATCH_ORI_CTF_NAME].to(device, non_blocking=True)
+            rotmats = batch[BATCH_POSE_NAME][0].unsqueeze(1).to(device, non_blocking=True)
+            md = batch[BATCH_MD_NAME]
+            fimages = pj._real_to_fourier(imgs) #TODO. I should be able to get the fimages from the rfft_ctf.correct_ctf. I would need to apply a phase shift to reproduce the real space fftshift
+            maxCorrs, predRotMats, predShiftsAngs, comparedWeight = pj.align_particles(fimages, ctfs, rotmats)
+            break
         for bix, batch in enumerate(tqdm(dl)):
             # print(batch[BATCH_IDS_NAME])
             imgs = batch[BATCH_ORI_IMAGE_NAME].to(device, non_blocking=True)

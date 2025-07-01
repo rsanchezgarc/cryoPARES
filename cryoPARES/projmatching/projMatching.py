@@ -1,22 +1,29 @@
 import math
+import os.path
+import sys
 import time
 from functools import lru_cache, cached_property
 from typing import Tuple, Optional, Union, Sequence
 
 import numpy as np
+import pandas as pd
+import starfile
 import torch
+from scipy.spatial.transform import Rotation
 from torch import nn
 from torch.nn import functional as F
-from torch_fourier_slice import extract_central_slices_rfft_3d
+from cryoPARES.projmatching.extract_central_slices_as_real import extract_central_slices_rfft_3d_multichannel
 from torch_grid_utils import fftfreq_grid
 from torch_grid_utils.shapes_2d import circle #TODO we can use other things to limit frequencies
 
-from cryoPARES.geometry.convert_angles import euler_angles_to_matrix
+from cryoPARES.geometry.convert_angles import euler_angles_to_matrix, matrix_to_euler_angles
 from cryoPARES.geometry.grids import so3_near_identity_grid_cartesianprod
+from cryoPARES.projmatching.fftOps import _real_to_fourier_2d, _fourier_proj_to_real_2d
 from cryoPARES.utils.paths import MAP_AS_ARRAY_OR_FNAME_TYPE
 from cryoPARES.utils.reconstructionUtils import get_vol
-from cryoPARES.constants import RELION_EULER_CONVENTION, BATCH_PARTICLES_NAME, BATCH_POSE_NAME, BATCH_ORI_IMAGE_NAME, \
-    BATCH_ORI_CTF_NAME
+from cryoPARES.constants import (RELION_EULER_CONVENTION, BATCH_PARTICLES_NAME, BATCH_POSE_NAME,
+                                 BATCH_ORI_IMAGE_NAME, BATCH_ORI_CTF_NAME, BATCH_IDS_NAME, BATCH_MD_NAME,
+                                 RELION_ANGLES_NAMES, PROJECTION_MATCHING_SCORE, RELION_SHIFTS_NAMES)
 
 
 class ProjectionMatcher(nn.Module):
@@ -25,8 +32,9 @@ class ProjectionMatcher(nn.Module):
                  grid_step_degs: float,
                  pixel_size: Optional[float] = None,
                  filter_resolution_angst: Optional[float] = None,
-                 max_shift_fraction: float = 0.2, #TODO: Add this to CONFIG,
-                 return_top_k: int = 2
+                 max_shift_fraction: Optional[float] = 0.2, #TODO: Add this to CONFIG,
+                 return_top_k: int = 2,
+                 correct_ctf: bool = True
                  ): #TODO: Add downsampling of the volume
 
         super().__init__()
@@ -36,8 +44,9 @@ class ProjectionMatcher(nn.Module):
         self.filter_resolution_angst = filter_resolution_angst
         self.max_shift_fraction = max_shift_fraction
         self.return_top_k = return_top_k
+        self.correct_ctf = correct_ctf
 
-        self.ori_vol_shape = None
+        self.vol_shape = None
         self.ori_image_shape = None
         self.vol_voxel_size = None
 
@@ -56,7 +65,7 @@ class ProjectionMatcher(nn.Module):
         :param reference_vol: A volume fname or torch tensor or numpy array representing a cryoEM volume
         :param pixel_size: The sampling rate in Å/px
 
-        stores the reference_vol as a tensor and sets the following attributes: self.ori_vol_shape,
+        stores the reference_vol as a tensor and sets the following attributes: self.vol_shape,
         and self.ori_image_shape, that contain information about the original volume; and  self.vol_shape  and
         self.image_shape that contain information about the volume after padding or other transformation
 
@@ -66,13 +75,13 @@ class ProjectionMatcher(nn.Module):
         assert pixel_size
         # reference_vol = reference_vol - reference_vol.mean()
 
-        self.ori_vol_shape = tuple(reference_vol.shape)
+        self.vol_shape = tuple(reference_vol.shape)
 
-        assert len(self.ori_vol_shape) == 3
-        assert len(set(self.ori_vol_shape)) == 1, "Only cubic volumes are allowed"
-        assert set(self.ori_vol_shape).pop() % 2 == 0, "Only even boxsizes are allowed"
+        assert len(self.vol_shape) == 3
+        assert len(set(self.vol_shape)) == 1, "Only cubic volumes are allowed"
+        assert set(self.vol_shape).pop() % 2 == 0, "Only even boxsizes are allowed"
 
-        self.ori_image_shape = tuple(self.ori_vol_shape[-2:])
+        self.ori_image_shape = tuple(self.vol_shape[-2:])
         self.half_particle_size = 0.5 * self.ori_image_shape[-2]
         self.vol_voxel_size = pixel_size
         reference_vol = torch.as_tensor(reference_vol.numpy(), device=reference_vol.device, dtype=reference_vol.dtype)
@@ -80,7 +89,8 @@ class ProjectionMatcher(nn.Module):
         reference_vol, vol_shape, pad_length = compute_dft(reference_vol, pad=False) # reference_vol is computed with rfft=True, fftshift=True,
         self.pad_length = pad_length
 
-        #TODO: apply raised cosine filter to limit the resolution. OR PERHAPS IT IS NOT NEEDED TO THE NEW API of the fourier projector
+
+        reference_vol = torch.view_as_real(reference_vol).permute([-1, 0, 1, 2]).contiguous()
 
         self.register_buffer("reference_vol", reference_vol)
 
@@ -95,9 +105,8 @@ class ProjectionMatcher(nn.Module):
     def _store_so3_grid_rotmats(self):
         n_angles = math.ceil(self.grid_distance_degs / (self.grid_step_degs))
         n_angles = n_angles if n_angles % 2 == 1 else n_angles + 1 #We always want an odd number
-        so3_local_grid = so3_near_identity_grid_cartesianprod(self.grid_distance_degs/2, n_angles, transposed=False)
-        so3_local_grid = torch.deg2rad(so3_local_grid)
-        grid_rotmats = euler_angles_to_matrix(so3_local_grid, convention=RELION_EULER_CONVENTION)
+        so3_local_grid = so3_near_identity_grid_cartesianprod(self.grid_distance_degs/2, n_angles, transposed=False, degrees=True)
+        grid_rotmats = euler_angles_to_matrix( torch.deg2rad(so3_local_grid), convention=RELION_EULER_CONVENTION)
         self.register_buffer("grid_rotmats", grid_rotmats)
 
 
@@ -106,28 +115,17 @@ class ProjectionMatcher(nn.Module):
         return self.reference_vol.device
 
     def _fourier_proj_to_real(self, projections):
-        projections = torch.fft.ifftshift(projections, dim=(-2,))  # ifftshift of rfft
-        projections = torch.fft.irfftn(projections, dim=(-2, -1))
-        projections = torch.fft.ifftshift(projections, dim=(-2, -1))  # recenter real space
-
-        if self.pad_length is not None:
-            projections = projections[..., self.pad_length: -self.pad_length, self.pad_length: -self.pad_length]
-        return projections
+        return _fourier_proj_to_real_2d(projections, self.pad_length)
 
     def _real_to_fourier(self, imgs):#TODO. I should be able to get the fimages from the rfft_ctf.correct_ctf. I would need to apply a phase shift to reproduce the real space fftshift
-        imgs = torch.fft.fftshift(imgs, dim=(-2, -1))
-        imgs = torch.fft.rfftn(imgs, dim=(-2, -1))
-        imgs = torch.fft.fftshift(imgs, dim=(-2,))
-        return imgs
+        return _real_to_fourier_2d(imgs, as_real_img=True)
 
     def _apply_ctfF(self, projs, ctf):
-        proj_ctfed = projs * ctf
-        return proj_ctfed
+        projs.mul_(ctf)
+        return projs
 
     def _projectF(self, rotmats):
-        projs = extract_central_slices_rfft_3d(self.reference_vol, self.ori_vol_shape, rotation_matrices=rotmats,
-                                               fftfreq_max=self.fftfreq_max)
-        return projs
+        return projectVol(self.reference_vol, self.vol_shape, rotmats, self.fftfreq_max)
 
     def _correlateCrossCorrelation(self, parts: torch.Tensor, projs: torch.Tensor) -> Tuple[torch.Tensor,torch.Tensor]:
 
@@ -137,18 +135,21 @@ class ProjectionMatcher(nn.Module):
 
         corrs = correlate_dft_2d(parts, projs)
 
-        # corrs = torch.fft.ifftshift(_correlate_dft_2d(parts, projs, rfft=True, fftshifted=True), dim=(-2,-1))
         # from matplotlib import pyplot as plt
-        # f, axes = plt.subplots(2,1)
-        # # axes[0].imshow(corr_dft2d[0].abs().log().cpu(), cmap="gray")
-        # axes[1].imshow(corrs[0].abs().log().cpu(), cmap="gray"); plt.show()
+        # f, axes = plt.subplots(3,1)
+        # axes[0].imshow(self._fourier_proj_to_real(parts[0, 0, 0]).cpu(), cmap="gray")
+        # axes[1].imshow(self._fourier_proj_to_real(projs[0, 0, 5]).cpu(), cmap="gray")
+        # # # axes[2].imshow(self._fourier_proj_to_real(projs[0, 0, 5]).cpu().flip(-2).flip(-1), cmap="gray")
+        # axes[2].imshow(self._fourier_proj_to_real(projs[0, 0, 5].cpu()) - self._fourier_proj_to_real(parts[0, 0, 0].cpu()), cmap="gray")
+        # plt.show()
+        # from skimage.feature import match_template
+        # match_template(self._fourier_proj_to_real(projs[0, 0, 5].cpu()).numpy(), self._fourier_proj_to_real(parts[0, 0, 0].cpu()).numpy())
 
-        perImgCorr, pixelShiftsXY = self._extract_ccor_max(corrs)
+        # axes[0].imshow(corr_dft2d[0].abs().log().cpu(), cmap="gray")
+        # axes[2].imshow(corrs[0, 0, 5], cmap="gray"); plt.show()
 
-        # pixel_shift_frac = pixelShiftsXY/parts.shape[1]
-        # shifted_proj = self._shiftF(projs, pixel_shift_frac)
-        # # logprob = RelionProb(projs.shape[-2:], rfft=True, fftshift=True).to(projs.device).get_logprob(parts, shifted_proj)
-        #
+        perImgCorr, pixelShiftsXY = _extract_ccor_max(corrs, self.max_shift_fraction)
+
         # from matplotlib import pyplot as plt
         # f, axes = plt.subplots(1,3)
         # _shifted_proj_real = _fourier_proj_to_real(shifted_proj[0]).cpu()
@@ -162,94 +163,126 @@ class ProjectionMatcher(nn.Module):
         # axes[2].imshow(_part_real, cmap="gray")
         # plt.show()
         # breakpoint()
-        #TODO: Once we have estimated the shifts, we can compute a more accurate error function
-        # perImgCorr = perImgCorr / (parts - projs).abs().mean((-2,-1)) #np.prod(parts.shape[1:]) #This is the temperature for the softmax
 
         return perImgCorr, pixelShiftsXY
-
-    def _extract_ccor_max_unconstrained(self, corrs):
-        pixelShiftsXY = torch.empty(corrs.shape[0], 2, device=corrs.device, dtype=torch.int64)
-        maxCorrsJ, maxIndxJ = corrs.max(-1)
-        perImgCorr, maxIndxI = maxCorrsJ.max(-1)
-        pixelShiftsXY[:, 1] = maxIndxI
-        pixelShiftsXY[:, 0] = torch.gather(maxIndxJ, 1, maxIndxI.unsqueeze(1)).squeeze(1) # maxIndxJ[torch.arange(maxIndxI.shape[0]), maxIndxI]
-        return perImgCorr, pixelShiftsXY
-
-    def _extract_ccor_max(self, corrs):
-
-        pixelShiftsXY = torch.empty(corrs.shape[:-2]+(2,), device=corrs.device, dtype=torch.int64)
-
-        h0, h1, w0, w1 = self._get_begin_end_from_max_shift(corrs.shape[-2:], self.max_shift_fraction)
-        corrs = corrs[..., h0:h1, w0:w1]
-        maxCorrsJ, maxIndxJ = corrs.max(-1)
-        perImgCorr, maxIndxI = maxCorrsJ.max(-1)
-        pixelShiftsXY[..., 1] = h0 + maxIndxI
-        pixelShiftsXY[..., 0] = w0 + torch.gather(maxIndxJ, -1, maxIndxI.unsqueeze(1)).squeeze(1)
-        return perImgCorr, pixelShiftsXY
-
-    @classmethod
-    @lru_cache(1)
-    def _get_begin_end_from_max_shift(cls, image_shape, max_shift):
-        h, w = image_shape
-        one_minux_max_shift = 1 - max_shift
-        delta_h = math.ceil((h * one_minux_max_shift) / 2)
-        h0 = delta_h
-        h1 = h - delta_h
-
-        delta_w = math.ceil((w * one_minux_max_shift) / 2)
-        w0 = delta_w
-        w1 = w - delta_w
-
-        return h0, h1, w0, w1
 
     def align_particles(self, fimg, ctf, rotmats):
 
-        expanded_rotmats = torch.einsum("gjk, btij -> btgij", self.grid_rotmats, rotmats)
+        # expanded_rotmats = torch.einsum("gij, btjk -> btgik", self.grid_rotmats, rotmats)
+        expanded_rotmats = torch.matmul(rotmats.unsqueeze(2), self.grid_rotmats.unsqueeze(0).unsqueeze(0))
+        del rotmats
         projs = self._projectF(expanded_rotmats)
 
         # from matplotlib import pyplot as plt
         # f, axes = plt.subplots(2, 2)
-        # axes[0, 0].imshow(self._fourier_proj_to_real(projs)[0, 0, 0, ...])
-        # axes[0, 1].imshow(self._fourier_proj_to_real(projs)[0, 1, 0, ...])
-        # axes[1, 0].imshow(self._fourier_proj_to_real(projs)[1, 0, 0, ...])
-        # axes[1, 1].imshow(self._fourier_proj_to_real(projs)[1, 1, 0, ...])
+        # cpu_projs = projs.to("cpu", copy=True)
+        # mat_idxs = [5, 6]
+        # axes[0, 0].imshow(self._fourier_proj_to_real(cpu_projs)[0, 0, mat_idxs[0], ...])
+        # axes[0, 1].imshow(self._fourier_proj_to_real(cpu_projs)[0, 0, mat_idxs[1], ...])
+        # axes[1, 0].imshow(self._fourier_proj_to_real(cpu_projs)[1, 0, mat_idxs[0], ...])
+        # axes[1, 1].imshow(self._fourier_proj_to_real(cpu_projs)[1, 0, mat_idxs[1], ...])
         # plt.show()
 
-        projs *= ctf[:, None, None, ...]
+        if self.correct_ctf:
+            projs *= ctf[:, None, None, ..., None] #TODO. Multiply ctf in the particles
+        del ctf
         perImgCorr, pixelShiftsXY = self._correlateCrossCorrelation(fimg[:, None, None, ...], projs)
-        # b, topk, nrots = perImgCorr.shape[:3]
-        # reshaped_perImgCorr = perImgCorr.reshape(b, -1)
-        # maxCorrs, maxIdxs = reshaped_perImgCorr.topk(self.return_top_k, largest=True, sorted=True)
-        # bestPixelShiftsXY = pixelShiftsXY.reshape(b, -1)[torch.arange(b).unsqueeze(1), maxIdxs]
-        # mean_corr = torch.mean(reshaped_perImgCorr, dim=-1, keepdim=True)
-        # std_corr = torch.std(reshaped_perImgCorr, dim=-1, keepdim=True)
-        # comparedWeight = torch.distributions.Normal(mean_corr,std_corr).cdf(maxCorrs) #1-P(I_i > All_images)
 
         maxCorrs, predRotMats, predShiftsAngs, comparedWeight = _analyze_cross_correlation(perImgCorr, pixelShiftsXY,
-                                                                           grid_rotmats = self.grid_rotmats,
+                                                                           grid_rotmats=expanded_rotmats,
                                                                            return_top_k=self.return_top_k,
                                                                            half_particle_size=self.half_particle_size,
                                                                            vol_voxel_size=self.vol_voxel_size)
-
+        #TODO: PreRotMats comes from multyping the (grid_rotmat @ rotmat)
         return maxCorrs, predRotMats, predShiftsAngs, comparedWeight
 
 
-@torch.compile(mode="max-autotune")
+# @torch.compile(mode="max-autotune", fullgraph=True)
 def _analyze_cross_correlation(perImgCorr:torch.Tensor, pixelShiftsXY:torch.Tensor, grid_rotmats:torch.Tensor,
                                return_top_k:int, half_particle_size:float,
-                               vol_voxel_size:int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    b, topk, nrots = perImgCorr.shape[:3]
+                               vol_voxel_size:float) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+
+    b, topk, nrots = perImgCorr.shape
+    batch_arange= torch.arange(b, device=perImgCorr.device).unsqueeze(1)
+    topk_arange= torch.arange(topk, device=perImgCorr.device).unsqueeze(1)
     reshaped_perImgCorr = perImgCorr.reshape(b, -1)
     maxCorrs, maxIdxs = reshaped_perImgCorr.topk(return_top_k, largest=True, sorted=True)
-    bestPixelShiftsXY = pixelShiftsXY.reshape(b, -1)[torch.arange(b).unsqueeze(1), maxIdxs]
+    bestPixelShiftsXY = pixelShiftsXY.reshape(b, -1, 2)[batch_arange, maxIdxs]
     mean_corr = torch.mean(reshaped_perImgCorr, dim=-1, keepdim=True)
     std_corr = torch.std(reshaped_perImgCorr, dim=-1, keepdim=True)
     comparedWeight = torch.distributions.Normal(mean_corr, std_corr).cdf(maxCorrs)  # 1-P(I_i > All_images)
     predShiftsAngs = -(bestPixelShiftsXY - half_particle_size) * vol_voxel_size
     predRotMatsIdxs = maxIdxs % nrots
-    predRotMats = grid_rotmats[predRotMatsIdxs]
+    predRotMats = grid_rotmats[batch_arange, topk_arange, predRotMatsIdxs]
 
     return maxCorrs, predRotMats, predShiftsAngs, comparedWeight
+
+@lru_cache(1)
+def _get_begin_end_from_max_shift(image_shape, max_shift):
+    h, w = image_shape
+    one_minus_max_shift = 1 - max_shift
+    delta_h = math.ceil((h * one_minus_max_shift) / 2)
+    h0 = delta_h
+    h1 = h - delta_h
+
+    delta_w = math.ceil((w * one_minus_max_shift) / 2)
+    w0 = delta_w
+    w1 = w - delta_w
+
+    return h0, h1, w0, w1
+
+# @torch.compile()
+def _extract_ccor_max(corrs, max_shift_fraction):
+    pixelShiftsXY = torch.empty(corrs.shape[:-2] + (2,), device=corrs.device, dtype=torch.int64)
+
+    if max_shift_fraction is not None:
+        h0, h1, w0, w1 = _get_begin_end_from_max_shift(corrs.shape[-2:], max_shift_fraction)
+        corrs = corrs[..., h0:h1, w0:w1]
+    else:
+        h0, w0 = 0, 0
+    maxCorrsJ, maxIndxJ = corrs.max(-1)
+    perImgCorr, maxIndxI = maxCorrsJ.max(-1)
+    pixelShiftsXY[..., 1] = h0 + maxIndxI
+    pixelShiftsXY[..., 0] = w0 + torch.gather(maxIndxJ, -1, maxIndxI.unsqueeze(-1)).squeeze(-1)
+
+    return perImgCorr, pixelShiftsXY
+
+# @torch.compile(mode="max-autotune", fullgraph=True)
+def correlate_dft_2d(
+    parts: torch.Tensor,
+    projs: torch.Tensor,
+) -> torch.Tensor:
+    """Correlate fftshifted rfft discrete Fourier transforms of images"""
+
+    #TODO: try to limit the comparison to the mask that Alister uses
+    """
+        normed_grid = (einops.reduce(freq_grid**2, "h w zyx -> h w", reduction="sum") ** 0.5)
+        freq_grid_mask = normed_grid <= fftfreq_max
+        valid_coords = freq_grid[freq_grid_mask, ...]  # (b, zyx)
+    """
+
+    if not parts.is_complex():
+        parts = torch.view_as_complex(parts)
+    if not projs.is_complex():
+        projs = torch.view_as_complex(projs)
+    result = parts * torch.conj(projs)
+
+    result = torch.fft.ifftshift(result, dim=(-2,),)
+    result = torch.fft.irfftn(result, dim=(-2, -1))
+    result = torch.fft.ifftshift(result, dim=(-2, -1)).real
+
+    # from matplotlib import pyplot as plt
+    # plt.imshow(result)
+    # plt.show()
+    return result
+
+# @torch.compile(mode="reduce-overhead", fullgraph=False) #mode="max-autotune"
+def projectVol(reference_vol, vol_shape, rotmats, fftfreq_max):
+    projs = extract_central_slices_rfft_3d_multichannel(reference_vol, vol_shape,
+                                                        rotation_matrices=rotmats, fftfreq_max=fftfreq_max,
+                                                        zyx_matrices=False)
+    projs = projs.permute([0, 1, 2, 4, 5, 3]).contiguous()
+    return projs
 
 def compute_dft(
     volume: torch.Tensor,
@@ -299,29 +332,6 @@ def compute_dft(
     return dft, vol_shape, pad_length
 
 
-
-
-def correlate_dft_2d(
-    a: torch.Tensor,
-    b: torch.Tensor,
-) -> torch.Tensor:
-    """Correlate fftshifted rfft discrete Fourier transforms of images"""
-
-    #TODO: limit the comparison to the mask that alister uses
-    """
-        normed_grid = (einops.reduce(freq_grid**2, "h w zyx -> h w", reduction="sum") ** 0.5)
-        freq_grid_mask = normed_grid <= fftfreq_max
-        valid_coords = freq_grid[freq_grid_mask, ...]  # (b, zyx)
-    """
-
-    result = a * torch.conj(b)
-
-    result = torch.fft.ifftshift(result, dim=(-2,))
-    result = torch.fft.irfftn(result, dim=(-2, -1))
-    result = torch.fft.ifftshift(result, dim=(-2, -1))
-    return torch.real(result)
-
-
 def _test0():
     device = "cuda"
     batch_size = 16
@@ -346,16 +356,18 @@ def _test0():
     print("DONE", time.time()-t)
 
 def _test1():
-    device = "cuda"
-    batch_size = 4
+    device = "cpu"
+    batch_size = 16
 
-    pj = ProjectionMatcher(reference_vol="/home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles_reconstruct.mrc",
-                           grid_distance_degs=12,
-                           grid_step_degs=2,
+    torch.set_float32_matmul_precision('high')
+    pj = ProjectionMatcher(reference_vol=os.path.expanduser("~/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles_reconstruct.mrc"),
+                           grid_distance_degs=10, #12
+                           grid_step_degs=5,      #2
                            pixel_size=None,
                            filter_resolution_angst=6,
-                           max_shift_fraction=0.2,
-                           return_top_k=1)
+                           max_shift_fraction=None,
+                           return_top_k=1,
+                           correct_ctf=False)
 
     from cryoPARES.datamanager.datamanager import DataManager
     from tqdm import tqdm
@@ -364,24 +376,51 @@ def _test1():
     # main_config.datamanager.particlesdataset.desired_image_size_px=360
     # main_config.datamanager.particlesdataset.desired_sampling_rate_angs=1.27
 
-    datamanager = DataManager(star_fnames=["/home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles.star"],
-                              symmetry="C1",
-                              batch_size=batch_size,
-                              particles_dir=None,
-                              halfset=None,
-                              save_train_val_partition_dir=None,
-                              is_global_zero=True,
-                              return_ori_imagen=True,
-                              num_augmented_copies_per_batch=1,
-                              num_data_workers=1)
+    datamanager = DataManager(
+          # star_fnames=[os.path.expanduser("~/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles.star")],
+          star_fnames=[os.path.expanduser("~/cryo/data/preAlignedParticles/EMPIAR-10166/data/projections/proj_noCTF_no_shifts.star")],
+          symmetry="C1",
+          batch_size=batch_size,
+          particles_dir=[os.path.expanduser("~/cryo/data/preAlignedParticles/EMPIAR-10166/data/")],
+          halfset=None,
+          save_train_val_partition_dir=None,
+          is_global_zero=True,
+          return_ori_imagen=True,
+          num_augmented_copies_per_batch=1,
+          num_data_workers=2)
     pj.to(device)
     with torch.inference_mode():
-        for batch in tqdm(datamanager._create_dataloader()):
+        pd_list = []
+        dl = datamanager._create_dataloader()
+        for bix, batch in enumerate(tqdm(dl)):
+            # print(batch[BATCH_IDS_NAME])
             imgs = batch[BATCH_ORI_IMAGE_NAME].to(device, non_blocking=True)
             ctfs = batch[BATCH_ORI_CTF_NAME].to(device, non_blocking=True)
             rotmats = batch[BATCH_POSE_NAME][0].unsqueeze(1).to(device, non_blocking=True)
+            md = batch[BATCH_MD_NAME]
             fimages = pj._real_to_fourier(imgs) #TODO. I should be able to get the fimages from the rfft_ctf.correct_ctf. I would need to apply a phase shift to reproduce the real space fftshift
-            pj.align_particles(fimages, ctfs, rotmats)
+            maxCorrs, predRotMats, predShiftsAngs, comparedWeight = pj.align_particles(fimages, ctfs, rotmats)
+        #     print("GT Rots\n", torch.rad2deg(matrix_to_euler_angles(rotmats, RELION_EULER_CONVENTION)).squeeze(1)) #TODO: I don't trust matrix_to_euler
+        #     print("Pred Rots\n",torch.rad2deg(matrix_to_euler_angles(predRotMats, RELION_EULER_CONVENTION)).squeeze(1))
+        #
+        #     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+        #     print("GT shifts\n", batch[BATCH_POSE_NAME][1])
+        #     print("pred shifts\n", predShiftsAngs.squeeze(1))
+        #     print("---------------------------------------------------")
+        #     print()
+        #
+        #     for topk in range(predRotMats.shape[1]):
+        #         suffix = "" if topk == 0 else f"_top{topk}"
+        #         eulers = Rotation.from_matrix(predRotMats.cpu().numpy()[:,topk,...]).as_euler(RELION_EULER_CONVENTION, degrees=True)
+        #         for i, angName in enumerate(RELION_ANGLES_NAMES):
+        #             md[angName+suffix] = eulers[:,i]
+        #         for i, shiftName in enumerate(RELION_SHIFTS_NAMES):
+        #             md[shiftName+suffix] = predShiftsAngs[:,topk,i].cpu().numpy()
+        #         md[PROJECTION_MATCHING_SCORE] = comparedWeight[:,topk,...]
+        #     pd_list.append(pd.DataFrame(md))
+        # optics = getattr(dl.dataset, "particles", dl.dataset.datasets[0].particles).optics_md
+        # parts = pd.concat(pd_list)
+        # starfile.write(dict(optics=optics, particles=parts), filename="/tmp/particles.star")
 
 if __name__ == "__main__":
     _test1()

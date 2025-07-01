@@ -3,12 +3,25 @@ import torch
 import healpy as hp
 from typing import Literal, Optional
 
+from scipy.spatial.transform import Rotation as R
+
 from cryoPARES.cacheManager import get_cache
 from cryoPARES.constants import RELION_EULER_CONVENTION
 from cryoPARES.geometry.convert_angles import matrix_to_euler_angles
 from cryoPARES.geometry.metrics_angles import rotation_magnitude
 
 cache = get_cache(cache_name=__name__)
+
+
+def hp_order_to_degs(hp_order):
+    return hp.nside2resol(hp.order2nside(hp_order), arcmin=True) / 60
+
+def pick_hp_order(grid_resolution_degs):
+    for i in range(14):  # We generally want i to be in the 4 to 6 range.
+        curr_degs = hp_order_to_degs(i)
+        if curr_degs <= grid_resolution_degs:
+            return i
+    raise RuntimeError(f"Error, discretization required for {grid_resolution_degs} is beyond precision limit")
 
 cache.cache()
 def s2_healpix_grid(hp_order, max_beta):
@@ -76,56 +89,53 @@ def so3_healpix_grid_equiangular(hp_order: int = 3):
 
     return result, n_cones
 
-# try:
-#     from escnn.group import so3_group
-#     def so3_healpix_grid_escnn(hp_order: int, method:Literal["thomson", "hopf", "thomson_cube", "fibonacci"] = "hopf",
-#                                representation:Optional[Literal["MAT", "Q", "ZYZ"]]="ZYZ"):
-#         n_cones = hp.order2npix(hp_order) * 6
-#         gridB = so3_group(maximum_frequency=1).grid(N=n_cones, type=method)
-#         if representation is not None:
-#             gridB = [x.to(representation) for x in gridB]
-#             gridB = torch.stack([torch.as_tensor(x, dtype=torch.float32) for x in gridB]).T.contiguous()
-#         return gridB, n_cones
-#
-#     def so3_near_identity_grid_escnn(max_rads,
-#                                      hp_order):  # TODO. It is hard to set parameters that lead to good results
-#         fullSo3 = so3_healpix_grid_escnn(hp_order, representation="MAT")[0]
-#         magnitudes = rotation_magnitude(fullSo3)
-#         angles = matrix_to_euler_angles(fullSo3[magnitudes < max_rads], convention=RELION_EULER_CONVENTION)
-#         assert angles.shape[0] > 0
-#         return angles
-#
-# except (ImportError, AttributeError):
-#     pass
 
-so3_healpix_grid = so3_healpix_grid_equiangular #so3_healpix_grid_escnn
+so3_healpix_grid = so3_healpix_grid_equiangular
 
-cache.cache()
-def so3_near_identity_grid_cartesianprod(max_angle, n_angles, transposed=True): #TODO: It is probably better to use something like healpy rather than a cartesian product.
+cache.cache() #TODO: This is not a great way of doing it
+def so3_near_identity_grid_cartesianprod(max_angle, n_angles, transposed=True, degrees=False): #TODO: It is probably better to use something like healpy rather than a cartesian product.
     """Spatial grid over SO3 used to parametrize localized filter
 
     :return: a local grid of SO(3) points
-           size of the kernel = n_alpha**3
     """
 
     angles_range = torch.linspace(-max_angle, max_angle, n_angles)
     grid = torch.cartesian_prod(angles_range, angles_range, angles_range)
+
+    grid = _filter_duplicate_angles_in_grid(grid, degrees=degrees)
     if transposed:
         grid = grid.T.contiguous()
     return grid
 
 
-def so3_near_identity_grid_ori(max_alpha=np.pi / 12, max_beta=np.pi / 12, max_gamma=np.pi / 12,
-                           n_alpha=8, n_beta=3, n_gamma=8):  # New version
-    """Spatial grid over SO3 used to parametrize localized filter
 
-    :return: a local grid of SO(3) points
-           size of the kernel = n_alpha * n_beta * n_gamma
+
+def _filter_duplicate_angles_in_grid(grid, degrees:bool, atol=None):
     """
 
-    alpha = torch.linspace(-max_alpha, max_alpha, n_alpha)
-    beta = torch.linspace(-max_beta, max_beta, n_beta)
-    gamma = torch.linspace(-max_gamma, max_gamma, n_gamma)
-    grid = torch.cartesian_prod(alpha, beta, gamma)
-    return grid.T
+    :param grid: A tensor of shape Bx3, representing euler angles
+    :param degrees:
+    :return:
+    """
+    if atol is None:
+        if degrees:
+            atol = 0.1
+        else:
+            atol = np.deg2rad(0.1)
+    rots = R.from_euler(RELION_EULER_CONVENTION, grid, degrees=degrees)
+    duplicates = set()
+    for i in range(grid.shape[0]):
 
+        relative_duplicate_indices = np.where(rots[i].approx_equal(
+            rots[range(i + 1, grid.shape[0])],
+            atol=atol, degrees=degrees))[0]
+        # Convert relative indices to original absolute indices
+        absolute_duplicate_indices = relative_duplicate_indices + (i + 1)
+        duplicates.update(absolute_duplicate_indices.tolist())
+
+    idxs = [i for i in range(len(rots)) if i not in duplicates]
+    grid = grid[idxs]
+    return grid
+
+if __name__ == "__main__":
+    so3_near_identity_grid_cartesianprod(15, 3, transposed=False, degrees=True)

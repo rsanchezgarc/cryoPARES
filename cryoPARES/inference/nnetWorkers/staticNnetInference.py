@@ -21,6 +21,7 @@ from cryoPARES.geometry.convert_angles import matrix_to_euler_angles
 from cryoPARES.inference.nnetWorkers.inferenceModel import InferenceModel
 from cryoPARES.models.model import PlModel
 from cryoPARES.datamanager.datamanager import DataManager
+from cryoPARES.projmatching.projMatching import ProjectionMatcher
 
 
 class PartitionInferencer:
@@ -99,13 +100,17 @@ class PartitionInferencer:
     def _setup_model(self, rank: Optional[int] = None):
         """Setup the model for inference."""
 
-        scriptmodel_fname = os.path.join(self.checkpoint_dir, self.halfset, "checkpoints", BEST_MODEL_SCRIPT_BASENAME)
-        scriptmodel = torch.jit.load(scriptmodel_fname)
+        so3Model_fname = os.path.join(self.checkpoint_dir, self.halfset, "checkpoints", BEST_MODEL_SCRIPT_BASENAME)
+        so3Model = torch.jit.load(so3Model_fname)
 
         percentilemodel_fname = os.path.join(self.checkpoint_dir, self.halfset, "checkpoints", BEST_DIRECTIONAL_NORMALIZER)
         percentilemodel = torch.load(percentilemodel_fname, weights_only=False)
+        normalizedScore_thr = 0.1
 
-        model = InferenceModel(scriptmodel, percentilemodel, top_k=self.top_k)
+        #TODO: add the ProjectionMatcher arguments to the cmd args or to the config
+        localRefiner = ProjectionMatcher(reference_vol=NotImplemented)
+        model = InferenceModel(so3Model, percentilemodel, normalizedScore_thr, localRefiner,
+                               top_k=self.top_k)
 
         # Handle missing symmetry attribute
         if not hasattr(model, 'symmetry'):

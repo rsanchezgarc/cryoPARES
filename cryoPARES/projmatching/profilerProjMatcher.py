@@ -96,9 +96,7 @@ def profile_projection_matcher():
 
             # Profile this operation
             start_time = time.time()
-            maxCorrs, predRotMats, predShiftsAngs, comparedWeight = pj.align_particles(
-                fakefimage, fakeCtf, rotmats
-            )
+            maxCorrs, predRotMats, predShiftsAngs, comparedWeight = pj.align_particles(fakefimage, fakeCtf, rotmats)
 
             if device == "cuda":
                 torch.cuda.synchronize()  # Wait for GPU operations to complete

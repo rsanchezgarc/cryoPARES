@@ -335,11 +335,11 @@ class PlModel(RotationPredictionMixin, pl.LightningModule):
                 gathered_scores = self.all_gather(scores)
 
                 if self.trainer.is_global_zero:
-                    normalizer = DirectionalPercentileNormalizer(hp_order=NORMALIZER_HP_ORDER, symmetry=self.symmetry)
+                    normalizer = DirectionalPercentileNormalizer(symmetry=self.symmetry, hp_order=NORMALIZER_HP_ORDER)
                     normalizer.fit(gathered_predRotMats, gathered_scores, gathered_gtRotmats)
                     torch.save(normalizer, precentile_model_savename)
             else:
-                normalizer = DirectionalPercentileNormalizer(hp_order=NORMALIZER_HP_ORDER, symmetry=self.symmetry)
+                normalizer = DirectionalPercentileNormalizer(symmetry=self.symmetry, hp_order=NORMALIZER_HP_ORDER)
                 normalizer.fit(predRotMats, scores, gtRotmats)
                 torch.save(normalizer, precentile_model_savename)
 

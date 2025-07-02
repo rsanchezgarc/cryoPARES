@@ -445,7 +445,7 @@ def _update_config_for_test():
 def _test():
     _update_config_for_test()
     b = 4
-    example_batch = get_example_random_batch(4, n_channels=3, seed=42)
+    example_batch = get_example_random_batch(b, n_channels=3, seed=42)
     imgs = example_batch[BATCH_PARTICLES_NAME]
 
     import torchvision

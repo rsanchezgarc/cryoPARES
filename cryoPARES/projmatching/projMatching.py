@@ -30,14 +30,25 @@ from cryoPARES.constants import (RELION_EULER_CONVENTION, BATCH_PARTICLES_NAME, 
 
 class ProjectionMatcher(nn.Module):
     def __init__(self, reference_vol: MAP_AS_ARRAY_OR_FNAME_TYPE,
-                 grid_distance_degs: float,
-                 grid_step_degs: float,
-                 pixel_size: Optional[float] = None,
-                 filter_resolution_angst: Optional[float] = None,
-                 max_shift_fraction: Optional[float] = 0.2, #TODO: Add this to CONFIG,
-                 return_top_k: int = 2,
+                 grid_distance_degs: float, #TODO: Add this to CONFIG
+                 grid_step_degs: float,     #TODO: Add this to CONFIG
+                 pixel_size: Optional[float] = None, #Only used if reference_vol is a np.array/torch.tensor
+                 filter_resolution_angst: Optional[float] = None, #TODO: Add this to CONFIG
+                 max_shift_fraction: Optional[float] = 0.2, #TODO: Add this to CONFIG
+                 return_top_k: int = 1,
                  correct_ctf: bool = True
-                 ): #TODO: Add downsampling of the volume
+                 ): #TODO: Add downsampling of the volume particles for speed
+        """
+
+        :param reference_vol:
+        :param grid_distance_degs: ~Cone width
+        :param grid_step_degs:
+        :param pixel_size:
+        :param filter_resolution_angst:
+        :param max_shift_fraction:
+        :param return_top_k:
+        :param correct_ctf:
+        """
 
         super().__init__()
 
@@ -53,15 +64,14 @@ class ProjectionMatcher(nn.Module):
         self.vol_voxel_size = None
 
 
-        self._store_reference_vol(reference_vol, pixel_size, filter_resolution_angst)
+        self._store_reference_vol(reference_vol, pixel_size)
         self._store_so3_grid_rotmats()
 
         self._correlateF = self._correlateCrossCorrelation
         self.background_stream = torch.cuda.Stream()
 
     def _store_reference_vol(self, reference_vol: MAP_AS_ARRAY_OR_FNAME_TYPE,
-                             pixel_size: Optional[float] = None,
-                             filter_resolution_angst: Optional[float] = None):
+                             pixel_size: Optional[float] = None):
         """
 
         :param reference_vol: A volume fname or torch tensor or numpy array representing a cryoEM volume
@@ -174,7 +184,7 @@ class ProjectionMatcher(nn.Module):
 
         return perImgCorr, pixelShiftsXY
 
-    def align_particles(self, fimg, ctf, rotmats):
+    def align_particles(self, fimgs, ctf, rotmats):
 
         # expanded_rotmats = torch.einsum("gij, btjk -> btgik", self.grid_rotmats, rotmats)
         expanded_rotmats = torch.matmul(rotmats.unsqueeze(2), self.grid_rotmats.unsqueeze(0).unsqueeze(0))
@@ -194,7 +204,7 @@ class ProjectionMatcher(nn.Module):
         if self.correct_ctf:
             projs *= ctf[:, None, None, ..., None] #TODO. Multiply ctf in the particles
         del ctf
-        perImgCorr, pixelShiftsXY = self._correlateCrossCorrelation(fimg[:, None, None, ...], projs)
+        perImgCorr, pixelShiftsXY = self._correlateCrossCorrelation(fimgs[:, None, None, ...], projs)
 
         maxCorrs, predRotMats, predShiftsAngs, comparedWeight = _analyze_cross_correlation(perImgCorr, pixelShiftsXY,
                                                                            grid_rotmats=expanded_rotmats,
@@ -204,6 +214,11 @@ class ProjectionMatcher(nn.Module):
         #TODO: PreRotMats comes from multyping the (grid_rotmat @ rotmat)
         return maxCorrs, predRotMats, predShiftsAngs, comparedWeight
 
+    def forward(self, imgs, ctfs, rotmats):
+        with torch.cuda.stream(self.background_stream):
+            fimages = self._real_to_fourier(imgs)
+        maxCorrs, predRotMats, predShiftsAngs, comparedWeight = self.align_particles(fimages, ctfs, rotmats)
+        return maxCorrs, predRotMats, predShiftsAngs, comparedWeight
 
 #TODO: we should define a _analyze_cross_correlation_FACTORY to use main_config.projmatching properly
 @torch.compile(fullgraph=True, disable=main_config.projmatching.disable_compile_analyze_cc,

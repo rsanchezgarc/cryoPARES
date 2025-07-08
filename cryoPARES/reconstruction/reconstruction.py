@@ -23,12 +23,12 @@ from starstack import ParticlesStarSet
 from starstack.constants import RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES, RELION_EULER_CONVENTION
 from torch.utils.data import Dataset, DataLoader
 from torch_fourier_shift import fourier_shift_dft_2d
-from torch_fourier_slice import insert_central_slices_rfft_3d, insert_central_slices_rfft_3d_multichannel
 from torch_grid_utils import fftfreq_grid
 
 from cryoPARES.datamanager.ctf.rfft_ctf import compute_ctf_rfft
 from cryoPARES.geometry.convert_angles import euler_angles_to_matrix
 from cryoPARES.geometry.symmetry import getSymmetryGroup
+from cryoPARES.reconstruction.insert_central_slices_rfft_3d import insert_central_slices_rfft_3d_multichannel
 from cryoPARES.utils.paths import FNAME_TYPE
 
 
@@ -210,15 +210,7 @@ class Reconstructor():
 
                 self.weights += weights
             else:
-                dft_3d, weights = insert_central_slices_rfft_3d( #TODO: Compile this as well
-                    image_rfft=imgs,
-                    volume_shape=(self.box_size,) * 3,
-                    rotation_matrices=rotMats,
-                    fftfreq_max=None,
-                    zyx_matrices=zyx_matrices,
-                )
-                self.f_num += dft_3d
-                self.weights += weights
+                raise NotImplementedError()
 
             if use_only_n_first_batches and bidx > use_only_n_first_batches: #TODO: Remove this debug code
                 break
@@ -301,7 +293,7 @@ class ReconstructionParticlesDataset(Dataset):
         return img, ctf, rotMat, hwShiftAngs
 
 def reconstruct_starfile(particles_star_fname: str, symmetry: str, output_fname: str, particles_dir:Optional[str]=None,
-                         num_workers: int = 1, batch_size: int = 64, use_cuda: bool = False,
+                         num_dataworkers: int = 1, batch_size: int = 64, use_cuda: bool = False,
                          correct_ctf: bool = True, eps: float = 1e-3, min_denominator_value: float = 1e-4,
                          use_only_n_first_batches: Optional[int] = None):
     """
@@ -310,7 +302,7 @@ def reconstruct_starfile(particles_star_fname: str, symmetry: str, output_fname:
     :param symmetry: The symmetry of the volume (e.g. C1, D2, ...)
     :param output_fname: The name of the output filename
     :param particles_dir: The particles directory (root of the starfile fnames)
-    :param num_workers:
+    :param num_dataworkers: Num workers for data loading
     :param batch_size: The number of particles to be simultaneusly backprojected
     :param use_cuda:
     :param correct_ctf:
@@ -323,7 +315,7 @@ def reconstruct_starfile(particles_star_fname: str, symmetry: str, output_fname:
     device = "cpu" if not use_cuda else "cuda"
     reconstructor = Reconstructor(symmetry=symmetry, correct_ctf=correct_ctf, eps=eps,
                                   min_denominator_value=min_denominator_value, device=device)
-    reconstructor.backproject_particles(particles_star_fname, particles_dir, batch_size, num_workers,
+    reconstructor.backproject_particles(particles_star_fname, particles_dir, batch_size, num_dataworkers,
                                         use_only_n_first_batches=use_only_n_first_batches)
     reconstructor.generate_volume(output_fname)
 

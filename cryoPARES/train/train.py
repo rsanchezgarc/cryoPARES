@@ -67,8 +67,8 @@ class Trainer:
     def _setup_training_dir(self, train_save_dir: str):
         from cryoPARES.utils.checkpointUtils import get_version_to_use
 
-        assert os.path.isdir(train_save_dir), f"Error, training directory {train_save_dir} not found!"
-
+        # assert os.path.isdir(train_save_dir), f"Error, training directory {train_save_dir} not found!"
+        os.makedirs(train_save_dir, exist_ok=True)
         if self.continue_checkpoint_dir is not None:
             _train_save_dir, version_dir = osp.split(self.continue_checkpoint_dir)
             if train_save_dir is not None:

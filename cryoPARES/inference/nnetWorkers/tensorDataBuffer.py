@@ -1,21 +1,21 @@
+import numpy as np
 import torch
 from typing import List, Dict, Any, Callable, Optional
 
 from torch import nn
 
 
-class StreamingBuffer:
+class StreamingBuffer(nn.Module):
     def __init__(
             self,
             buffer_size: int,
             processing_fn: Callable[[Dict[str, torch.Tensor], Dict[str, List]], List[Any]],
-            device: str = 'cpu'
     ):
+        super().__init__()
         if buffer_size <= 0:
             raise ValueError("buffer_size must be a positive integer.")
         self.buffer_size = buffer_size
         self.processing_fn = processing_fn
-        self.device = device
         self.current_fill = 0
         self.initialized = False
         self.tensor_buffers: Dict[str, torch.Tensor] = {}
@@ -26,13 +26,18 @@ class StreamingBuffer:
         for key, value in sample_item.items():
             if isinstance(value, torch.Tensor):
                 self.tensor_buffers[key] = torch.empty(
-                    (self.buffer_size,) + value.shape, dtype=value.dtype, device=self.device
+                    (self.buffer_size,) + value.shape, dtype=value.dtype,device=value.device,
                 )
             else:  # For metadata, create a pre-allocated list
                 self.metadata_buffers[key] = [None] * self.buffer_size
         self.initialized = True
 
-    def _process(self) -> List[Any]:
+    def to(self, device: str, *args, **kwargs):
+        for key, tensor in self.tensor_buffers.items():
+            self.tensor_buffers[key] = tensor.to(device)
+        return self
+
+    def _process(self) -> None | List[Any]:
         if self.current_fill == 0:
             return None
         active_tensors = {k: v[:self.current_fill].clone() for k, v in self.tensor_buffers.items()}
@@ -55,7 +60,7 @@ class StreamingBuffer:
             space = self.buffer_size - self.current_fill
             if space == 0:
                 results = self._process()
-                if results: all_processed_results.extend(results)
+                if results: all_processed_results.append(results)
                 space = self.buffer_size
 
             num_to_add = min(batch_size - items_added, space)
@@ -73,12 +78,49 @@ class StreamingBuffer:
 
         if self.current_fill >= self.buffer_size:
             results = self._process()
-            if results: all_processed_results.extend(results)
-
-        return all_processed_results if all_processed_results else None
+            if results: all_processed_results.append(results)
+        if all_processed_results:
+            transposed_items = zip(*all_processed_results)
+            all_processed_results = [concat_items_along_first_dim(list(col_items)) for col_items in
+                                transposed_items]
+            return all_processed_results
+        else:
+            return None
 
     def flush(self) -> List[Any]:
         return self._process()
+
+
+def concat_items_along_first_dim(items):
+    """
+    Concatenates a list of items along their first dimension, handling
+    torch.Tensor, numpy.ndarray, and Python lists.
+
+    Args:
+        items (list): A list of items of the same type (or convertible types).
+
+    Returns:
+        The concatenated result, or a list if other types.
+    """
+    if not items:
+        return []
+
+    first_item = items[0]
+
+    if isinstance(first_item, torch.Tensor):
+        return torch.cat(items, dim=0)
+    elif isinstance(first_item, np.ndarray):
+        return np.concatenate(items, axis=0)
+    elif isinstance(first_item, list):
+        # Flatten and extend for lists
+        concatenated_list = []
+        for sublist in items:
+            concatenated_list.extend(sublist)
+        return concatenated_list
+    else:
+        # Fallback for other types: simply collect them into a new list
+        # This handles strings, ints, floats, booleans, etc.
+        return list(items)
 
 # ============================================================================
 # Test Battery for StreamingBuffer
@@ -112,7 +154,7 @@ class TestStreamingBuffer:
         processing_fn = self._setup()
         buffer = StreamingBuffer(buffer_size=5, processing_fn=processing_fn)
         results = buffer.flush()
-        assert results == []
+        assert not results
         assert len(self.mock_call_log) == 0
         print("✓ PASSED\n")
 
@@ -137,7 +179,7 @@ class TestStreamingBuffer:
         batch = {
             'id': [10, 20],
             'name': ['A', 'B'],
-            'data': torch.tensor([[1., 1.], [2., 2.]], device=buffer.device)
+            'data': torch.tensor([[1., 1.], [2., 2.]])
         }
         buffer.add_batch(batch)
 
@@ -197,10 +239,11 @@ class TestStreamingBuffer:
             return
 
         processing_fn = self._setup()
-        buffer = StreamingBuffer(buffer_size=2, processing_fn=processing_fn, device='cuda')
+        buffer = StreamingBuffer(buffer_size=2, processing_fn=processing_fn)
+        buffer.to("cuda")
 
         # Add a batch of CPU tensors
-        buffer.add_batch({'id': [1], 'data': torch.randn(1, 2)})
+        buffer.add_batch({'id': [1], 'data': torch.randn(1, 2, device="cuda")})
         buffer.flush()
 
         processed_tensors = self.mock_call_log[0]['tensors']

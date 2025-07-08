@@ -2,6 +2,7 @@ import math
 import os.path
 import sys
 import time
+import warnings
 from functools import lru_cache, cached_property
 from typing import Tuple, Optional, Union, Sequence
 
@@ -13,6 +14,7 @@ from scipy.spatial.transform import Rotation
 from torch import nn
 from torch.nn import functional as F
 
+from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.projmatching.extract_central_slices_as_real import extract_central_slices_rfft_3d_multichannel
 from torch_grid_utils import fftfreq_grid
@@ -29,14 +31,15 @@ from cryoPARES.constants import (RELION_EULER_CONVENTION, BATCH_PARTICLES_NAME, 
 
 
 class ProjectionMatcher(nn.Module):
+    @inject_defaults_from_config(default_config=main_config.projmatching)
     def __init__(self, reference_vol: MAP_AS_ARRAY_OR_FNAME_TYPE,
-                 grid_distance_degs: float, #TODO: Add this to CONFIG
-                 grid_step_degs: float,     #TODO: Add this to CONFIG
+                 grid_distance_degs: float = CONFIG_PARAM(),
+                 grid_step_degs: float = CONFIG_PARAM(),
                  pixel_size: Optional[float] = None, #Only used if reference_vol is a np.array/torch.tensor
-                 filter_resolution_angst: Optional[float] = None, #TODO: Add this to CONFIG
-                 max_shift_fraction: Optional[float] = 0.2, #TODO: Add this to CONFIG
+                 filter_resolution_angst: Optional[float] = CONFIG_PARAM(),
+                 max_shift_fraction: Optional[float] = CONFIG_PARAM(),
                  return_top_k: int = 1,
-                 correct_ctf: bool = True
+                 correct_ctf: bool = CONFIG_PARAM(),
                  ): #TODO: Add downsampling of the volume particles for speed
         """
 
@@ -58,7 +61,8 @@ class ProjectionMatcher(nn.Module):
         self.max_shift_fraction = max_shift_fraction
         self.return_top_k = return_top_k
         self.correct_ctf = correct_ctf
-
+        if return_top_k > 1:
+            warnings.warn("return_top_k has not being tested for projMatching")
         self.vol_shape = None
         self.ori_image_shape = None
         self.vol_voxel_size = None
@@ -235,7 +239,7 @@ def _analyze_cross_correlation(perImgCorr:torch.Tensor, pixelShiftsXY:torch.Tens
     bestPixelShiftsXY = pixelShiftsXY.reshape(b, -1, 2)[batch_arange, maxIdxs]
     mean_corr = torch.mean(reshaped_perImgCorr, dim=-1, keepdim=True)
     std_corr = torch.std(reshaped_perImgCorr, dim=-1, keepdim=True)
-    comparedWeight = torch.distributions.Normal(mean_corr, std_corr).cdf(maxCorrs)  # 1-P(I_i > All_images)
+    comparedWeight = torch.distributions.Normal(mean_corr, std_corr+1e-6).cdf(maxCorrs)  # 1-P(I_i > All_images)
     predShiftsAngs = -(bestPixelShiftsXY - half_particle_size) * vol_voxel_size
     predRotMatsIdxs = maxIdxs % nrots
     predRotMats = grid_rotmats[batch_arange, topk_arange, predRotMatsIdxs]
@@ -433,28 +437,28 @@ def _test1():
             with torch.cuda.stream(pj.background_stream):
                 fimages = pj._real_to_fourier(imgs) #TODO. I should be able to get the fimages from the rfft_ctf.correct_ctf. I would need to apply a phase shift to reproduce the real space fftshift
             maxCorrs, predRotMats, predShiftsAngs, comparedWeight = pj.align_particles(fimages, ctfs, rotmats)
-        #     print("GT Rots\n", torch.rad2deg(matrix_to_euler_angles(rotmats, RELION_EULER_CONVENTION)).squeeze(1)) #TODO: I don't trust matrix_to_euler
-        #     print("Pred Rots\n",torch.rad2deg(matrix_to_euler_angles(predRotMats, RELION_EULER_CONVENTION)).squeeze(1))
-        #
-        #     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-        #     print("GT shifts\n", batch[BATCH_POSE_NAME][1])
-        #     print("pred shifts\n", predShiftsAngs.squeeze(1))
-        #     print("---------------------------------------------------")
-        #     print()
-        #
-        #     for topk in range(predRotMats.shape[1]):
-        #         suffix = "" if topk == 0 else f"_top{topk}"
-        #         eulers = Rotation.from_matrix(predRotMats.cpu().numpy()[:,topk,...]).as_euler(RELION_EULER_CONVENTION, degrees=True)
-        #         for i, angName in enumerate(RELION_ANGLES_NAMES):
-        #             md[angName+suffix] = eulers[:,i]
-        #         for i, shiftName in enumerate(RELION_SHIFTS_NAMES):
-        #             md[shiftName+suffix] = predShiftsAngs[:,topk,i].cpu().numpy()
-        #         md[PROJECTION_MATCHING_SCORE] = comparedWeight[:,topk,...].cpu().numpy()
-        #     pd_list.append(pd.DataFrame(md))
-        #     del predRotMats, eulers, predShiftsAngs, comparedWeight
-        # optics = getattr(dl.dataset, "particles", dl.dataset.datasets[0].particles).optics_md
-        # parts = pd.concat(pd_list)
-        # starfile.write(dict(optics=optics, particles=parts), filename="/tmp/particles.star")
+            print("GT Rots\n", torch.rad2deg(matrix_to_euler_angles(rotmats, RELION_EULER_CONVENTION)).squeeze(1)) #TODO: I don't trust matrix_to_euler
+            print("Pred Rots\n",torch.rad2deg(matrix_to_euler_angles(predRotMats, RELION_EULER_CONVENTION)).squeeze(1))
+
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            print("GT shifts\n", batch[BATCH_POSE_NAME][1])
+            print("pred shifts\n", predShiftsAngs.squeeze(1))
+            print("---------------------------------------------------")
+            print()
+
+            for topk in range(predRotMats.shape[1]):
+                suffix = "" if topk == 0 else f"_top{topk}"
+                eulers = Rotation.from_matrix(predRotMats.cpu().numpy()[:,topk,...]).as_euler(RELION_EULER_CONVENTION, degrees=True)
+                for i, angName in enumerate(RELION_ANGLES_NAMES):
+                    md[angName+suffix] = eulers[:,i]
+                for i, shiftName in enumerate(RELION_SHIFTS_NAMES):
+                    md[shiftName+suffix] = predShiftsAngs[:,topk,i].cpu().numpy()
+                md[PROJECTION_MATCHING_SCORE] = comparedWeight[:,topk,...].cpu().numpy()
+            pd_list.append(pd.DataFrame(md))
+            del predRotMats, eulers, predShiftsAngs, comparedWeight
+        optics = getattr(dl.dataset, "particles", dl.dataset.datasets[0].particles).optics_md
+        parts = pd.concat(pd_list)
+        starfile.write(dict(optics=optics, particles=parts), filename="/tmp/particles.star")
 
 if __name__ == "__main__":
     _test1()

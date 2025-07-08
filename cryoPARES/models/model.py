@@ -1,6 +1,7 @@
 import os.path
 import warnings
 
+from tqdm import tqdm
 
 from cryoPARES import constants
 from torch import Tensor, nn, ScriptModule
@@ -207,7 +208,7 @@ class PlModel(RotationPredictionMixin, pl.LightningModule):
 
         return loss
 
-    def predict_step(self, batch: Dict[str, Any], batch_idx: int, dataloader_idx: int = 0, top_k: Optional[int] = None):
+    def _predict_step(self, batch: Dict[str, Any], batch_idx: int, dataloader_idx: int = 0, top_k: Optional[int] = None):
 
         if top_k is None:
             top_k = self.top_k
@@ -268,12 +269,13 @@ class PlModel(RotationPredictionMixin, pl.LightningModule):
         configTrain = main_config.train
         optClass = getattr(torch.optim, configTrain.default_optimizer)
         opt = optClass(self.parameters(), lr=lr, weight_decay=configTrain.weight_decay)
-        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, verbose=True,
-                                                                  factor=0.5,
-                                                                  threshold=5e-4,
-                                                                  min_lr=lr * configTrain.min_learning_rate_factor,
-                                                                  cooldown=1,
-                                                                  patience=configTrain.patient_reduce_lr_plateau_n_epochs)
+        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                                                  opt,
+                                                  factor=0.5,
+                                                  threshold=5e-4,
+                                                  min_lr=lr * configTrain.min_learning_rate_factor,
+                                                  cooldown=1,
+                                                  patience=configTrain.patient_reduce_lr_plateau_n_epochs)
         conf = {
             'optimizer': opt,
             'lr_scheduler': lr_scheduler,
@@ -282,7 +284,7 @@ class PlModel(RotationPredictionMixin, pl.LightningModule):
         return conf
 
     def on_fit_end(self) -> None:
-
+        print("Preparing directional percentiles")
         device = self.trainer.strategy.root_device
         self.so3model.to(device)
 
@@ -299,7 +301,7 @@ class PlModel(RotationPredictionMixin, pl.LightningModule):
         self.eval()
         with (torch.inference_mode()):
             for dataloader_idx, dataloader in enumerate(val_dataloaders):
-                for batch_idx, batch in enumerate(dataloader):
+                for batch_idx, batch in enumerate(tqdm(dataloader)):
                     batch = self.transfer_batch_to_device(batch, device, dataloader_idx)
                     predictions = self.predict_step(batch, batch_idx, dataloader_idx, top_k=10)
                     idd, (pred_rotmats, maxprobs), \
@@ -318,8 +320,8 @@ class PlModel(RotationPredictionMixin, pl.LightningModule):
                     #     metadata[angname] = predEulers[:,0,ai].cpu().numpy()
                     # for si, siname in enumerate(RELION_SHIFTS_NAMES):
                     #     metadata[siname] = pred_shifts[:,0,si].cpu().numpy()
-
-
+                    if self.trainer.overfit_batches is not None and batch_idx > self.trainer.overfit_batches:
+                        break
             predRotMats = torch.concat(predRotMats)
             gtRotmats = torch.concat(gtRotmats)
             scores = torch.concat(scores)

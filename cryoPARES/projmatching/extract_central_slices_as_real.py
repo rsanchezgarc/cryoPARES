@@ -227,14 +227,31 @@ def _fftfreq_to_dft_coordinates(
         image_shape, device=frequencies.device, dtype=frequencies.dtype
     )
     rfft_shape = _rfft_shape_tensor(image_shape, device=frequencies.device, dtype=frequencies.dtype)
-    coordinates = torch.empty_like(frequencies)
-    coordinates[..., :-1] = frequencies[..., :-1] * image_shape[:-1]
+    # define step size in each dimension
+    delta_fftfreq = 1 / image_shape
+
+    # calculate total width of DFT interval in cycles/sample per dimension
+    # last dim is only non-redundant half in rfft case
+    fftfreq_interval_width = 1 - delta_fftfreq
     if rfft is True:
-        coordinates[..., -1] = frequencies[..., -1] * 2 * (rfft_shape[-1] - 1)
+        fftfreq_interval_width[-1] = 0.5
+
+    # allocate for continuous output dft sample coordinates
+    coordinates = torch.empty_like(frequencies)
+
+    # transform frequency coordinates into array coordinates
+    if rfft is True:
+        # full dimensions span `[-0.5, 0.5 - delta_fftfreq]`
+        coordinates[..., :-1] = (frequencies[..., :-1] + 0.5) / fftfreq_interval_width[:-1]
+        coordinates[..., :-1] = coordinates[..., :-1] * (image_shape[:-1] - 1)
+
+        # half transform dimension (interval width 0.5)
+        coordinates[..., -1] = (frequencies[..., -1] * 2) * (rfft_shape[-1] - 1)
     else:
-        coordinates[..., -1] = frequencies[..., -1] * image_shape[-1]
-    dc = _dft_center(image_shape, rfft=rfft, fftshifted=True, device=frequencies.device)
-    return coordinates + dc
+        # all dims are full and span `[-0.5, 0.5 - delta_fftfreq]`
+        coordinates[..., :] = (frequencies[..., :] + 0.5) / fftfreq_interval_width
+        coordinates[..., :] = coordinates[..., :] * (image_shape - 1)
+    return coordinates
 
 def _dft_center(
     image_shape: tuple[int, ...],

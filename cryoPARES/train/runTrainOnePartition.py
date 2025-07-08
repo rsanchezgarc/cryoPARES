@@ -215,6 +215,7 @@ class TrainerPartition:
 
         trainer.strategy.barrier()
         if trainer.is_global_zero and trainer.state.status == TrainerStatus.FINISHED:
+            print("Trained finished. Launching ")
             self._save_training_completion(checkpointer)
 
             reconstructions_dir = get_reconstructions_dir(self.train_save_dir, self.partition)
@@ -230,9 +231,10 @@ class TrainerPartition:
                     output_fname = os.path.join(reconstructions_dir, "%d.mrc" % fnameIdx)
                     kwargs = dict(particles_star_fname=fname,
                                   symmetry=self.symmetry,
-                                  output_fname=output_fname,      # TODO: Add things to CONFIG
+                                  output_fname=output_fname,
                                   particles_dir=particles_dir,
-                                  num_workers=1, batch_size=64,
+                                  num_workers=datamodule.num_data_workers,
+                                  batch_size=64, # TODO: Add things to CONFIG
                                   use_cuda=main_config.train.cuda_for_reconstruct, #TODO: How to use the GPU without getting out of memory
                                   correct_ctf=True, eps=1e-3, min_denominator_value=1e-4)
                     if self.overfit_batches is not None:

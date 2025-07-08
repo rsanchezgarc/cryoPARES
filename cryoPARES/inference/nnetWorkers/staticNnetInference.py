@@ -39,7 +39,8 @@ class PartitionInferencer:
                  use_cuda: bool = CONFIG_PARAM(),
                  n_cpus_if_no_cuda: int = CONFIG_PARAM(),
                  compile_model: bool = False,
-                 top_k: int = CONFIG_PARAM()
+                 top_k: int = CONFIG_PARAM(),
+                 reference_map: Optional[str] = None
                  ):
         """
 
@@ -54,8 +55,9 @@ class PartitionInferencer:
         :param n_cpus_if_no_cuda:
         :param compile_model:
         :param top_k:
+        :param reference_map: If not provided, it will be tried to load from the checkpoint
         """
-
+        assert halfset != "allParticles", "allParticlesMode has not been implemented yet"
         self.star_fnames = star_fnames
         self.checkpoint_dir = checkpoint_dir
 
@@ -69,6 +71,7 @@ class PartitionInferencer:
         self.halfset = halfset
         self.compile_model = compile_model
         self.top_k = top_k
+        self.reference_map = reference_map
         os.makedirs(results_dir, exist_ok=True)
 
         self.accelerator, self.device_count = self._setup_accelerator()
@@ -105,12 +108,15 @@ class PartitionInferencer:
 
         percentilemodel_fname = os.path.join(self.checkpoint_dir, self.halfset, "checkpoints", BEST_DIRECTIONAL_NORMALIZER)
         percentilemodel = torch.load(percentilemodel_fname, weights_only=False)
-        normalizedScore_thr = 0.1
+        normalizedScore_thr = 0.1 #TODO: This should be in the config
 
-        #TODO: add the ProjectionMatcher arguments to the cmd args or to the config
-        localRefiner = ProjectionMatcher(reference_vol=NotImplemented)
+        if self.reference_map is None:
+            reference_map = os.path.join(self.checkpoint_dir, self.halfset, "reconstructions", "0.mrc")
+        else:
+            reference_map = self.reference_map
+        localRefiner = ProjectionMatcher(reference_vol=reference_map)
         model = InferenceModel(so3Model, percentilemodel, normalizedScore_thr, localRefiner,
-                               top_k=self.top_k)
+                               return_top_k=self.top_k)
 
         # Handle missing symmetry attribute
         if not hasattr(model, 'symmetry'):
@@ -156,7 +162,8 @@ class PartitionInferencer:
             augment_train=False,  # No augmentation during inference
             halfset=halfset,
             is_global_zero=rank == 0 if rank is not None else True,
-            save_train_val_partition_dir=None  # Not needed for inference
+            save_train_val_partition_dir=None,  # Not needed for inference
+            return_ori_imagen=True #Needed for inference
         )
 
         if rank is not None and world_size is not None:
@@ -179,18 +186,13 @@ class PartitionInferencer:
 
         # Use predict_step as requested
         result = model.predict_step(batch, batch_idx=batch_idx, dataloader_idx=0)
-        (idd, (pred_rotmats, maxprobs, norm_score),
-         (pred_shifts, shifts_probs), errors, metadata) = result
-
+        if result is None:
+            return None
+        ids, pred_rotmats, pred_shifts, score, norm_nn_score = result
         # Convert rotation matrices to euler angles
         euler_degs = torch.rad2deg(matrix_to_euler_angles(pred_rotmats, RELION_EULER_CONVENTION))
 
-        # Set shifts to zero. WE DO THAT BECAUSE WE ARE NOT PREDICTING THEM YET
-        #TODO: predict shifts
-        pred_shifts.fill_(0.)
-        shifts_probs.fill_(1.)
-
-        return idd, (euler_degs, maxprobs), (pred_shifts, shifts_probs), norm_score
+        return ids, euler_degs, pred_shifts, score, norm_nn_score
 
     def _gpu_worker(self, gpu_id: int, dataloader):
         """Async worker for a single GPU - processes subset of batches."""
@@ -225,9 +227,9 @@ class PartitionInferencer:
                 else:
                     with torch.inference_mode():
                         result = self._process_batch(model, batch, batch_idx, device)
-
-                batch_results.append((batch_idx, result))
-                batch_count += 1
+                if result is not None:
+                    batch_results.append((batch_idx, result))
+                    batch_count += 1
 
                 # Report progress periodically
                 if batch_count % self.UPDATE_PROGRESS_BAR_N_BATCHES == 0:
@@ -237,7 +239,7 @@ class PartitionInferencer:
             remaining = batch_count % self.UPDATE_PROGRESS_BAR_N_BATCHES
             if remaining > 0:
                 self.output_queue.put(("PROGRESS", gpu_id, remaining))
-
+            #TODO: We need to flush the predictor
             # Send results
             self.output_queue.put(("RESULTS", gpu_id, batch_results))
 
@@ -335,7 +337,8 @@ class PartitionInferencer:
                     with torch.inference_mode():
                         for batch_idx, batch in enumerate(dataloader):
                             result = self._process_batch(model, batch, batch_idx, device)
-                            all_results[batch_idx] = result
+                            if result:
+                                all_results[batch_idx] = result
                             pbar.update(1)
                 finally:
                     pbar.close()
@@ -359,55 +362,51 @@ class PartitionInferencer:
         #starfile is provided
 
         # Create result tensors
-        n_particles = len(dataset)
+        n_particles = sum(len(v[0])for v in all_results.values())
         result_arrays = {
             'eulerdegs': torch.zeros((n_particles, self.top_k, 3), dtype=torch.float32),
-            'rotprobs': torch.zeros((n_particles, self.top_k), dtype=torch.float32),
+            'score': torch.zeros((n_particles, self.top_k), dtype=torch.float32),
             'shifts': torch.zeros((n_particles, self.top_k, 2), dtype=torch.float32),
-            'shiftprobs': torch.zeros((n_particles, self.top_k), dtype=torch.float32),
-            'directional_zscore': torch.zeros((n_particles, self.top_k), dtype=torch.float32),
+            'top1_directional_zscore': torch.zeros((n_particles), dtype=torch.float32),
             'ids': [None]*n_particles
         }
 
         # Fill result arrays
         current_idx = 0
         for batch_idx in sorted(all_results.keys()):
-            idd, (euler_degs, maxprobs), (pred_shifts, shifts_probs), directional_zscore = all_results[batch_idx]
+            idd, euler_degs, pred_shifts, maxprobs, top1_directional_zscore = all_results[batch_idx]
 
             batch_size = len(idd)
             end_idx = current_idx + batch_size
 
             result_arrays['eulerdegs'][current_idx:end_idx] = euler_degs.cpu()
-            result_arrays['rotprobs'][current_idx:end_idx] = maxprobs.cpu()
+            result_arrays['score'][current_idx:end_idx] = maxprobs.cpu()
             result_arrays['shifts'][current_idx:end_idx] = pred_shifts.cpu()
-            result_arrays['shiftprobs'][current_idx:end_idx] = shifts_probs.cpu()
-            result_arrays['directional_zscore'][current_idx:end_idx] = directional_zscore.cpu()
-            result_arrays['ids'][current_idx:end_idx]  =  idd
+            result_arrays['top1_directional_zscore'][current_idx:end_idx] = top1_directional_zscore.cpu()
+            result_arrays['ids'][current_idx:end_idx] = idd
             current_idx = end_idx
 
         # Save to STAR files (same logic as original)
         for datIdx, _dataset in enumerate(dataset.datasets):
             particlesSet = _dataset.particles
             particles_md = particlesSet.particles_md
+            ids = result_arrays["ids"]
+            particles_md[DIRECTIONAL_ZSCORE_NAME] = 0.
+            particles_md.loc[ids, DIRECTIONAL_ZSCORE_NAME] = result_arrays["top1_directional_zscore"].numpy()
 
             for k in range(self.top_k):
                 suffix = "" if k == 0 else f"_top{k}"
                 angles_names = [x + suffix for x in RELION_ANGLES_NAMES]
                 shifts_names = [x + suffix for x in RELION_SHIFTS_NAMES]
                 confide_name = RELION_PRED_POSE_CONFIDENCE_NAME + suffix
-                zscore_name = DIRECTIONAL_ZSCORE_NAME + suffix
+
                 particles_md[angles_names] = 0.
                 particles_md[shifts_names] = 0.
                 particles_md[confide_name] = 0.
 
-                # Get indices for this dataset
-                ids = result_arrays["ids"]
-
                 particles_md.loc[ids, angles_names] = result_arrays["eulerdegs"][..., k, :].numpy()
                 particles_md.loc[ids, shifts_names] = result_arrays["shifts"][..., k, :].numpy()
-                particles_md.loc[ids, confide_name] = (result_arrays["rotprobs"][..., k] *
-                                                       result_arrays["shiftprobs"][..., k]).numpy()
-                particles_md.loc[ids, zscore_name] = (result_arrays["directional_zscore"][..., k]).numpy()
+                particles_md.loc[ids, confide_name] = result_arrays["score"][..., k].numpy()
 
             if particlesSet.starFname is not None:
                 basename = os.path.basename(particlesSet.starFname).removesuffix(".star")

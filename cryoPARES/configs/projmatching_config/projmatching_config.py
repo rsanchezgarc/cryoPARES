@@ -6,6 +6,13 @@ from cryoPARES.configs.models_config.image2sphere_config.image2sphere_config imp
 
 @dataclass
 class Projmatching_config:
+
+    grid_distance_degs: float = 10. #TODO: Make this 8
+    grid_step_degs: float = 5. #TODO: Make this 2
+    filter_resolution_angst: float = 6.
+    max_shift_fraction: float = 0.2
+    correct_ctf: bool = True
+
     disable_compile_projectVol: bool = True #TODO: I believe that this config is not going to work in a dynamic manner, as it is used with a inject_config
     compile_projectVol_mode: Optional[str] = "max-autotune"
 

@@ -6,9 +6,9 @@ from torch import nn, ScriptModule
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.projmatching.projMatching import ProjectionMatcher
 from tensorDataBuffer import StreamingBuffer
-from cryoPARES.geometry.metrics_angles import rotation_error_rads
 from cryoPARES.models.model import RotationPredictionMixin
-
+from cryoPARES.constants import (BATCH_IDS_NAME, BATCH_PARTICLES_NAME, BATCH_ORI_IMAGE_NAME,
+                                 BATCH_ORI_CTF_NAME, BATCH_MD_NAME)
 
 class InferenceModel(RotationPredictionMixin, nn.Module):
     def __init__(self,
@@ -16,7 +16,8 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
                  scoreNormalizer: Union[nn.Module, ScriptModule],
                  normalizedScore_thr: float,
                  localRefiner: ProjectionMatcher,
-                 buffer_size: int = 64 #TODO: Move this to CONFIG
+                 buffer_size: int = 4, #TODO: Move this to CONFIG
+                 return_top_k: int = 1
                  ):
         super().__init__()
         self.__init_mixin__()
@@ -26,13 +27,14 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
         self.normalizedScore_thr = normalizedScore_thr
         self.localRefiner = localRefiner
         self.buffer_size = buffer_size
+        self.return_top_k = return_top_k
 
         self.buffer = StreamingBuffer(
             buffer_size=buffer_size,
             processing_fn=self._run_stage2,
         )
 
-    def forward(self, ids, imgs, fullSizeImg, ctfs, top_k):
+    def forward(self, ids, imgs, fullSizeImg, fullSizeCtfs, top_k):
         if self.normalizedScore_thr:
             _top_k = 10 if top_k < 10 else top_k
         else:
@@ -51,15 +53,30 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
             batch_to_add = {
                 'ids': [ids[i] for i in valid_indices],
                 'imgs': fullSizeImg[passing_mask],  # Use the device-specific tensor
-                'ctfs': ctfs[passing_mask],
+                'ctfs': fullSizeCtfs[passing_mask],
                 'rotmats': pred_rotmats[passing_mask],
                 'maxprobs': maxprobs[passing_mask],
                 'norm_nn_score': norm_nn_score[passing_mask],
             }
-
-            return self.buffer.add_batch(batch_to_add)
+            if self.localRefiner is not None:
+                out = self.buffer.add_batch(batch_to_add)
+                return out
+            else:
+                return (batch_to_add['ids'], batch_to_add['rotmats'], None, batch_to_add['maxprobs'],
+                        batch_to_add['norm_nn_score'])
         else:
             return ids, pred_rotmats, None, maxprobs, norm_nn_score
+
+    def predict_step(self, batch, batch_idx, dataloader_idx=0):
+        ids = batch[BATCH_IDS_NAME]
+        imgs = batch[BATCH_PARTICLES_NAME]
+        fullSizeImg = batch[BATCH_ORI_IMAGE_NAME]
+        fullSizeCtfs = batch[BATCH_ORI_CTF_NAME]
+        # metadata = batch[BATCH_MD_NAME]
+        results = self.forward(ids, imgs, fullSizeImg, fullSizeCtfs, top_k=self.return_top_k)
+        # return ids, pred_rotmats, pred_shifts, maxprobs, norm_nn_score, metadata
+        return results
+
 
     def _run_stage2(self, tensors, md):
         #tensors.keys() -> ids, imgs, ctfs, rotmats, maxprobs, norm_nn_score
@@ -116,7 +133,7 @@ def _test():
         reference_vol="/home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles_reconstruct.mrc",
         grid_distance_degs=10, grid_step_degs=5)
     model = InferenceModel(so3Model, percentilemodel, normalizedScore_thr, localRefiner, buffer_size=1)
-    out = model.forward(ids, imgs, imgs[:,0,...], ctfs, top_k)
+    out = model.forward(ids, imgs, imgs[:, 0, ...], ctfs, top_k)
     print(out)
     print("First was out")
     out = model.flush()

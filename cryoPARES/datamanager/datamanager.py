@@ -54,7 +54,7 @@ class DataManager(pl.LightningDataModule):
                  num_data_workers: int = CONFIG_PARAM(),
                  augment_train: bool = CONFIG_PARAM(),
                  only_first_dataset_for_validation: bool = CONFIG_PARAM(),
-                 return_ori_imagen: bool =False
+                 return_ori_imagen: bool = False
                  ):
 
         super().__init__()

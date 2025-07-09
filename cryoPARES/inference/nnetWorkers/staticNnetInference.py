@@ -6,6 +6,7 @@ import threading
 import queue
 import traceback
 import yaml
+from sqlalchemy.orm import reconstructor
 from tqdm import tqdm
 from typing import Optional, List, Literal, Dict, Any, Tuple
 
@@ -22,17 +23,18 @@ from cryoPARES.inference.nnetWorkers.inferenceModel import InferenceModel
 from cryoPARES.models.model import PlModel
 from cryoPARES.datamanager.datamanager import DataManager
 from cryoPARES.projmatching.projMatching import ProjectionMatcher
+from cryoPARES.reconstruction.reconstruction import Reconstructor
 
 
 class PartitionInferencer:
-    UPDATE_PROGRESS_BAR_N_BATCHES = 20
+    UPDATE_PROGRESS_BAR_N_BATCHES = 20 #TODO: Move this to config
 
     @inject_defaults_from_config(main_config.inference, update_config_with_args=True)
     def __init__(self,
                  star_fnames: List[str],
                  checkpoint_dir: str,
                  results_dir: str,
-                 halfset: Literal["half1", "half2", "allParticles"] = "allParticles", #TODO: Distinguish halfset for model and halfset for input data
+                 halfset: Literal["half1", "half2", "allParticles"] = "allParticles",
                  particles_dir: Optional[List[str]] = None,
                  batch_size: int = CONFIG_PARAM(),
                  num_data_workers: int = CONFIG_PARAM(config=main_config.datamanager),
@@ -40,7 +42,10 @@ class PartitionInferencer:
                  n_cpus_if_no_cuda: int = CONFIG_PARAM(),
                  compile_model: bool = False,
                  top_k: int = CONFIG_PARAM(),
-                 reference_map: Optional[str] = None
+                 reference_map: Optional[str] = None,
+                 directional_zscore_thr: Optional[float] = 0,
+                 perform_localrefinement: bool = True,
+                 perform_reconstruction: bool = True
                  ):
         """
 
@@ -55,7 +60,10 @@ class PartitionInferencer:
         :param n_cpus_if_no_cuda:
         :param compile_model:
         :param top_k:
-        :param reference_map: If not provided, it will be tried to load from the checkpoint
+        :param reference_map: If not provided, it will be tried to load from the checkpointç
+        :param directional_zscore_thr:
+        :param perform_localrefinement:
+        :param perform_reconstruction:
         """
         assert halfset != "allParticles", "allParticlesMode has not been implemented yet"
         self.star_fnames = star_fnames
@@ -72,9 +80,13 @@ class PartitionInferencer:
         self.compile_model = compile_model
         self.top_k = top_k
         self.reference_map = reference_map
+        self.directional_zscore_thr = directional_zscore_thr
+        self.perform_localrefinement = perform_localrefinement
+        self.perform_reconstruction = perform_reconstruction
+
         os.makedirs(results_dir, exist_ok=True)
 
-        self.accelerator, self.device_count = self._setup_accelerator()
+        self._setup_accelerator()
 
         # For async processing
         self.models = []
@@ -98,7 +110,8 @@ class PartitionInferencer:
 
         print(f'devices={device_count} accelerator={accelerator}', flush=True)
         torch.set_num_threads(max(1, torch.get_num_threads() // device_count))
-        return accelerator, device_count
+
+        self.device, self.device_count = accelerator, device_count
 
     def _setup_model(self, rank: Optional[int] = None):
         """Setup the model for inference."""
@@ -108,14 +121,24 @@ class PartitionInferencer:
 
         percentilemodel_fname = os.path.join(self.checkpoint_dir, self.halfset, "checkpoints", BEST_DIRECTIONAL_NORMALIZER)
         percentilemodel = torch.load(percentilemodel_fname, weights_only=False)
-        normalizedScore_thr = 0.1 #TODO: This should be in the config
 
         if self.reference_map is None:
             reference_map = os.path.join(self.checkpoint_dir, self.halfset, "reconstructions", "0.mrc")
         else:
             reference_map = self.reference_map
-        localRefiner = ProjectionMatcher(reference_vol=reference_map)
-        model = InferenceModel(so3Model, percentilemodel, normalizedScore_thr, localRefiner,
+
+        if self.perform_localrefinement:
+            localRefiner = ProjectionMatcher(reference_vol=reference_map)
+        else:
+            localRefiner = None
+
+        if self.perform_reconstruction:
+            reconstructor = Reconstructor(symmetry=so3Model.symmetry)
+        else:
+            reconstructor = None
+
+        model = InferenceModel(so3Model, percentilemodel, self.directional_zscore_thr, localRefiner,
+                               reconstructor=reconstructor,
                                return_top_k=self.top_k)
 
         # Handle missing symmetry attribute
@@ -127,7 +150,7 @@ class PartitionInferencer:
                 raise RuntimeError("Symmetry not found in model")
 
         device = f'cuda:{rank}' if rank is not None else 'cuda:0'
-        if self.accelerator == "cpu":
+        if self.device == "cpu":
             device = "cpu"
 
         model = model.to(device)
@@ -171,21 +194,24 @@ class PartitionInferencer:
 
         return datamanager.predict_dataloader()
 
-    def _process_batch(self, model: PlModel, batch: Dict[str, Any], batch_idx: int, device: torch.device):
+    def _process_batch(self, model: PlModel, batch: Dict[str, Any] | None, batch_idx: int):
         """Process a single batch of data using predict_step."""
+        device = self.device
+        if batch is not None:
+            if hasattr(model, 'transfer_batch_to_device'):
+                batch = model.transfer_batch_to_device(batch, self.device, dataloader_idx=0)
+            else:
+                # Fallback: manually transfer tensors
+                for key, value in batch.items():
+                    if isinstance(value, torch.Tensor):
+                        batch[key] = value.to(device, non_blocking=True)
+                    elif isinstance(value, (list, tuple)) and len(value) > 0 and isinstance(value[0], torch.Tensor):
+                        batch[key] = [v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for v in value]
 
-        if hasattr(model, 'transfer_batch_to_device'):
-            batch = model.transfer_batch_to_device(batch, device, dataloader_idx=0)
+            # Use predict_step as requested
+            result = model.predict_step(batch, batch_idx=batch_idx, dataloader_idx=0)
         else:
-            # Fallback: manually transfer tensors
-            for key, value in batch.items():
-                if isinstance(value, torch.Tensor):
-                    batch[key] = value.to(device, non_blocking=True)
-                elif isinstance(value, (list, tuple)) and len(value) > 0 and isinstance(value[0], torch.Tensor):
-                    batch[key] = [v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for v in value]
-
-        # Use predict_step as requested
-        result = model.predict_step(batch, batch_idx=batch_idx, dataloader_idx=0)
+            result = model.flush()
         if result is None:
             return None
         ids, pred_rotmats, pred_shifts, score, norm_nn_score = result
@@ -196,8 +222,9 @@ class PartitionInferencer:
 
     def _gpu_worker(self, gpu_id: int, dataloader):
         """Async worker for a single GPU - processes subset of batches."""
+        raise NotImplementedError()
         try:
-            if self.accelerator == "cuda":
+            if self.device == "cuda":
                 torch.cuda.set_device(gpu_id)
                 device = torch.device(f'cuda:{gpu_id}')
                 stream = torch.cuda.Stream(device=device)
@@ -206,7 +233,7 @@ class PartitionInferencer:
                 stream = None
 
             # Setup model for this GPU
-            model = self._setup_model(gpu_id if self.accelerator == "cuda" else None)
+            model = self._setup_model(gpu_id if self.device == "cuda" else None)
 
             batch_results = []
             batch_count = 0
@@ -222,11 +249,11 @@ class PartitionInferencer:
                 if stream is not None:
                     with torch.cuda.stream(stream):
                         with torch.inference_mode():
-                            result = self._process_batch(model, batch, batch_idx, device)
+                            result = self._process_batch(model, batch, batch_idx)
                     stream.synchronize()
                 else:
                     with torch.inference_mode():
-                        result = self._process_batch(model, batch, batch_idx, device)
+                        result = self._process_batch(model, batch, batch_idx)
                 if result is not None:
                     batch_results.append((batch_idx, result))
                     batch_count += 1
@@ -286,7 +313,17 @@ class PartitionInferencer:
         finally:
             pbar.close()
 
-    def run(self):
+    def run(self): #TODO: check if this is correct
+        if self.halfset == "allParticles":
+            self.halfset = "half1"
+            self._run()
+
+            self.halfset = "half2"
+            self._run()
+        else:
+            return self._run()
+
+    def _run(self):
         """Main entry point for running async inference."""
 
 
@@ -328,25 +365,28 @@ class PartitionInferencer:
                 print("Using single GPU processing")
                 # Single GPU processing
                 model = self._setup_model()
-                device = torch.device('cuda:0' if self.accelerator == "cuda" else "cpu")
-
                 all_results = {}
                 pbar = tqdm(total=total_batches, desc="Processing batches")
-
                 try:
                     with torch.inference_mode():
                         for batch_idx, batch in enumerate(dataloader):
-                            result = self._process_batch(model, batch, batch_idx, device)
+                            result = self._process_batch(model, batch, batch_idx)
                             if result:
                                 all_results[batch_idx] = result
                             pbar.update(1)
+                        result = self._process_batch(model, batch=None, batch_idx=-1) #This flushes the buffer
+                        if result:
+                            all_results[-1] = result
                 finally:
                     pbar.close()
+                    if self.perform_reconstruction:
+                        out_fname = os.path.join(self.results_dir, f"reconstruction_{self.halfset}_nnet.mrc")
+                        model.reconstructor.generate_volume(out_fname)
 
             if self.error_occurred.is_set():
                 raise RuntimeError(f"Error during processing: {self.error_message}")
 
-            # Aggregate results and save to STAR files (same logic as original)
+            # Aggregate results and save to STAR files
             self._save_results(all_results, dataset)
 
         except Exception as e:
@@ -412,7 +452,7 @@ class PartitionInferencer:
                 basename = os.path.basename(particlesSet.starFname).removesuffix(".star")
             else:
                 basename = "particles%d"%datIdx
-            out_fname = os.path.join(self.results_dir, basename + "_nnet.star")
+            out_fname = os.path.join(self.results_dir, basename + f"_{self.halfset}_nnet.star")
             print(f"Results were saved at {out_fname}")
             particlesSet.save(out_fname)
 
@@ -497,7 +537,7 @@ class PartitionInferencer:
             self.input_queues.clear()
 
         # 5. Clean up CUDA resources
-        if self.accelerator == "cuda" and torch.cuda.is_available():
+        if self.device == "cuda" and torch.cuda.is_available():
             try:
                 # Clear CUDA streams
                 if hasattr(self, 'streams'):

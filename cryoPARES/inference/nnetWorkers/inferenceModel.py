@@ -3,20 +3,24 @@ from typing import Union, Any, Dict, Tuple, List
 import torch
 from torch import nn, ScriptModule
 
+from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.projmatching.projMatching import ProjectionMatcher
+from cryoPARES.reconstruction.backup_reconstruction import Reconstructor
 from tensorDataBuffer import StreamingBuffer
 from cryoPARES.models.model import RotationPredictionMixin
 from cryoPARES.constants import (BATCH_IDS_NAME, BATCH_PARTICLES_NAME, BATCH_ORI_IMAGE_NAME,
                                  BATCH_ORI_CTF_NAME, BATCH_MD_NAME)
 
 class InferenceModel(RotationPredictionMixin, nn.Module):
+    @inject_defaults_from_config(main_config.inference, update_config_with_args=False)
     def __init__(self,
                  so3model: Union[nn.Module, ScriptModule],
                  scoreNormalizer: Union[nn.Module, ScriptModule],
-                 normalizedScore_thr: float,
-                 localRefiner: ProjectionMatcher,
-                 buffer_size: int = 4, #TODO: Move this to CONFIG
+                 normalizedScore_thr: float | None,
+                 localRefiner: ProjectionMatcher | None,
+                 reconstructor: Reconstructor | None = None,
+                 before_refiner_buffer_size: int = CONFIG_PARAM(),
                  return_top_k: int = 1
                  ):
         super().__init__()
@@ -26,11 +30,12 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
         self.scoreNormalizer = scoreNormalizer
         self.normalizedScore_thr = normalizedScore_thr
         self.localRefiner = localRefiner
-        self.buffer_size = buffer_size
+        self.reconstructor = reconstructor
+        self.buffer_size = before_refiner_buffer_size
         self.return_top_k = return_top_k
 
         self.buffer = StreamingBuffer(
-            buffer_size=buffer_size,
+            buffer_size=before_refiner_buffer_size,
             processing_fn=self._run_stage2,
         )
 
@@ -40,7 +45,7 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
         else:
             _top_k = top_k
         _, _, _, pred_rotmats, maxprobs = self.so3model(imgs, _top_k)
-        #TODO: Check if we are injecting the top10 scores
+
         norm_nn_score = self.scoreNormalizer(pred_rotmats[:, 0, ...], maxprobs[:,:10].sum(1))
         pred_rotmats = pred_rotmats[:,:top_k]
         maxprobs = maxprobs[:,:top_k]
@@ -58,14 +63,27 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
                 'maxprobs': maxprobs[passing_mask],
                 'norm_nn_score': norm_nn_score[passing_mask],
             }
-            if self.localRefiner is not None:
-                out = self.buffer.add_batch(batch_to_add)
-                return out
-            else:
-                return (batch_to_add['ids'], batch_to_add['rotmats'], None, batch_to_add['maxprobs'],
-                        batch_to_add['norm_nn_score'])
         else:
-            return ids, pred_rotmats, None, maxprobs, norm_nn_score
+            batch_to_add = {
+                'ids': ids,
+                'imgs': fullSizeImg,
+                'ctfs': fullSizeCtfs,
+                'rotmats': pred_rotmats,
+                'maxprobs': maxprobs,
+                'norm_nn_score': norm_nn_score,
+            }
+
+        if self.localRefiner is not None:
+            out = self.buffer.add_batch(batch_to_add)
+        else:
+            out = (batch_to_add['ids'], batch_to_add['rotmats'], None, batch_to_add['maxprobs'],
+                    batch_to_add['norm_nn_score'])
+
+        if self.reconstructor is not None: #TODO: we might want this running on a torch.cuda.Stream(device=device)
+            self.reconstructor._backproject_batch(fullSizeImg, fullSizeCtfs,
+                           rotMats=out[1], hwShiftAngs=out[1])
+
+        return out
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         ids = batch[BATCH_IDS_NAME]
@@ -132,7 +150,7 @@ def _test():
     localRefiner = ProjectionMatcher(
         reference_vol="/home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles_reconstruct.mrc",
         grid_distance_degs=10, grid_step_degs=5)
-    model = InferenceModel(so3Model, percentilemodel, normalizedScore_thr, localRefiner, buffer_size=1)
+    model = InferenceModel(so3Model, percentilemodel, normalizedScore_thr, localRefiner, before_refiner_buffer_size=1)
     out = model.forward(ids, imgs, imgs[:, 0, ...], ctfs, top_k)
     print(out)
     print("First was out")

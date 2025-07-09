@@ -15,4 +15,5 @@ class Inference_config:
     pl_plugin: Literal["LightningEnvironment", "none"] = "LightningEnvironment"  #Try none to submit to slurm
     num_computer_nodes: int = 1 #It has not been tried with values different from 1
 
+    before_refiner_buffer_size: int = 4
     # nnetinference: NnetInference_config = field(default_factory=NnetInference_config)

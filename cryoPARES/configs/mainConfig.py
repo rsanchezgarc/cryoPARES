@@ -60,5 +60,5 @@ class MainConfig:
 
 # Create an instance
 main_config = MainConfig()
-print(main_config)
+# print(main_config)
 print(f"Config ({id(main_config)}) was initiated for PID {os.getpid()}")

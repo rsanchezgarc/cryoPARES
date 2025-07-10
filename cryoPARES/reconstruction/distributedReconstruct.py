@@ -1,18 +1,30 @@
 import os
+import sys
+import traceback
+import time
+from typing import Optional
+
 import numpy as np
 from torch import multiprocessing
 import torch
-from more_itertools import batched
 from progressBarDistributed import SharedMemoryProgressBar, SharedMemoryProgressBarWorker
 
 from cryoPARES.reconstruction.reconstruction import Reconstructor
 
 _RECONSTRUCTOR = None
 
+def worker(worker_id, *args, **kwargs):
+    try:
+        # Your existing worker code here
+        _worker(worker_id, *args, **kwargs)
+    except Exception as e:
+        print(f"[Worker {worker_id}] Exception occurred: {e}", file=sys.stderr)
+        traceback.print_exc()
+        raise e
 
-def worker(pbar_fname, worker_id, n_particles, n_workers, particles_idxs,
-           reconstructor_init_kwargs, reconstructor_run_kwargs,
-           shared_numerator, shared_weights, shared_ctfsq, device=None):
+
+def _worker(worker_id, pbar_fname, particles_idxs, reconstructor_init_kwargs, reconstructor_run_kwargs,
+            shared_numerator, shared_weights, shared_ctfsq, device=None):
     global _RECONSTRUCTOR
     if _RECONSTRUCTOR is None:
         # Initialize reconstructor in worker process
@@ -50,7 +62,7 @@ def worker(pbar_fname, worker_id, n_particles, n_workers, particles_idxs,
             shared_ctfsq_tensor += _RECONSTRUCTOR.ctfsq.cpu()
 
 
-def create_shared_tensor(shape, dtype=torch.float32):
+def create_shared_tensor(shape, dtype=torch.float32, ctx=None):
     """Create a shared memory tensor"""
     size = int(np.prod(shape))  # Convert numpy.int64 to Python int
     if dtype == torch.float32:
@@ -59,29 +71,47 @@ def create_shared_tensor(shape, dtype=torch.float32):
         typecode = 'd'
     else:
         raise ValueError(f"Unsupported dtype: {dtype}")
-
-    shared_array = multiprocessing.Array(typecode, size)
+    if ctx is None:
+        ctx = multiprocessing
+    shared_array = ctx.Array(typecode, size)
     return shared_array, shape
 
+def reconstruct_starfile(particles_star_fname: str, symmetry: str, output_fname: str,
+                         particles_dir:Optional[str]=None,
+                         n_jobs: int  = 1,
+                         num_dataworkers: int = 1, batch_size: int = 64, use_cuda: bool = True,
+                         correct_ctf: bool = True, eps: float = 1e-3, min_denominator_value: float = 1e-4,
+                         use_only_n_first_batches: Optional[int] = None):
+    """
 
-def main():
-    n_jobs = 2
-    device = "cuda"
-    outname = "/tmp/reconstructed_vol.mrc"
+    :param particles_star_fname: The particles to reconstruct
+    :param symmetry: The symmetry of the volume (e.g. C1, D2, ...)
+    :param output_fname: The name of the output filename
+    :param particles_dir: The particles directory (root of the starfile fnames)
+    :param n_jobs: The number of workers to split the reconstruction process
+    :param num_dataworkers: Num workers for data loading
+    :param batch_size: The number of particles to be simultaneusly backprojected
+    :param use_cuda:
+    :param correct_ctf:
+    :param eps: The regularization constant (ideally, this is 1/SNR)
+    :param min_denominator_value: Used to prevent division by 0
+    :param use_only_n_first_batches: Use only the n first batches to reconstruct
+    :return:
+    """
+    ctx = multiprocessing.get_context('spawn')
 
     reconstructor_init_kwargs = dict(
-        symmetry="C1", correct_ctf=True, eps=1e-3, min_denominator_value=1e-4,
+        symmetry=symmetry, correct_ctf=correct_ctf, eps=eps, min_denominator_value=min_denominator_value,
     )
     reconstructor_run_kwargs = dict(
-        particles_star_fname="/home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/projections/1000proj_with_ctf.star",
-        # particles_star_fname="/home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles.star",
-        particles_dir="/home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/",
-        batch_size=40,
-        num_dataworkers=2,
-        use_only_n_first_batches=None
+        particles_star_fname=particles_star_fname,
+        particles_dir=particles_dir,
+        batch_size=batch_size,
+        num_dataworkers=num_dataworkers,
+        use_only_n_first_batches=use_only_n_first_batches
     )
 
-    if str(device).startswith("cuda"):
+    if use_cuda:
         n_cuda_devices = torch.cuda.device_count()
         print(f"Using {n_cuda_devices} CUDA devices")
     else:
@@ -100,9 +130,9 @@ def main():
     ctfsq_shape = reconstructor.ctfsq.shape
 
     # Create shared memory tensors for results
-    shared_numerator, _ = create_shared_tensor(numerator_shape)
-    shared_weights, _ = create_shared_tensor(weights_shape)
-    shared_ctfsq, _ = create_shared_tensor(ctfsq_shape)
+    shared_numerator, _ = create_shared_tensor(numerator_shape, ctx=ctx)
+    shared_weights, _ = create_shared_tensor(weights_shape, ctx=ctx)
+    shared_ctfsq, _ = create_shared_tensor(ctfsq_shape, ctx=ctx)
 
     n_particles = len(particles)
 
@@ -116,18 +146,56 @@ def main():
             if n_cuda_devices is not None:
                 worker_device = f"cuda:{worker_id % n_cuda_devices}"
 
-            p = multiprocessing.Process(
+            p = ctx.Process(
                 target=worker,
-                args=(pbar_fname, worker_id, n_particles, n_jobs, particles_idxs,
+                args=(worker_id, pbar_fname, particles_idxs,
                       reconstructor_init_kwargs, reconstructor_run_kwargs,
                       shared_numerator, shared_weights, shared_ctfsq, worker_device)
             )
             p.start()
             processes.append(p)
 
-        # Wait for all processes to complete
-        for p in processes:
-            p.join()
+        check_interval = 2  # seconds
+        all_done = False
+        try:
+            while not all_done:
+                all_done = True
+                for p in processes:
+                    if not p.is_alive() and p.exitcode != 0:
+                        print(f"Worker {p.pid} died with exit code {p.exitcode}!", file=sys.stderr)
+
+                        # Terminate all processes
+                        for q in processes:
+                            if q.is_alive():
+                                print(f"Terminating worker {q.pid}...")
+                                q.terminate()
+                        sys.exit(1)
+
+                    if p.is_alive():
+                        all_done = False
+
+                time.sleep(check_interval)
+
+            # Final join to clean up any remaining zombie processes
+            for p in processes:
+                p.join()
+
+        except KeyboardInterrupt:
+            print("Interrupted by user. Terminating workers...")
+            for p in processes:
+                if p.is_alive():
+                    p.terminate()
+            sys.exit(1)
+
+    #     # Wait for all processes to complete
+    #     error = False
+    #     for p in processes:
+    #         p.join()
+    #         error = error or (p.exitcode != 0)
+    #
+    # if error:
+    #     print("One of the workers died!!")
+    #     sys.exit(1)
 
     print("Backprojection done. Reconstructing")
 
@@ -141,11 +209,14 @@ def main():
     reconstructor.weights = final_weights
     reconstructor.ctfsq = final_ctfsq
 
-    reconstructor.generate_volume(outname)
+    reconstructor.generate_volume(output_fname)
     print("Reconstruction done.")
 
 
+
 if __name__ == "__main__":
-    # Required for multiprocessing with CUDA
-    multiprocessing.set_start_method('spawn', force=True)
-    main()
+    from argParseFromDoc import parse_function_and_call
+    parse_function_and_call(reconstruct_starfile)
+    """
+python -m cryoPARES.reconstruction.distributedReconstruct  --symmetry C1 --particles_star_fname /home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles.star --output_fname /tmp/reconstruction.mrc --use_only_n_first_batches 100    
+    """

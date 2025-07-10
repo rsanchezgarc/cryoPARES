@@ -317,7 +317,7 @@ class ReconstructionParticlesDataset(Dataset):
         return img, ctf, rotMat, hwShiftAngs
 
 def reconstruct_starfile(particles_star_fname: str, symmetry: str, output_fname: str, particles_dir:Optional[str]=None,
-                         num_dataworkers: int = 1, batch_size: int = 64, use_cuda: bool = False,
+                         num_dataworkers: int = 1, batch_size: int = 64, use_cuda: bool = True,
                          correct_ctf: bool = True, eps: float = 1e-3, min_denominator_value: float = 1e-4,
                          use_only_n_first_batches: Optional[int] = None):
     """
@@ -428,3 +428,7 @@ if __name__ == "__main__":
     # _test_real_insertion()
     from argParseFromDoc import parse_function_and_call
     parse_function_and_call(reconstruct_starfile)
+
+    """
+--symmetry C1 --particles_star_fname /home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles.star --output_fname /tmp/reconstruction.mrc --use_only_n_first_batches 100    
+    """

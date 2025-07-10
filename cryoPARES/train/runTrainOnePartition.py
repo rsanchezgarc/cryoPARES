@@ -215,13 +215,16 @@ class TrainerPartition:
 
         trainer.strategy.barrier()
         if trainer.is_global_zero and trainer.state.status == TrainerStatus.FINISHED:
-            print("Trained finished. Launching ")
+            save_train_val_partition_dir = trainer.datamodule.save_train_val_partition_dir
+            del trainer
+            print("Trained finished. Saving model ")
             self._save_training_completion(checkpointer)
-
+            torch.cuda.empty_cache()
+            print("Trained finished. Lauching reconstruction")
             reconstructions_dir = get_reconstructions_dir(self.train_save_dir, self.partition)
             os.makedirs(reconstructions_dir, exist_ok=True)
-            if os.path.isdir(trainer.datamodule.save_train_val_partition_dir):
-                saved_particles_dir = os.path.join(trainer.datamodule.save_train_val_partition_dir, "train")
+            if os.path.isdir(save_train_val_partition_dir):
+                saved_particles_dir = os.path.join(save_train_val_partition_dir, "train")
                 for fnameIdx, fname in enumerate(os.listdir(saved_particles_dir)):
                     fname = os.path.join(saved_particles_dir, fname)
                     print(f"Reconstructing {fname}")

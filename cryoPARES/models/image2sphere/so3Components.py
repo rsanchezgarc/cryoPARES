@@ -266,7 +266,7 @@ class SO3OutputGrid(nn.Module):
         self.register_buffer("completeIdxs_to_reducedIdxs", completeIdxs_to_reducedIdxs)
 
         self.register_buffer("_cached_batch_size_ies", torch.tensor(-1, dtype=torch.int64))
-        self.register_buffer("_cached_ies", torch.empty(0, dtype=torch.int64))
+        self.register_buffer("_cached_ies", torch.empty(0, dtype=torch.int64), persistent=False)
 
     # @staticmethod
     # @cache.cache()

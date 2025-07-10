@@ -35,7 +35,7 @@ class Image2Sphere(nn.Module):
     cache = get_cache(cache_name=__qualname__)
 
     @inject_defaults_from_config(main_config.models.image2sphere, update_config_with_args=False)
-    def __init__(self, symmetry, lmax: int = CONFIG_PARAM(),
+    def __init__(self, symmetry:str, lmax: int = CONFIG_PARAM(),
                  hp_order: int = CONFIG_PARAM(config=main_config.models.image2sphere.so3components.so3outputgrid),
                  label_smoothing: float = CONFIG_PARAM(),
                  num_augmented_copies_per_batch: Optional[int] = CONFIG_PARAM(config=main_config.datamanager),
@@ -91,7 +91,7 @@ class Image2Sphere(nn.Module):
         """Initialize symmetry-related components."""
         if not self.has_symmetry:
             self._sym_equiv = None
-            self.register_buffer("symmetryGroupMatrix", torch.eye(3).unsqueeze(0))
+            # self.register_buffer("symmetryGroupMatrix", torch.eye(3).unsqueeze(0))
             self._selected_rotmat_idxs = None
             self._old_idx_to_new_idx = None
             self.so3_grid = SO3OutputGrid(self.lmax, self.hp_order_output)
@@ -125,10 +125,12 @@ class Image2Sphere(nn.Module):
         self.register_buffer("_neigs", neigs)
 
     def _initialize_caches(self):
-        self.register_buffer("_cached_batch_size_ies", torch.tensor(-1, dtype=torch.int64))
-        self.register_buffer("_cached_ies", torch.empty(0, dtype=torch.int64))
-        self.register_buffer("_cached_batch_size_range", torch.tensor(-1, dtype=torch.int64))
-        self.register_buffer("_cached_batch_indices", torch.empty(0, dtype=torch.int64))
+        # self.register_buffer("_cached_batch_size_ies", torch.tensor(-1, dtype=torch.int64), persistent=False)
+        # self.register_buffer("_cached_ies", torch.empty(0, dtype=torch.int64), persistent=False)
+        # self.register_buffer("_cached_batch_size_range", torch.tensor(-1, dtype=torch.int64), persistent=False)
+        # self.register_buffer("_cached_batch_indices", torch.empty(0, dtype=torch.int64), persistent=False)
+        #TODO: Remove this legacy code
+        return
 
     def predict_wignerDs(self, x):
         """

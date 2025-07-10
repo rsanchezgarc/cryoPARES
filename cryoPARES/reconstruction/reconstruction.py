@@ -5,6 +5,7 @@ volume from a RELION‑style particle STAR file using the open‑source
 """
 import os
 import sys
+from functools import lru_cache
 from typing import List, Optional
 
 import mrcfile
@@ -33,6 +34,10 @@ class Reconstructor(nn.Module):
     def __init__(self, symmetry: str, correct_ctf: bool = True, eps=1e-3,
                  min_denominator_value=1e-4, *args, **kwargs):
 
+        numerator = kwargs.pop("numerator", None)
+        weights = kwargs.pop("weights", None)
+        ctfsq = kwargs.pop("ctfsq", None)
+
         super().__init__(*args, **kwargs)
         self.symmetry = symmetry.upper()
         self.has_symmetry = self.symmetry != "C1"
@@ -49,12 +54,23 @@ class Reconstructor(nn.Module):
         self.box_size = None
         self.sampling_rate = None
 
-        self.register_buffer('f_num', None)
-        self.register_buffer('weights', None)
-        self.register_buffer('ctfsq', None)
+        self.register_buffer('numerator', numerator)
+        self.register_buffer('weights', weights)
+        self.register_buffer('ctfsq', ctfsq)
 
     def get_device(self):
         return self.dummy_buffer.device
+
+    def move_buffers_to_share_mem(self):
+        if self.numerator:
+            self.numerator.share_memory_()
+        if self.weights:
+            self.weights.share_memory_()
+        if self.ctfsq:
+            self.ctfsq.share_memory_()
+
+    def get_buffers(self):
+        return dict(numerator=self.numerator, weights=self.weights, ctfsq=self.ctfsq)
 
     def set_metadata_from_particles(self, particlesDataset):
 
@@ -73,9 +89,11 @@ class Reconstructor(nn.Module):
             self.particle_shape = (box_size, box_size)
             nky, nkx = self.box_size, self.box_size // 2 + 1
 
-            self.f_num = torch.zeros((self.box_size, self.box_size, nkx), dtype=torch.complex64, device=self.get_device())
-            self.weights = torch.zeros_like(self.f_num, dtype=torch.float32, device=self.get_device())
-            self.ctfsq = torch.zeros_like(self.f_num, dtype=torch.float32, device=self.get_device())
+            # self.numerator = torch.zeros((self.box_size, self.box_size, nkx, 2), dtype=torch.float32, device=self.get_device())
+            self.numerator = torch.zeros((2, self.box_size, self.box_size, nkx), dtype=torch.float32, device=self.get_device())
+
+            self.weights = torch.zeros((self.box_size, self.box_size, nkx), dtype=torch.float32, device=self.get_device())
+            self.ctfsq = torch.zeros_like(self.weights, dtype=torch.float32, device=self.get_device())
 
 
     def _expand_with_symmetry(self, imgs, ctf, rotMats, hwShiftAngs):
@@ -209,17 +227,26 @@ class Reconstructor(nn.Module):
             )
 
             # Update the volume Fourier space components
-            self.f_num += torch.view_as_complex(dft_ctf[:2, ...].permute(1, 2, 3, 0).contiguous())
+            # self.numerator += torch.view_as_complex(dft_ctf[:2, ...].permute(1, 2, 3, 0).contiguous())
+            # self.numerator[...,0] += dft_ctf[0,...]
+            # self.numerator[...,1] += dft_ctf[1,...]
+            # self.numerator += dft_ctf[:2, ...].permute(1, 2, 3, 0)
+            self.numerator += dft_ctf[:2, ...]
             self.ctfsq += dft_ctf[-1, ...]
             self.weights += weights
         else:
             raise NotImplementedError("Backprojection without CTF correction is not implemented.")
 
+    @staticmethod
+    @lru_cache(maxsize=1)
+    def get_sincsq(shape, device):
+        grid = fftfreq_grid(image_shape=shape, rfft=False, fftshift=True, norm=True, device=device)
+        return torch.sinc(grid) ** 2
 
     def generate_volume(self, fname: Optional[FNAME_TYPE] = None, overwrite_fname: bool = True,
                         device: Optional[str] = "cpu"):
 
-        dft = torch.zeros_like(self.f_num)
+        dft = torch.zeros_like(self.numerator)
 
         # Only divide where we have sufficient weights
         mask = self.weights > self.min_denominator_value
@@ -227,21 +254,18 @@ class Reconstructor(nn.Module):
             denominator = self.ctfsq[mask] + self.eps * self.weights[mask]
             # Handle potential near-zero denominators
             denominator[denominator.abs() < self.min_denominator_value] = self.min_denominator_value
-            dft[mask] = self.f_num[mask] / denominator
+            dft[:, mask] = self.numerator[:, mask] / denominator[None, ...]
 
         else:
-            dft[mask] = self.f_num[mask] / self.weights[mask]
-
+            dft[:, mask] = self.numerator[:, mask] / self.weights[mask][None, ...]
+        dft = torch.complex(real=dft[0,...], imag=dft[1,...])
         # back to real space
         dft = torch.fft.ifftshift(dft, dim=(-3, -2))  # actual ifftshift
         dft = torch.fft.irfftn(dft, dim=(-3, -2, -1))
         dft = torch.fft.ifftshift(dft, dim=(-3, -2, -1))  # center in real space
 
         # correct for convolution with linear interpolation kernel
-        grid = fftfreq_grid(image_shape=dft.shape, rfft=False, fftshift=True, norm=True, device=dft.device)
-        #TODO: Store the sinc volume to avoid overhead
-        vol = dft / torch.sinc(grid) ** 2
-        vol = vol.to(device)
+        vol = dft.to(device) / self.get_sincsq(dft.shape, device)
 
         if fname is not None:
             mrcfile.write(fname, data=vol.detach().cpu().numpy(), overwrite=overwrite_fname,
@@ -318,6 +342,7 @@ def reconstruct_starfile(particles_star_fname: str, symmetry: str, output_fname:
     reconstructor.to(device=device)
     reconstructor.backproject_particles(particles_star_fname, particles_dir, batch_size, num_dataworkers,
                                         use_only_n_first_batches=use_only_n_first_batches)
+    print("")
     reconstructor.generate_volume(output_fname)
 
 

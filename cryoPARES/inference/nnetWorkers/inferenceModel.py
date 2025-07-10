@@ -81,7 +81,7 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
 
         if self.reconstructor is not None: #TODO: we might want this running on a torch.cuda.Stream(device=device)
             self.reconstructor._backproject_batch(fullSizeImg, fullSizeCtfs,
-                           rotMats=out[1], hwShiftAngs=out[1])
+                           rotMats=out[1], hwShiftAngs=out[1], zyx_matrices=False)
 
         return out
 

@@ -13,6 +13,7 @@ from starstack.particlesStar import ParticlesStarSet
 from torch.utils.data import Dataset
 from typing import Union, Literal, Optional, List, Tuple, Any, Dict
 
+from cryoPARES.cacheManager import get_cache
 from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.datamanager_config.particlesDataset_config import CtfCorrectionType, ImgNormalizationType
 from cryoPARES.configs.mainConfig import main_config
@@ -86,18 +87,10 @@ class ParticlesDataset(Dataset, ABC):
         self.ctf_correction_do_concat = ctf_correction.startswith("concat")
         self.ctf_correction = ctf_correction.removeprefix("concat_")
 
-
         if self.store_data_in_memory:
-            warnings.warn("store_data_in_memory has not being implemented yet")
-            #TODO: implement catching for getIdx
-            # self._getIdx = functools.cache(self._getIdx)
-        #     print(locals())
-        #     breakpoint()
-        #     self.cacheDir = SharedTemporaryDirectory("particles_", locals(), rootdir="/dev/shm")
-        #     # warnings.warn(f"Data is going to be stored in memory ({memoryname}). Check if you have enough.")
-        #     self.memory = get_cache(cache_name="mrcdataset", cachedir=self.cacheDir)
-        #     self._getIdx = self.memory.cache(self._getIdx, ignore=["self"])
-            raise NotImplementedError()
+            self.memory = get_cache(cache_name=None, verbose=0)
+            self._getIdx = self.memory.cache(self._getIdx, ignore=["self"], verbose=0)
+
         self._particles = None
         self._augmenter = None
         self._image_size = None

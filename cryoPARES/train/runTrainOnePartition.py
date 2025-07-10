@@ -234,8 +234,8 @@ class TrainerPartition:
                                   output_fname=output_fname,
                                   particles_dir=particles_dir,
                                   num_workers=datamodule.num_data_workers,
-                                  batch_size=64, # TODO: Add things to CONFIG
-                                  use_cuda=main_config.train.cuda_for_reconstruct, #TODO: How to use the GPU without getting out of memory
+                                  batch_size=main_config.train.batch_size_for_reconstruct,
+                                  use_cuda=main_config.train.cuda_for_reconstruct,
                                   correct_ctf=True, eps=1e-3, min_denominator_value=1e-4)
                     if self.overfit_batches is not None:
                         kwargs["use_only_n_first_batches"] = self.overfit_batches

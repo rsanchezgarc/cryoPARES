@@ -205,33 +205,12 @@ class PlModel(RotationPredictionMixin, pl.LightningModule):
             # Visualize the predicted rotmats and the ground truth rotmats with error
             self._visualize_rotmats(pred_rotmats, gt_rotmats, error_degs=error_degs, partition="val")
 
-
         return loss
-
-    def _predict_step(self, batch: Dict[str, Any], batch_idx: int, dataloader_idx: int = 0, top_k: Optional[int] = None):
-
-        if top_k is None:
-            top_k = self.top_k
-
-        idd, imgs, poses, metadata = self.resolve_batch(batch)
-        wD, rotMat_logits, pred_rotmat_id, pred_rotmats, maxprobs = self(imgs, batch_idx, top_k=top_k)
-
-        pred_shifts = pred_rotmats.new_full((pred_rotmats.shape[0], top_k, 2), torch.nan) #TODO: Predict this as well
-        shifts_probs = maxprobs * torch.nan
-
-        if poses is not None:
-            (rotMats, xyShiftAngs, conf) = poses
-            errors = rotation_error_rads(rotMats, pred_rotmats[:,0,...])
-            errors = torch.rad2deg(errors)
-            errors = errors.detach().cpu()
-        else:
-            errors = None
-        return idd, (pred_rotmats, maxprobs), (pred_shifts, shifts_probs), errors, metadata
 
     def forward(self, imgs: torch.Tensor, batch_idx: int, dataloader_idx: int = 0, top_k: Optional[int] = None) -> Any:
         if top_k is None:
             top_k = self.top_k
-        return self.so3model(imgs, top_k=top_k)
+        return self.so3model(imgs, top_k=top_k) #wD, rotMat_logits, pred_rotmat_id, pred_rotmats, maxprobs
 
 
     def optimizer_step_v1(self, epoch: int, batch_idx: int,
@@ -303,11 +282,8 @@ class PlModel(RotationPredictionMixin, pl.LightningModule):
             for dataloader_idx, dataloader in enumerate(val_dataloaders):
                 for batch_idx, batch in enumerate(tqdm(dataloader)):
                     batch = self.transfer_batch_to_device(batch, device, dataloader_idx)
-                    predictions = self.predict_step(batch, batch_idx, dataloader_idx, top_k=10)
-                    idd, (pred_rotmats, maxprobs), \
-                         (pred_shifts, shifts_probs), errors, metadata = predictions
-
-                    # predEulers = torch.rad2deg(matrix_to_euler_angles(pred_rotmats, convention=RELION_EULER_CONVENTION).cpu())
+                    imgs = batch[self.BATCH_PARTICLES_NAME]
+                    _, _, _, pred_rotmats, maxprobs = self.forward(imgs, batch_idx, dataloader_idx, top_k=10)
                     predRotMats.append(pred_rotmats[:,0,...].cpu()) # I am only using topK=1 for the clusters in the normalizer
 
                     topKscore = maxprobs.sum(-1) #But we use top-10 for confidence
@@ -316,10 +292,6 @@ class PlModel(RotationPredictionMixin, pl.LightningModule):
                     gt_rotmats = batch[self.BATCH_POSE_NAME][0]
                     gtRotmats.append(gt_rotmats.cpu())
 
-                    # for ai, angname in enumerate(RELION_ANGLES_NAMES):
-                    #     metadata[angname] = predEulers[:,0,ai].cpu().numpy()
-                    # for si, siname in enumerate(RELION_SHIFTS_NAMES):
-                    #     metadata[siname] = pred_shifts[:,0,si].cpu().numpy()
                     if self.trainer.overfit_batches is not None and batch_idx > self.trainer.overfit_batches:
                         break
             predRotMats = torch.concat(predRotMats)

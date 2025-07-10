@@ -97,11 +97,17 @@ class DataManager(pl.LightningDataModule):
         return
 
     def create_dataset(self, partitionName):
+
         from cryoPARES.datamanager.relionStarDataset import ParticlesRelionStarDataset
+        if partitionName in ["train", "val"]:
+            store_data_in_memory = main_config.datamanager.particlesdataset.store_data_in_memory
+        else:
+            store_data_in_memory = None
         datasets = []
         for i, (partFname, partDir) in enumerate(zip(self.star_fnames, self.particles_dir)):
             mrcsDataset = ParticlesRelionStarDataset(particles_star_fname=partFname, particles_dir=partDir,
                                                      symmetry=self.symmetry, halfset=self.halfset,
+                                                     store_data_in_memory=store_data_in_memory,
                                                      return_ori_imagen=self.return_ori_imagen)
 
             if self.is_global_zero and self.save_train_val_partition_dir is not None:

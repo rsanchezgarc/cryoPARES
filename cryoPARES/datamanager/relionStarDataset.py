@@ -78,8 +78,10 @@ if __name__ == "__main__":
         kwargs["mask_radius_angs"] = args.mask_radius_angs
     if args.ctf_correction:
         kwargs["ctf_correction"] = args.ctf_correction
-    parts = ParticlesRelionStarDataset(particles_star_fname=osp.expanduser(args.filename), particles_dir=args.dirname,
+    parts = ParticlesRelionStarDataset(particles_star_fname=osp.expanduser(args.filename),
+                                       particles_dir=args.dirname,
                                        symmetry=args.symmetry, halfset=None, min_maxProb=None,
+                                       store_data_in_memory=True,
                                        **kwargs)
 
     print(len(parts))

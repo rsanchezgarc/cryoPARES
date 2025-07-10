@@ -138,4 +138,6 @@ def _filter_duplicate_angles_in_grid(grid, degrees:bool, atol=None):
     return grid
 
 if __name__ == "__main__":
-    so3_near_identity_grid_cartesianprod(15, 3, transposed=False, degrees=True)
+    # out = so3_near_identity_grid_cartesianprod(15, 3, transposed=False, degrees=True)
+    out = so3_near_identity_grid_cartesianprod(np.pi/12, 8, transposed=False, degrees=False)
+    print(out)

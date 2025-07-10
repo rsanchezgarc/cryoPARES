@@ -208,7 +208,7 @@ class SO3Conv(nn.Module):
     @staticmethod
     @cache.cache()
     def build_components(f_in: int, f_out: int, lmax: int, max_rads: float, n_angles: int):
-        kernel_grid = so3_near_identity_grid_cartesianprod(max_rads, n_angles)
+        kernel_grid = so3_near_identity_grid_cartesianprod(max_rads, n_angles, degrees=False)
         # kernel_grid = so3_near_identity_grid_ori(n_alpha=8, n_beta=3) #TODO: This was the original implementation
         f_wigner = flat_wigner(lmax, *kernel_grid)
         so3_ir = so3_irreps(lmax)
@@ -432,9 +432,11 @@ def _test_SO3Conv():
     # Test parameters
     f_in, f_out, lmax = 16, 32, 4
     batch_size = 2
+    max_rads= np.pi/12
+    n_angles = 8
 
     # Initialize conv layer
-    conv = SO3Conv(f_in=f_in, f_out=f_out, lmax=lmax)
+    conv = SO3Conv(f_in=f_in, f_out=f_out, lmax=lmax, max_rads=max_rads, n_angles=n_angles)
 
     # Create sample input
     input_size = sum((2 * l + 1) ** 2 for l in range(lmax + 1))
@@ -519,5 +521,5 @@ def _test_so3grid():
 if __name__ == "__main__":
     # _test_Image2SphereProjector()
     # _test_S2Conv()
-    # _test_SO3Conv()
-    _test_so3grid()
+    _test_SO3Conv()
+    # _test_so3grid()

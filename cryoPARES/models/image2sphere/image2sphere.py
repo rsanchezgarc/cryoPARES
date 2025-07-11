@@ -252,8 +252,8 @@ class Image2Sphere(nn.Module):
             contrast_loss = self.simCLR_like_loss(wD)
         else:
             contrast_loss = 0
-        # TODO: The problem is that pred_rotmats has shape (B, top_k, 3, 3), but gt_rotmat has shape (B,3,3). Is it solved?
-        if self.symmetry != "C1":
+
+        if self.has_symmetry:
             n_groupElems = self.so3_grid.symmetryGroupMatrix.shape[0]
             rows = torch.arange(rotMat_logits.shape[0]).view(-1, 1).repeat(1, n_groupElems)
             with torch.no_grad(): #TODO: Try to use error_rads as part of the loss function

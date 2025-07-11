@@ -1,14 +1,12 @@
-import functools
-
-import e3nn
 import torch
 
-from typing import Tuple, Optional
 import numpy as np
 from e3nn import o3
+from e3nn import nn as e3_nn
 from e3nn.o3._so3grid import flat_wigner
 from torch import nn
 from tqdm import tqdm
+from typing import Tuple, Optional
 
 from cryoPARES.cacheManager import get_cache
 from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
@@ -422,7 +420,7 @@ class SO3Activation(nn.Module):
     @staticmethod
     @cache.cache()
     def build_components(lmax: int, so3_act_resolution: int):
-        return e3nn.nn.SO3Activation(lmax, lmax, act=torch.relu, resolution=so3_act_resolution)
+        return e3_nn.SO3Activation(lmax, lmax, act=torch.relu, resolution=so3_act_resolution)
 
     def forward(self, x):
         return self.act(x)

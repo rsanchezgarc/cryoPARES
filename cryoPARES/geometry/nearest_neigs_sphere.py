@@ -1,12 +1,11 @@
 import os
 import warnings
-
+import numba
 import joblib
 import numpy as np
 import torch
 from sklearn.neighbors import NearestNeighbors
 from scipy.spatial.transform import Rotation as R
-import numba
 from cryoPARES.constants import RELION_EULER_CONVENTION
 
 

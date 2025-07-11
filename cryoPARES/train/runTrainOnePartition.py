@@ -216,14 +216,16 @@ class TrainerPartition:
 
         trainer.strategy.barrier() #TODO: We probably want to run reconstruct in the main loop
         if trainer.is_global_zero and trainer.state.status == TrainerStatus.FINISHED:
+            print("Trained finished. Saving model ")
+            self._save_training_completion(checkpointer)
             save_train_val_partition_dir = trainer.datamodule.save_train_val_partition_dir
+            num_data_workers = datamodule.num_data_workers
             del trainer
-            del pl_model
+            del pl_model, checkpointer
             del datamodule
             gc.collect()
             torch.cuda.empty_cache()
-            print("Trained finished. Saving model ")
-            self._save_training_completion(checkpointer)
+
             torch.cuda.empty_cache()
             print("Trained finished. Lauching reconstruction")
             reconstructions_dir = get_reconstructions_dir(self.train_save_dir, self.partition)
@@ -241,7 +243,7 @@ class TrainerPartition:
                                   symmetry=self.symmetry,
                                   output_fname=output_fname,
                                   particles_dir=particles_dir,
-                                  num_workers=datamodule.num_data_workers,
+                                  num_workers=num_data_workers,
                                   batch_size=main_config.train.batch_size_for_reconstruct,
                                   use_cuda=main_config.train.cuda_for_reconstruct,
                                   correct_ctf=True, eps=1e-3, min_denominator_value=1e-4)

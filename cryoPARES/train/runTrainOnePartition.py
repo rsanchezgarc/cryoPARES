@@ -220,14 +220,11 @@ class TrainerPartition:
             self._save_training_completion(checkpointer)
             save_train_val_partition_dir = trainer.datamodule.save_train_val_partition_dir
             num_data_workers = datamodule.num_data_workers
-            del trainer
-            del pl_model, checkpointer
-            del datamodule
+            del trainer, pl_model, checkpointer, datamodule, callbacks
             gc.collect()
             torch.cuda.empty_cache()
 
-            torch.cuda.empty_cache()
-            print("Trained finished. Lauching reconstruction")
+            print("Trained finished. Launching reconstruction")
             reconstructions_dir = get_reconstructions_dir(self.train_save_dir, self.partition)
             os.makedirs(reconstructions_dir, exist_ok=True)
             if os.path.isdir(save_train_val_partition_dir):

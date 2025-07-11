@@ -127,17 +127,6 @@ class RotationPredictionMixin:
         finally:
             matplotlib.use(current_backend)
 
-    def resolve_batch(self, batch: Dict[str, Union[torch.Tensor, List[str],
-    Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
-    Dict[str, Any]]]
-                      ) -> Tuple[torch.Tensor, torch.Tensor,
-    Tuple[torch.Tensor, torch.Tensor, torch.Tensor], Dict[str, Any]]:
-        idd = batch[self.BATCH_IDS_NAME]
-        imgs = batch[self.BATCH_PARTICLES_NAME]
-        (rotMats, xyShiftAngs, conf) = batch[self.BATCH_POSE_NAME]
-        metadata = batch[self.BATCH_MD_NAME]
-        return idd, imgs, (rotMats, xyShiftAngs, conf), metadata
-
 
 class PlModel(RotationPredictionMixin, pl.LightningModule):
     def __init__(self, lr: float, symmetry: str, num_augmented_copies_per_batch: int,
@@ -171,9 +160,13 @@ class PlModel(RotationPredictionMixin, pl.LightningModule):
 
     def _step(self, batch, batch_idx):
 
-        idd, imgs, (gt_rotMats, shifts, conf), metadata = self.resolve_batch(batch)
-        (wD, rotMat_logits, pred_rotmat_ids,
-         pred_rotmats, maxprobs), loss, error_rads = self.so3model.forward_and_loss(imgs, gt_rotMats, conf, top_k=self.top_k)
+        # idd = batch[self.BATCH_IDS_NAME]
+        imgs = batch[self.BATCH_PARTICLES_NAME]
+        (gt_rotMats, xyShiftAngs, confid) = batch[self.BATCH_POSE_NAME]
+        # metadata = batch[self.BATCH_MD_NAME]
+        del batch
+        (_, _, _, pred_rotmats, maxprobs
+         ), loss, error_rads = self.so3model.forward_and_loss(imgs, gt_rotMats, confid, top_k=self.top_k)
         error_degs = torch.rad2deg(error_rads)
         return loss, error_degs, pred_rotmats, maxprobs, gt_rotMats
 
@@ -255,12 +248,12 @@ class PlModel(RotationPredictionMixin, pl.LightningModule):
                                                   min_lr=lr * configTrain.min_learning_rate_factor,
                                                   cooldown=1,
                                                   patience=configTrain.patient_reduce_lr_plateau_n_epochs)
-        conf = {
+        confid = {
             'optimizer': opt,
             'lr_scheduler': lr_scheduler,
             'monitor': configTrain.monitor_metric
         }
-        return conf
+        return confid
 
     def on_fit_end(self) -> None:
         print("Preparing directional percentiles")
@@ -332,7 +325,8 @@ def _test0():
     batch = get_example_random_batch(b)
     model_kwargs = dict(lr=1e-5, symmetry="c1", num_augmented_copies_per_batch=1, top_k=1)
     plmodel = PlModel(**model_kwargs)
-    _, imgs, poses, _ = plmodel.resolve_batch(batch)
+    imgs = batch[plmodel.BATCH_PARTICLES_NAME]
+    (rotMats, xyShiftAngs, confid) = batch[plmodel.BATCH_POSE_NAME]
     plmodel.training_step(batch, batch_idx=0)
 
     plmodel(imgs, batch_idx=0)

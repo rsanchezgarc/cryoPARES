@@ -1,6 +1,7 @@
 import os.path as osp
+import subprocess
 
-from starstack.particlesStar import ParticlesStarSet
+from starstack.particlesStar import ParticlesStarSet, split_particle_and_fname
 from typing import Union, Optional
 from os import PathLike
 
@@ -34,7 +35,19 @@ class ParticlesRelionStarDataset(ParticlesDataset):
         self._datadir = osp.expanduser(particles_dir) if particles_dir is not None else None
 
     def load_ParticlesStarSet(self):
-        return ParticlesStarSet(starFname=self._star_fname, particlesDir=self._datadir)
+        ps =  ParticlesStarSet(starFname=self._star_fname, particlesDir=self._datadir)
+        ulimit = subprocess.run(["ulimit -n"], check=True, capture_output=True, shell=True)
+        assert ulimit.returncode == 0, "Error, ulimit -n command failed"
+        ulimit = int(ulimit.stdout.decode().strip())
+        stackFnames = ps.particles_md["rlnImageName"].map(lambda x: split_particle_and_fname(x)["basename"])
+        n_stacks = len(stackFnames.unique())
+        assert n_stacks < 5 * ulimit, f"Error, the number of particle stacks is too" \
+                                      f" large ({n_stacks}) given current number of allowed file " \
+                                      f"handlers {ulimit}. Please, increase the number using " \
+                                      f"'ulimit -n NUMBER', where NUMBER should be much larger than " \
+                                      f"the number of stacks (at least 10x). Otherwise, group the " \
+                                      f"particle stacks (.mrcs) into less but larger stack files."
+        return ps
 
 
     def saveMd(self, fname: Union[str, PathLike], overwrite: bool = True):

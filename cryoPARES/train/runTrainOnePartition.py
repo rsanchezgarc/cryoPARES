@@ -68,6 +68,7 @@ class TrainerPartition:
             self.train_config.n_epochs = self.n_epochs
 
         torch.set_float32_matmul_precision(constants.float32_matmul_precision)
+        # os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
     def _setup_accelerator(self):
         from cryoPARES.utils.torchUtils import accelerator_selector

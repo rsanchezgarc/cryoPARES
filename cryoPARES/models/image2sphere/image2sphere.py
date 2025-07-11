@@ -1,4 +1,5 @@
 import functools
+import os
 from collections import defaultdict
 from dataclasses import asdict
 from typing import Optional, Tuple, Dict, Any
@@ -11,7 +12,7 @@ from torch import nn
 from cryoPARES.cacheManager import get_cache
 
 from cryoPARES.configs.mainConfig import main_config
-from cryoPARES.constants import BATCH_PARTICLES_NAME
+from cryoPARES.constants import BATCH_PARTICLES_NAME, SCRIPT_ENTRY_POINT
 from cryoPARES.datamanager.datamanager import get_example_random_batch
 from cryoPARES.geometry.metrics_angles import mean_rot_matrix, rotation_error_rads
 from cryoPARES.geometry.nearest_neigs_sphere import compute_nearest_neighbours
@@ -47,6 +48,7 @@ class Image2Sphere(nn.Module):
         self.label_smoothing = label_smoothing
         self.num_augmented_copies_per_batch = num_augmented_copies_per_batch #TODO: refactor SimCLR
         self.use_simCLR = use_simCLR
+        self.n_neigs_to_compute = main_config.models.image2sphere.n_neigs_to_compute
 
         if example_batch is None:
             example_batch = get_example_random_batch(1)
@@ -72,27 +74,33 @@ class Image2Sphere(nn.Module):
 
         self.enforce_symmetry = enforce_symmetry
 
-        #TODO: The different caches need to be refactored, since they are problematic with multigpu.
-        # We need to precompute them always
-
         # Register nearest neighbors buffer
         self._initialize_neigs()
         self._initialize_caches()
 
-    def _initialize_neigs(self, k: int = 10):
+    def _initialize_neigs(self, k: Optional[int] = None):
         """Initialize nearest neighbors matrix."""
+        if k is None:
+            k = self.n_neigs_to_compute
         euler_angles = self.so3_grid.output_eulerRad_yxy.cpu()
         neigs = compute_nearest_neighbours(
                 euler_angles,
                 k=k,
                 cache_dir=main_config.cachedir,
-                n_jobs=1
+                n_jobs=1 #TODO: Use more jobs. Read from config the num of threads
             )["nearest_neigbours"]
         self.register_buffer("_neigs", neigs)
+        return self._neigs
 
     def _initialize_caches(self):
-        self.register_buffer("_cached_batch_size_range", torch.tensor(-1, dtype=torch.int64), persistent=False)
-        self.register_buffer("_cached_batch_indices", torch.empty(0, dtype=torch.int64), persistent=False)
+        # self.register_buffer("_cached_batch_size_range", torch.tensor(-1, dtype=torch.int64), persistent=False)
+        # self.register_buffer("_cached_batch_indices", torch.empty(0, dtype=torch.int64), persistent=False)
+
+        batch_size = max(main_config.train.batch_size, main_config.inference.batch_size)
+        self._max_indices_buffer_size = 2 * batch_size
+        self.register_buffer("_indices_buffer",
+                           torch.arange(self._max_indices_buffer_size, dtype=torch.long),
+                           persistent=False)
 
     def predict_wignerDs(self, x):
         """
@@ -174,21 +182,32 @@ class Image2Sphere(nn.Module):
             # print(R.from_matrix(pred_rotmat).as_euler("ZYZ", degrees=True).round(3))
         return wD, rotMat_logits, pred_rotmat_id, pred_rotmat, maxprob.squeeze(-1)
 
-    def _get_batch_indices(self, batch_size: int, device: torch.device) -> torch.Tensor:
-        """
-        Used for indexing in forward_with_neigs
-        :param batch_size:
-        :param device:
-        :return:
-        """
-        if self._cached_batch_size_range != batch_size or self._cached_batch_indices.device != device:
-            # Update cache
-            indices = torch.arange(batch_size, device=device)
-            self._cached_batch_indices = indices
-            self._cached_batch_size_range.copy_(torch.tensor(batch_size, device=device))
-        return self._cached_batch_indices
+    # def __get_batch_indices(self, batch_size: int, device: torch.device) -> torch.Tensor:
+    #     """
+    #     Used for indexing in forward_with_neigs
+    #     :param batch_size:
+    #     :param device:
+    #     :return:
+    #     """
+    #     if self._cached_batch_size_range != batch_size or self._cached_batch_indices.device != device:
+    #         # Update cache
+    #         indices = torch.arange(batch_size, device=device)
+    #         self._cached_batch_indices = indices
+    #         self._cached_batch_size_range.copy_(torch.tensor(batch_size, device=device))
+    #     return self._cached_batch_indices
 
-    def _get_neigs_matrix(self, k=10): #TODO: k should be in the config
+    def _get_batch_indices(self, batch_size: int, device: torch.device) -> torch.Tensor:
+        """Memory-efficient batch indices using pre-allocated buffer"""
+        if batch_size <= self._max_indices_buffer_size:
+            # Use pre-allocated buffer
+            if self._indices_buffer.device != device:
+                self._indices_buffer = self._indices_buffer.to(device, non_blocking=True)
+            return self._indices_buffer[:batch_size]
+        else:
+            # For very large batches, create new tensor
+            return torch.arange(batch_size, device=device)
+
+    def _get_neigs_matrix(self):
         """
 
         :param k: The number of nearest neighbours to compute
@@ -196,9 +215,7 @@ class Image2Sphere(nn.Module):
         """
         neigs = getattr(self, "_neigs", None)
         if neigs is None:
-            neigs = compute_nearest_neighbours(self.so3_grid.output_eulerRad_yxy.cpu(), k=k,
-                                               cache_dir=main_config.cachedir, n_jobs=1)["nearest_neigbours"]
-            self.register_buffer("_neigs", neigs)
+            self._initialize_neigs()
         return self._neigs
 
 
@@ -238,18 +255,18 @@ class Image2Sphere(nn.Module):
         # TODO: The problem is that pred_rotmats has shape (B, top_k, 3, 3), but gt_rotmat has shape (B,3,3). Is it solved?
         if self.symmetry != "C1":
             n_groupElems = self.so3_grid.symmetryGroupMatrix.shape[0]
-            target_ohe = torch.zeros_like(rotMat_logits)
             rows = torch.arange(rotMat_logits.shape[0]).view(-1, 1).repeat(1, n_groupElems)
-            loss = nn.functional.cross_entropy(rotMat_logits, target_ohe, reduction="none", label_smoothing=self.label_smoothing)
             with torch.no_grad(): #TODO: Try to use error_rads as part of the loss function
                 gtrotMats = self.so3_grid.symmetryGroupMatrix[None, ...] @ gt_rotmat[:, None, ...]
                 rotMat_gtIds = self.so3_grid.nearest_rotmat_idx(gtrotMats.view(-1, 3, 3))[-1].view(
                     rotMat_logits.shape[0], -1)
+                target_ohe = torch.zeros_like(rotMat_logits)
                 target_ohe[rows, rotMat_gtIds] = 1 / n_groupElems
                 error_rads = rotation_error_rads(gtrotMats.view(-1,3,3),
                                                  torch.repeat_interleave(pred_rotmats, n_groupElems, dim=0)[:,0,...])
                 error_rads = error_rads.view(-1, n_groupElems)
                 error_rads = error_rads.min(1).values
+            loss = nn.functional.cross_entropy(rotMat_logits, target_ohe, reduction="none", label_smoothing=self.label_smoothing)
 
         else:
 

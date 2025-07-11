@@ -82,6 +82,7 @@ class DataManager(pl.LightningDataModule):
         else:
             self.augmenter = None
 
+
     @staticmethod
     def _expand_fname(fnameOrList):
             if fnameOrList is None:

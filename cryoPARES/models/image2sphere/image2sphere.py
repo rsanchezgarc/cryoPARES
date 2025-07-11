@@ -456,7 +456,7 @@ def _test_rotation_invariance(n_samples=10):
 
     encoder = nn.Conv2d(imgs.shape[1], main_config.models.image2sphere.so3components.i2sprojector.sphere_fdim,
                         kernel_size=1, padding="same")
-    model = Image2Sphere(symmetry="C1", lmax=6, enforce_symmetry=False, encoder=encoder)
+    model = Image2Sphere(symmetry="D2", lmax=6, enforce_symmetry=False, encoder=encoder)
     model.eval()
 
     # Store all results

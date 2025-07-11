@@ -263,8 +263,18 @@ class SO3OutputGrid(nn.Module):
         self.register_buffer("selected_rotmat_idxs", selected_rotmat_idxs) #Those are the indices of the rotmats that cover the portion of the projection sphere that corresponds to the symmetry
         self.register_buffer("completeIdxs_to_reducedIdxs", completeIdxs_to_reducedIdxs)
 
-        self.register_buffer("_cached_batch_size_ies", torch.tensor(-1, dtype=torch.int64))
-        self.register_buffer("_cached_ies", torch.empty(0, dtype=torch.int64), persistent=False)
+        # self.register_buffer("_cached_batch_size_ies", torch.tensor(-1, dtype=torch.int64))
+        # self.register_buffer("_cached_ies", None, persistent=False)
+
+        # self._cached_batch_size_ies = -1
+        # self._cached_ies = None
+
+        batch_size = max(main_config.train.batch_size, main_config.inference.batch_size)
+        self._max_i_cached_ies_size = 2 * batch_size
+        self.register_buffer("_cached_ies",
+                             SO3OutputGrid._compute_ies(batch_size, self.output_rotmats.shape[0],
+                                                        self.output_rotmats.device),
+                             persistent=False)
 
 
     @staticmethod
@@ -372,18 +382,34 @@ class SO3OutputGrid(nn.Module):
         reduced = self.completeIdxs_to_reducedIdxs[idxs]
         return reduced
 
-    def _get_ies_for_aggregate_symmetry(self, batch_size: int, device: torch.device) -> torch.Tensor:
+    @staticmethod
+    def _compute_ies(batch_size: int, n_rotmats: int, device: torch.device):
+        ies = (torch.arange(batch_size, device=device)
+               .unsqueeze(-1)
+               .expand(-1, n_rotmats)
+               .unsqueeze(-1))
+        return ies
 
-        if self._cached_batch_size_ies != batch_size or self._cached_ies.device != device:
-            # Update cache
-            n_rotmats = self.output_rotmats.shape[0]
-            ies = (torch.arange(batch_size, device=device)
-                   .unsqueeze(-1)
-                   .expand(-1, n_rotmats)
-                   .unsqueeze(-1))
-            self._cached_ies = ies
-            self._cached_batch_size_ies.copy_(torch.tensor(batch_size, device=device))
-        return self._cached_ies
+    # def _get_ies_for_aggregate_symmetry(self, batch_size: int, device: torch.device) -> torch.Tensor:
+    #
+    #     if (self._cached_batch_size_ies != batch_size or #self._cached_batch_size_ies==-1 when self._cached_ies is None
+    #         self._cached_ies.device != device):
+    #         # Update cache
+    #         n_rotmats = self.output_rotmats.shape[0]
+    #         ies = SO3OutputGrid.__compute_ies(batch_size, n_rotmats, device)
+    #         self._cached_ies = ies
+    #         self._cached_batch_size_ies = batch_size
+    #     return self._cached_ies
+
+    def _get_ies_for_aggregate_symmetry(self, batch_size: int, device: torch.device) -> torch.Tensor:
+        if batch_size <= self._max_i_cached_ies_size:
+            # Use pre-allocated buffer
+            if self._cached_ies.device != device:
+                self._cached_ies = self._cached_ies.to(device, non_blocking=True)
+            return self._cached_ies[:batch_size]
+        else:
+            # For very large batches, create new tensor
+            return SO3OutputGrid._compute_ies(batch_size, self.output_rotmats.shape[0], device)
 
     def aggregate_symmetry(self, signal):
         """

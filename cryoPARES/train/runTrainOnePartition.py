@@ -1,3 +1,4 @@
+import gc
 import os
 import subprocess
 import sys
@@ -217,6 +218,10 @@ class TrainerPartition:
         if trainer.is_global_zero and trainer.state.status == TrainerStatus.FINISHED:
             save_train_val_partition_dir = trainer.datamodule.save_train_val_partition_dir
             del trainer
+            del pl_model
+            del datamodule
+            gc.collect()
+            torch.cuda.empty_cache()
             print("Trained finished. Saving model ")
             self._save_training_completion(checkpointer)
             torch.cuda.empty_cache()

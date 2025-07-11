@@ -17,7 +17,7 @@ from cryoPARES.geometry.grids import s2_healpix_grid, so3_near_identity_grid_car
 from cryoPARES.geometry.metrics_angles import nearest_rotmat_idx, rotation_magnitude
 from cryoPARES.geometry.symmetry import getSymmetryGroup
 
-GET_DEBUG_SEED = lambda: torch.Generator().manual_seed(42) # None
+GET_DEBUG_SEED = lambda: None #torch.Generator().manual_seed(42) # None
 
 def s2_irreps(lmax):
     return o3.Irreps([(1, (l, 1)) for l in range(lmax + 1)])

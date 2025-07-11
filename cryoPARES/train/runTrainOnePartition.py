@@ -213,7 +213,7 @@ class TrainerPartition:
         print("Training starts", flush=True)
         trainer.fit(pl_model, datamodule=datamodule, ckpt_path=resume_from_checkpoint)
 
-        trainer.strategy.barrier()
+        trainer.strategy.barrier() #TODO: We probably want to run reconstruct in the main loop
         if trainer.is_global_zero and trainer.state.status == TrainerStatus.FINISHED:
             save_train_val_partition_dir = trainer.datamodule.save_train_val_partition_dir
             del trainer

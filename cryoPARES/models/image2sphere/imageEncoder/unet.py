@@ -501,7 +501,7 @@ class Unet(nn.Module):
             dropout=0,
         )
 
-        if out_channels is not None:
+        if out_channels is not None: #TODO: This can eat a lot of memory
             self.last_layer = ConvolutionalBlock(
                 2, out_channels_first * (2 ** (n_decoder_blocks_removed)), out_channels,
                 kernel_size=1, activation=None, normalization=normalization, preactivation=False,
@@ -522,9 +522,11 @@ class Unet(nn.Module):
 
 if __name__ == "__main__":
     from cryoPARES.datamanager.datamanager import get_example_random_batch
-    batch = get_example_random_batch(1)
+    batch = get_example_random_batch(64)
     x = batch["particle"]
-    model = Unet(x.shape[1], n_blocks=3, out_channels=8,
-                 out_channels_first=32, n_decoder_blocks_removed=1)
-    out = model(x)
+    device = "cuda"
+    model = Unet(x.shape[1],)# n_blocks=3, out_channels=8, out_channels_first=32, n_decoder_blocks_removed=1)
+    model.to(device)
+    out = model(x.to(device))
     print(out.shape)
+    print("DONE")

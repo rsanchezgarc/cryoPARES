@@ -34,6 +34,7 @@ class ImageEncoder(nn.Module):
 
     def instantiateEncoder(self, encoderArtchitecture):
         artchName = encoderArtchitecture.value
+        print(f"{artchName} to be used as image encoder")
         return pyObjectFromStr(f".{artchName}.{artchName[0].upper() + artchName[1:]}")
 
     def forward(self, x):

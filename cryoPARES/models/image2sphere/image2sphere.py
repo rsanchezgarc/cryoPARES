@@ -7,24 +7,18 @@ import numpy as np
 import torch
 from e3nn import o3
 from torch import nn
-from tqdm import tqdm
 
 from cryoPARES.cacheManager import get_cache
 
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.constants import BATCH_PARTICLES_NAME
 from cryoPARES.datamanager.datamanager import get_example_random_batch
-from cryoPARES.geometry.metrics_angles import rotation_magnitude, mean_rot_matrix, rotation_error_rads
+from cryoPARES.geometry.metrics_angles import mean_rot_matrix, rotation_error_rads
 from cryoPARES.geometry.nearest_neigs_sphere import compute_nearest_neighbours
-from cryoPARES.geometry.symmetry import getSymmetryGroup
 from cryoPARES.models.image2sphere.imageEncoder.imageEncoder import ImageEncoder
 from cryoPARES.models.image2sphere.so3Components import S2Conv, SO3Conv, I2SProjector, SO3OutputGrid, SO3Activation
 from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 
-
-
-# print(asdict(main_config.models).keys())
-# breakpoint()
 
 class Image2Sphere(nn.Module):
     '''
@@ -70,7 +64,7 @@ class Image2Sphere(nn.Module):
         out = self.so3_act(out)
 
         self.so3_conv = SO3Conv(f_in=out.shape[1], lmax=lmax)
-        # self.so3_grid = None #Will be set at self._initialize_grid_and_symmetry_components()
+
         self.so3_grid = SO3OutputGrid(lmax=self.lmax, hp_order=self.hp_order_output, symmetry=self.symmetry)
 
         self.symmetry = symmetry.upper()
@@ -78,40 +72,12 @@ class Image2Sphere(nn.Module):
 
         self.enforce_symmetry = enforce_symmetry
 
-        #TODO: The following needs to be refactored, since it is problematic with multigpu. We need to make sure that
-        #TODO: they are always precomputed
-
-        #self._initialize_grid_and_symmetry_components()
+        #TODO: The different caches need to be refactored, since they are problematic with multigpu.
+        # We need to precompute them always
 
         # Register nearest neighbors buffer
         self._initialize_neigs()
         self._initialize_caches()
-
-    def _initialize_grid_and_symmetry_components(self):
-        """Initialize symmetry-related components."""
-        if not self.has_symmetry:
-            self._sym_equiv = None
-            # self.register_buffer("symmetryGroupMatrix", torch.eye(3).unsqueeze(0))
-            self._selected_rotmat_idxs = None
-            self._old_idx_to_new_idx = None
-            self.so3_grid = SO3OutputGrid(self.lmax, self.hp_order_output)
-            return
-
-        # # Using cached compute_symmetry_indices
-        # (so3_grid, symmetryGroupMatrix, sym_equiv,
-        #  selected_rotmat_idxs, old_idx_to_new_idx) = compute_symmetry_indices(self.lmax,
-        #                                                                       self.hp_order_output,
-        #                                                                       self.symmetry)
-
-        self.so3_grid = SO3OutputGrid(lmax=self.lmax, hp_order=self.hp_order_output, symmetry=self.symmetry)
-        # self.register_buffer("symmetryGroupMatrix", symmetryGroupMatrix)
-        # self.register_buffer("_sym_equiv", sym_equiv)
-        # if self.enforce_symmetry:
-        #     self.register_buffer("_selected_rotmat_idxs", selected_rotmat_idxs)
-        #     self.register_buffer("_old_idx_to_new_idx", old_idx_to_new_idx)
-        # else:
-        #     self._selected_rotmat_idxs = None
-        #     self._old_idx_to_new_idx = None
 
     def _initialize_neigs(self, k: int = 10):
         """Initialize nearest neighbors matrix."""
@@ -125,12 +91,8 @@ class Image2Sphere(nn.Module):
         self.register_buffer("_neigs", neigs)
 
     def _initialize_caches(self):
-        # self.register_buffer("_cached_batch_size_ies", torch.tensor(-1, dtype=torch.int64), persistent=False)
-        # self.register_buffer("_cached_ies", torch.empty(0, dtype=torch.int64), persistent=False)
-        # self.register_buffer("_cached_batch_size_range", torch.tensor(-1, dtype=torch.int64), persistent=False)
-        # self.register_buffer("_cached_batch_indices", torch.empty(0, dtype=torch.int64), persistent=False)
-        #TODO: Remove this legacy code
-        return
+        self.register_buffer("_cached_batch_size_range", torch.tensor(-1, dtype=torch.int64), persistent=False)
+        self.register_buffer("_cached_batch_indices", torch.empty(0, dtype=torch.int64), persistent=False)
 
     def predict_wignerDs(self, x):
         """
@@ -226,7 +188,7 @@ class Image2Sphere(nn.Module):
             self._cached_batch_size_range.copy_(torch.tensor(batch_size, device=device))
         return self._cached_batch_indices
 
-    def _get_neigs_matrix(self, k=10): #TOOO: k should be in the config
+    def _get_neigs_matrix(self, k=10): #TODO: k should be in the config
         """
 
         :param k: The number of nearest neighbours to compute
@@ -238,27 +200,6 @@ class Image2Sphere(nn.Module):
                                                cache_dir=main_config.cachedir, n_jobs=1)["nearest_neigbours"]
             self.register_buffer("_neigs", neigs)
         return self._neigs
-
-    # def _get_ies_for_aggregate_symmetry(self, batch_size: int, device: torch.device) -> torch.Tensor:
-    #
-    #     if self._cached_batch_size_ies != batch_size or self._cached_ies.device != device:
-    #         # Update cache
-    #         n_rotmats = self.so3_grid.output_rotmats.shape[0]
-    #         ies = (torch.arange(batch_size, device=device)
-    #                .unsqueeze(-1)
-    #                .expand(-1, n_rotmats)
-    #                .unsqueeze(-1))
-    #         self._cached_ies = ies
-    #         self._cached_batch_size_ies.copy_(torch.tensor(batch_size, device=device))
-    #     return self._cached_ies
-    #
-    # def aggregate_symmetry(self, signal: torch.Tensor) -> torch.Tensor:
-    #     jes = self._sym_equiv
-    #     if jes is None:  # Then symmetry is C1
-    #         return signal
-    #
-    #     ies = self._get_ies_for_aggregate_symmetry(signal.shape[0], signal.device)
-    #     return signal[ies, jes].sum(-1)
 
 
     def compute_probabilities(self, img, hp_order=None):
@@ -297,27 +238,28 @@ class Image2Sphere(nn.Module):
         # TODO: The problem is that pred_rotmats has shape (B, top_k, 3, 3), but gt_rotmat has shape (B,3,3). Is it solved?
         if self.symmetry != "C1":
             n_groupElems = self.so3_grid.symmetryGroupMatrix.shape[0]
-
-            gtrotMats = self.so3_grid.symmetryGroupMatrix[None, ...] @ gt_rotmat[:, None, ...]
-            rotMat_gtIds = self.so3_grid.nearest_rotmat_idx(gtrotMats.view(-1, 3, 3))[-1].view(rotMat_logits.shape[0], -1)
-
             target_ohe = torch.zeros_like(rotMat_logits)
             rows = torch.arange(rotMat_logits.shape[0]).view(-1, 1).repeat(1, n_groupElems)
-            target_ohe[rows, rotMat_gtIds] = 1 / n_groupElems
             loss = nn.functional.cross_entropy(rotMat_logits, target_ohe, reduction="none", label_smoothing=self.label_smoothing)
             with torch.no_grad(): #TODO: Try to use error_rads as part of the loss function
+                gtrotMats = self.so3_grid.symmetryGroupMatrix[None, ...] @ gt_rotmat[:, None, ...]
+                rotMat_gtIds = self.so3_grid.nearest_rotmat_idx(gtrotMats.view(-1, 3, 3))[-1].view(
+                    rotMat_logits.shape[0], -1)
+                target_ohe[rows, rotMat_gtIds] = 1 / n_groupElems
                 error_rads = rotation_error_rads(gtrotMats.view(-1,3,3),
                                                  torch.repeat_interleave(pred_rotmats, n_groupElems, dim=0)[:,0,...])
                 error_rads = error_rads.view(-1, n_groupElems)
                 error_rads = error_rads.min(1).values
 
         else:
-            # find nearest grid point to ground truth rotation matrix
-            rot_idx = self.so3_grid.nearest_rotmat_idx(gt_rotmat)[-1]
-            loss = nn.functional.cross_entropy(rotMat_logits, rot_idx, reduction="none", label_smoothing=self.label_smoothing)
+
             with torch.no_grad():
+                # find nearest grid point to ground truth rotation matrix
+                rot_idx = self.so3_grid.nearest_rotmat_idx(gt_rotmat)[-1]
                 #We will consider top1 only
                 error_rads = rotation_error_rads(gt_rotmat, pred_rotmats[:,0,...])
+            loss = nn.functional.cross_entropy(rotMat_logits, rot_idx, reduction="none",
+                                               label_smoothing=self.label_smoothing)
 
         if per_img_weight is not None:
             loss = loss * per_img_weight.squeeze(-1)
@@ -327,8 +269,8 @@ class Image2Sphere(nn.Module):
         return (wD, rotMat_logits, pred_rotmat_ids, pred_rotmats, maxprobs), loss, error_rads
 
 
-@functools.lru_cache(maxsize=None)
-def create_extraction_mask(lmax, device='cuda'):
+@functools.lru_cache(maxsize=2)
+def create_extraction_mask(lmax, device):
     """
     Create a boolean mask to extract middle columns (m'=0) from flattened Wigner-D matrices.
     This mask is created once and can be reused for all extractions. Used to get the spherical harmonics

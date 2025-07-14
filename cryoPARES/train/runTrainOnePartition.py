@@ -69,7 +69,8 @@ class TrainerPartition:
 
         torch.set_float32_matmul_precision(constants.float32_matmul_precision)
         # Uncomment the next line to reduce fragmentation
-        # os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+        if main_config.train.expandable_segments_GPU_mem:
+            os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
     def _setup_accelerator(self):
         from cryoPARES.utils.torchUtils import accelerator_selector
@@ -245,7 +246,8 @@ class TrainerPartition:
                                   num_workers=num_data_workers,
                                   batch_size=main_config.train.batch_size_for_reconstruct,
                                   use_cuda=main_config.train.cuda_for_reconstruct,
-                                  correct_ctf=True, eps=1e-3, min_denominator_value=1e-4)
+                                  correct_ctf=True, eps=1e-3, min_denominator_value=1e-4,
+                                  float32_matmul_precision=main_config.train.float32_matmul_precision_for_reconstruct)
                     if self.overfit_batches is not None:
                         kwargs["use_only_n_first_batches"] = self.overfit_batches
 

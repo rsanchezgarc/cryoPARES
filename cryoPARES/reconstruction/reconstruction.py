@@ -319,7 +319,8 @@ class ReconstructionParticlesDataset(Dataset):
 def reconstruct_starfile(particles_star_fname: str, symmetry: str, output_fname: str, particles_dir:Optional[str]=None,
                          num_dataworkers: int = 1, batch_size: int = 64, use_cuda: bool = True,
                          correct_ctf: bool = True, eps: float = 1e-3, min_denominator_value: float = 1e-4,
-                         use_only_n_first_batches: Optional[int] = None):
+                         use_only_n_first_batches: Optional[int] = None,
+                         float32_matmul_precision: Optional[str] = None):
     """
 
     :param particles_star_fname: The particles to reconstruct
@@ -333,8 +334,11 @@ def reconstruct_starfile(particles_star_fname: str, symmetry: str, output_fname:
     :param eps: The regularization constant (ideally, this is 1/SNR)
     :param min_denominator_value: Used to prevent division by 0
     :param use_only_n_first_batches: Use only the n first batches to reconstruct
+    :param float32_matmul_precision: Set it to high or medium for speed up at a precision cost
     :return:
     """
+    if float32_matmul_precision is not None:
+        torch.set_float32_matmul_precision(float32_matmul_precision)  # 'high'
 
     device = "cpu" if not use_cuda else "cuda"
     reconstructor = Reconstructor(symmetry=symmetry, correct_ctf=correct_ctf, eps=eps,

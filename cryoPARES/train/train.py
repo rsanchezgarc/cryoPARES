@@ -7,11 +7,13 @@ import torch
 import sys
 import os.path as osp
 import tempfile
-from typing import Optional, List
+from typing import Optional, List, Literal
 
 from cryoPARES import constants
 from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
+from cryoPARES.utils.paths import get_most_recent_file
+
 
 class Trainer:
     @inject_defaults_from_config(main_config.train, update_config_with_args=True)
@@ -70,7 +72,7 @@ class Trainer:
         # assert os.path.isdir(train_save_dir), f"Error, training directory {train_save_dir} not found!"
         os.makedirs(train_save_dir, exist_ok=True)
         if self.continue_checkpoint_dir is not None:
-            _train_save_dir, version_dir = osp.split(self.continue_checkpoint_dir)
+            _train_save_dir, version_dir = osp.split(self.continue_checkpoint_dir.rstrip("/"))
             if train_save_dir is not None:
                 assert _train_save_dir == train_save_dir, (
                     f"Error, when continuing a checkpoint, _train_save_dir ({_train_save_dir}) !="
@@ -142,6 +144,13 @@ class Trainer:
         root_path = osp.dirname(osp.dirname(osp.dirname(module_path)))
         _copyCode(root_path, osp.join(copycodedir, "cryoPARES"))
 
+    def get_continue_checkpoint_fname(self, partition:Literal["allParticles", "half1", "half2"]):
+        if self.continue_checkpoint_dir:
+            return get_most_recent_file(os.path.join(self.continue_checkpoint_dir, partition, "checkpoints"), ".ckpt")
+
+        else:
+            return None
+
     def run(self, config_args):
         """
 
@@ -166,6 +175,8 @@ class Trainer:
                     # simulatedParticles = simulate_particles(self.map_fname_for_simulated_pretraining, tmpdir)
                     # execute_trainOnePartition() #TODO: Fill in this call
                     raise NotImplementedError()
+
+
                 print(f"\nExecuting training for partition {partition}")
                 execute_trainOnePartition(
                     symmetry=self.symmetry,
@@ -174,7 +185,7 @@ class Trainer:
                     particles_dir=self.particles_dir,
                     n_epochs=self.n_epochs,
                     partition=partition,
-                    continue_checkpoint_fname=self.continue_checkpoint_dir,
+                    continue_checkpoint_fname=self.get_continue_checkpoint_fname(partition),
                     finetune_checkpoint_fname=self.finetune_checkpoint_dir,
                     compile_model=self.compile_model,
                     val_check_interval=self.val_check_interval,

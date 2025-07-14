@@ -111,7 +111,7 @@ class TrainerPartition:
             StochasticWeightAveraging(
                 annealing_epochs=self.train_config.swalr_annelaing_n_epochs,
                 swa_epoch_start=self.train_config.swalr_begin_epoch,
-                swa_lrs=self.train_config.min_learning_rate_factor * 0.5 * self.train_config.learning_rate
+                swa_lrs= 1.1 * self.train_config.min_learning_rate_factor * self.train_config.learning_rate
             )
         ]
 
@@ -123,7 +123,7 @@ class TrainerPartition:
     def _setup_trainer(self, accel, dev_count, loggers, callbacks):
         from cryoPARES.utils import plUtils
         return pl.Trainer(
-            max_epochs=self.train_config.n_epochs,
+            max_epochs=max(0, self.train_config.n_epochs - 1),
             logger=loggers,
             devices=dev_count,
             accelerator=accel,

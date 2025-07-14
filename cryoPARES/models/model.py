@@ -255,7 +255,10 @@ class PlModel(RotationPredictionMixin, pl.LightningModule):
         }
         return confid
 
-    def on_fit_end(self) -> None:
+    def on_train_end(self) -> None:
+        from cryoPARES.models.directionalNormalizer.directionalNormalizer import DirectionalPercentileNormalizer
+        NORMALIZER_HP_ORDER = 2  # TODO: Move to config
+
         print("Preparing directional percentiles")
         device = self.trainer.strategy.root_device
         self.so3model.to(device)
@@ -271,19 +274,19 @@ class PlModel(RotationPredictionMixin, pl.LightningModule):
         gtRotmats = []
         scores = []
         self.eval()
-        with (torch.inference_mode()):
+        with torch.inference_mode():
             for dataloader_idx, dataloader in enumerate(val_dataloaders):
                 for batch_idx, batch in enumerate(tqdm(dataloader)):
                     batch = self.transfer_batch_to_device(batch, device, dataloader_idx)
                     imgs = batch[self.BATCH_PARTICLES_NAME]
                     _, _, _, pred_rotmats, maxprobs = self.forward(imgs, batch_idx, dataloader_idx, top_k=10)
-                    predRotMats.append(pred_rotmats[:,0,...].cpu()) # I am only using topK=1 for the clusters in the normalizer
+                    predRotMats.append(pred_rotmats[:,0,...]) # I am only using topK=1 for the clusters in the normalizer
 
                     topKscore = maxprobs.sum(-1) #But we use top-10 for confidence
                     scores.append(topKscore)
 
                     gt_rotmats = batch[self.BATCH_POSE_NAME][0]
-                    gtRotmats.append(gt_rotmats.cpu())
+                    gtRotmats.append(gt_rotmats)
 
                     if self.trainer.overfit_batches is not None and batch_idx > self.trainer.overfit_batches:
                         break
@@ -291,23 +294,17 @@ class PlModel(RotationPredictionMixin, pl.LightningModule):
             gtRotmats = torch.concat(gtRotmats)
             scores = torch.concat(scores)
 
-            from cryoPARES.models.directionalNormalizer.directionalNormalizer import DirectionalPercentileNormalizer
-            NORMALIZER_HP_ORDER = 2 #TODO: Move to config
             dirname = os.path.dirname(self.trainer.checkpoint_callback.best_model_path)
             precentile_model_savename = os.path.join(dirname, constants.BEST_DIRECTIONAL_NORMALIZER)
 
             if self.trainer.world_size > 1:
-                gathered_predRotMats = self.all_gather(predRotMats)
-                gathered_gtRotmats = self.all_gather(gtRotmats)
-                gathered_scores = self.all_gather(scores)
+                predRotMats = self.all_gather(predRotMats).reshape(-1, *predRotMats.shape[1:])
+                gtRotmats = self.all_gather(gtRotmats).reshape(-1, *gtRotmats.shape[1:])
+                scores = self.all_gather(scores).reshape(-1, *scores.shape[1:])
 
-                if self.trainer.is_global_zero:
-                    normalizer = DirectionalPercentileNormalizer(symmetry=self.symmetry, hp_order=NORMALIZER_HP_ORDER)
-                    normalizer.fit(gathered_predRotMats, gathered_scores, gathered_gtRotmats)
-                    torch.save(normalizer, precentile_model_savename)
-            else:
+            if self.trainer.is_global_zero:
                 normalizer = DirectionalPercentileNormalizer(symmetry=self.symmetry, hp_order=NORMALIZER_HP_ORDER)
-                normalizer.fit(predRotMats, scores, gtRotmats)
+                normalizer.fit(predRotMats.cpu(), scores.cpu(), gtRotmats.cpu())
                 torch.save(normalizer, precentile_model_savename)
 
 

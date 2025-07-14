@@ -122,7 +122,7 @@ class DirectionalPercentileNormalizer(nn.Module):
         they are more likely to be correct.
 
         Args:
-            pred_rotmats: Predicted SO(3) rotmats for particles
+            pred_rotmats: Predicted SO(3) rotmats for particles. Shape Bx3x3
             scores: Prediction scores for particles
             gt_rotmats: Ground truth SO(3) rotmats (if available for training)
             good_particles_percentile: Percentile of particles to use when no ground truth
@@ -130,6 +130,9 @@ class DirectionalPercentileNormalizer(nn.Module):
             min_particles_per_cone: Minimum number of particles required for reliable statistics
                                    Cones with fewer particles will use global statistics
         """
+        if pred_rotmats.shape == 4:
+            assert pred_rotmats.size(1) == 1
+            pred_rotmats = pred_rotmats[:,0,...]
         # Get cone indices for predictions
         cone_indices = self.rotmats_to_cone_id(pred_rotmats)
 

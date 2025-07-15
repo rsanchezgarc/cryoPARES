@@ -178,7 +178,7 @@ class ConfigOverrideSystem:
 
                 # If value is a dict and current value is a dataclass, recurse
                 if isinstance(value, dict) and is_dataclass(current_value):
-                    ConfigOverrideSystem.apply_overrides(current_value, value, current_path)
+                    ConfigOverrideSystem.apply_overrides(current_value, value, current_path, verbose=verbose)
                 else:
                     # Direct assignment
                     try:
@@ -209,9 +209,20 @@ class ConfigOverrideSystem:
                     f"Warning: Config object '{path or config.__class__.__name__}' has no attribute '{key}'. Full path: '{current_path}'")
 
     @staticmethod
-    def update_config_from_file(config, config_fname, verbose=True):
+    def update_config_from_file(config, config_fname, drop_paths=None, verbose=False):
         overrides = ConfigOverrideSystem.load_yaml_config(config_fname)
+        if drop_paths:
+            for path in drop_paths:
+                name = None
+                current_conf = overrides
+                for name in path.split("."):
+                    parent_config = current_conf
+                    current_conf = current_conf[name]
+                if name:
+                    del parent_config[name]
+
         ConfigOverrideSystem.apply_overrides(config, overrides, verbose=verbose)
+        return config
 
 def merge_dicts(d1: Dict[str, Any], d2: Dict[str, Any]) -> Dict[str, Any]:
     """Recursively merge two dictionaries."""
@@ -252,14 +263,19 @@ def export_config_to_yaml(config: Any, filepath: str) -> None:
 class ConfigArgumentParser(AutoArgumentParser):
     """AutoArgumentParser with integrated config override support."""
 
-    def __init__(self, *args, config_obj: Optional[Any] = main_config, **kwargs):
+    def __init__(self, verbose=False, *args, config_obj: Optional[Any] = main_config, **kwargs):
         super().__init__(*args, **kwargs)
+        self.verbose = verbose
         self.config_obj = config_obj
         self._config_arg_names = []
         self._config_param_mappings = {}  # Maps arg names to config paths
 
         if config_obj:
             self._add_config_args()
+
+    def print(self, *args, **kwargs):
+        if self.verbose:
+            print(*args, **kwargs)
 
     def _add_config_args(self):
         """Add config-related arguments to the parser."""
@@ -557,8 +573,8 @@ class ConfigArgumentParser(AutoArgumentParser):
                             value_to_set = Path(arg_value)
 
                         setattr(target, keys[-1], value_to_set)
-                        print(
-                            f"Set {config_path} = {value_to_set} (from direct arg --{arg_name.replace('_', '-')})")  # TODO: Enable verbosity
+                        self.print(
+                            f"Set {config_path} = {value_to_set} (from direct arg --{arg_name.replace('_', '-')})")
                     except Exception as e:
                         print(
                             f"Warning: Failed to set config attribute '{config_path}' from direct argument '--{arg_name.replace('_', '-')}' to '{arg_value}': {e}")
@@ -580,7 +596,7 @@ class ConfigArgumentParser(AutoArgumentParser):
                         file_overrides = ConfigOverrideSystem.load_yaml_config(config_item)
                         # Merge file overrides
                         overrides = merge_dicts(overrides, file_overrides)
-                        print(f"Loaded config from {config_item}")
+                        self.print(f"Loaded config from {config_item}")
                     else:
                         print(f"Warning: Config file {config_item} not found. Skipping.")
                 else:
@@ -592,5 +608,5 @@ class ConfigArgumentParser(AutoArgumentParser):
                         print(f"Warning: Invalid config assignment '{config_item}'. Skipping. Error: {e}")
 
             if overrides:
-                print("\nApplying config overrides from --config argument:")  # TODO: add a verbose flag
-                ConfigOverrideSystem.apply_overrides(self.config_obj, overrides)
+                self.print("\nApplying config overrides from --config argument:")
+                ConfigOverrideSystem.apply_overrides(self.config_obj, overrides, verbose=self.verbose)

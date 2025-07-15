@@ -153,6 +153,7 @@ class TrainerPartition:
         from cryoPARES.models.model import PlModel
         kwargs = self._kwargs_for_loading()
         if self.continue_checkpoint_fname or self.finetune_checkpoint_fname:
+            raise NotImplementedError("It seems is overwriting metrics.csv, and it is probably not picking up the right LR ")
             kwargs["map_location"] = torch.device("cpu")
             if self.continue_checkpoint_fname is None:
                 load_fname = self.finetune_checkpoint_fname

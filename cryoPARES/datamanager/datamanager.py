@@ -40,9 +40,9 @@ class DataManager(pl.LightningDataModule):
     DataManager: A LightningDataModule that wraps a ParticlesDataset
     """
     @inject_defaults_from_config(main_config.datamanager, update_config_with_args=False)
-    def __init__(self, star_fnames: List[FNAME_TYPE],
+    def __init__(self, star_fnames: List[FNAME_TYPE] | FNAME_TYPE,
                  symmetry:str,
-                 particles_dir: Optional[List[FNAME_TYPE]],
+                 particles_dir: Optional[List[FNAME_TYPE]] | FNAME_TYPE,
                  halfset: Optional[Literal[1, 2]],
                  batch_size: int,
                  save_train_val_partition_dir: Optional[FNAME_TYPE],

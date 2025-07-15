@@ -6,8 +6,8 @@ from torch import nn, ScriptModule
 from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.projmatching.projMatching import ProjectionMatcher
-from cryoPARES.reconstruction.backup_reconstruction import Reconstructor
-from tensorDataBuffer import StreamingBuffer
+from cryoPARES.reconstruction.reconstruction import Reconstructor
+from cryoPARES.inference.nnetWorkers.tensorDataBuffer import StreamingBuffer
 from cryoPARES.models.model import RotationPredictionMixin
 from cryoPARES.constants import (BATCH_IDS_NAME, BATCH_PARTICLES_NAME, BATCH_ORI_IMAGE_NAME,
                                  BATCH_ORI_CTF_NAME, BATCH_MD_NAME)
@@ -78,11 +78,9 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
         else:
             out = (batch_to_add['ids'], batch_to_add['rotmats'], None, batch_to_add['maxprobs'],
                     batch_to_add['norm_nn_score'])
-
-        if self.reconstructor is not None: #TODO: we might want this running on a torch.cuda.Stream(device=device)
-            self.reconstructor._backproject_batch(fullSizeImg, fullSizeCtfs,
-                           rotMats=out[1], hwShiftAngs=out[1], zyx_matrices=False)
-
+            if self.reconstructor is not None:
+                raise NotImplementedError("Error, at the moment, local refinement is needed before"
+                                          "reconstruction")
         return out
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
@@ -101,6 +99,11 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
         (maxCorrs, predRotMats, predShiftsAngs,
          comparedWeight) = self.localRefiner.forward(tensors['imgs'], tensors['ctfs'], tensors['rotmats'])
         score = tensors['maxprobs'] * comparedWeight
+
+        if self.reconstructor is not None:
+            self.reconstructor._backproject_batch(tensors['imgs'], tensors['ctfs'],
+                           rotMats=predRotMats, hwShiftAngs=predShiftsAngs, zyx_matrices=False)
+
         return md['ids'], predRotMats, predShiftsAngs, score, tensors['norm_nn_score']
 
     def flush(self):

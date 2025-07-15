@@ -57,6 +57,7 @@ class ProjectionMatcher(nn.Module):
 
         self.grid_distance_degs = grid_distance_degs
         self.grid_step_degs = grid_step_degs
+        print(f"Projection matching grid: +/-{self.grid_distance_degs/2} (step {self.grid_step_degs}) degs")
         self.filter_resolution_angst = filter_resolution_angst
         self.max_shift_fraction = max_shift_fraction
         self.return_top_k = return_top_k
@@ -261,7 +262,7 @@ def _get_begin_end_from_max_shift(image_shape, max_shift):
     return h0, h1, w0, w1
 
 #TODO: we should define a _extract_ccor_maxFACTORY to use main_config.projmatching properly
-@torch.compile(fullgraph=True, disable=main_config.projmatching.disable_compile_analyze_cc,
+@torch.compile(disable=main_config.projmatching.disable_compile_analyze_cc,
                mode=main_config.projmatching.compile_analyze_cc_mode)
 def _extract_ccor_max(corrs, max_shift_fraction):
     pixelShiftsXY = torch.empty(corrs.shape[:-2] + (2,), device=corrs.device, dtype=torch.int64)

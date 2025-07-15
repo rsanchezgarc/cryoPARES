@@ -58,6 +58,8 @@ class Reconstructor(nn.Module):
         self.register_buffer('weights', weights)
         self.register_buffer('ctfsq', ctfsq)
 
+        self._initialized = False
+
     def get_device(self):
         return self.dummy_buffer.device
 
@@ -95,6 +97,7 @@ class Reconstructor(nn.Module):
             self.weights = torch.zeros((self.box_size, self.box_size, nkx), dtype=torch.float32, device=self.get_device())
             self.ctfsq = torch.zeros_like(self.weights, dtype=torch.float32, device=self.get_device())
 
+        self._initialized = True
 
     def _expand_with_symmetry(self, imgs, ctf, rotMats, hwShiftAngs):
         """
@@ -189,6 +192,12 @@ class Reconstructor(nn.Module):
             hwShiftAngs (torch.Tensor): The translational shifts for each particle.
             zyx_matrices (bool): Flag indicating the rotation matrix format.
         """
+        #TODO: Implement confidence weighting
+        assert self._initialized, "Error, Reconstructor was not initialized"
+        rotMats_shape = rotMats.shape
+        assert rotMats_shape[:2] == hwShiftAngs.shape[:2] and rotMats.shape[0] == imgs.shape[0], \
+                        f"{rotMats_shape}, {hwShiftAngs.shape}, {imgs.shape}"
+
         device = self.get_device()
         imgs = imgs.to(device, non_blocking=True)
         rotMats = rotMats.to(device, non_blocking=True)
@@ -199,6 +208,11 @@ class Reconstructor(nn.Module):
         imgs = torch.fft.rfftn(imgs, dim=(-2, -1))
         imgs = torch.fft.fftshift(imgs, dim=(-2,))  # Actual fftshift
 
+        if len(rotMats_shape) == 4:
+            imgs = imgs.unsqueeze(1).expand(-1, rotMats_shape[1], -1, -1).view(-1, *imgs.shape[-2:])
+            ctf = ctf.unsqueeze(1).expand(-1, rotMats_shape[1], -1, -1).view(-1, *ctf.shape[-2:])
+            rotMats = rotMats.view(-1, 3, 3)
+            hwShiftAngs = hwShiftAngs.view(-1, 2)
         # Apply translational shifts
         imgs = fourier_shift_dft_2d(
             dft=imgs,

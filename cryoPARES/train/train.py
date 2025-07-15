@@ -151,6 +151,12 @@ class Trainer:
         else:
             return None
 
+    def get_finetune_checkpoint_fname(self, partition:Literal["allParticles", "half1", "half2"]):
+        if self.finetune_checkpoint_dir:
+            return get_most_recent_file(os.path.join(self.finetune_checkpoint_dir, partition, "checkpoints"), ".ckpt")
+        else:
+            return None
+
     def run(self, config_args):
         """
 
@@ -173,7 +179,7 @@ class Trainer:
                 if self.map_fname_for_simulated_pretraining:
                     # TODO: Implement simulate_particles
                     # simulatedParticles = simulate_particles(self.map_fname_for_simulated_pretraining, tmpdir)
-                    # execute_trainOnePartition() #TODO: Fill in this call
+                    # execute_trainOnePartition() #TODO: Fill in this call. At the moment we do simulation externally
                     raise NotImplementedError()
 
 
@@ -186,7 +192,7 @@ class Trainer:
                     n_epochs=self.n_epochs,
                     partition=partition,
                     continue_checkpoint_fname=self.get_continue_checkpoint_fname(partition),
-                    finetune_checkpoint_fname=self.finetune_checkpoint_dir,
+                    finetune_checkpoint_fname=self.get_finetune_checkpoint_fname(partition),
                     compile_model=self.compile_model,
                     val_check_interval=self.val_check_interval,
                     overfit_batches=self.overfit_batches,
@@ -214,7 +220,7 @@ if __name__ == "__main__":
     print("---------------------------------------")
     from cryoPARES.configManager.configParser import ConfigArgumentParser, export_config_to_yaml
 
-    parser = ConfigArgumentParser(prog="train_cryoPARES", config_obj=main_config)
+    parser = ConfigArgumentParser(prog="train_cryoPARES", config_obj=main_config, verbose=True)
     parser.add_args_from_function(Trainer.__init__)
     args, config_args = parser.parse_args()
     Trainer(**vars(args)).run(config_args)

@@ -2,7 +2,7 @@ import os.path as osp
 import subprocess
 
 from starstack.particlesStar import ParticlesStarSet, split_particle_and_fname
-from typing import Union, Optional
+from typing import Union, Optional, List
 from os import PathLike
 
 from cryoPARES.constants import BATCH_PARTICLES_NAME
@@ -19,23 +19,28 @@ class ParticlesRelionStarDataset(ParticlesDataset):
     <br>
     """
 
-    def __init__(self, particles_star_fname: Union[PathLike, str], particles_dir: Optional[str], **kwargs):
+    def __init__(self, particles_star_fname: Union[PathLike, str], particles_dir: Optional[str],
+                 subset_idxs: Optional[List[int]] = None
+                 , **kwargs):
         """
         ##Builder
 
         Args:
             particles_star_fname (Union[PathLike, str]): The star filename to use
             particles_dir (str): The root directory where the stack files are
-            symmetry (str): The point symmetry of the macromolecule
-            halfset: [1,2,None]
+            subset_idxs (Optional[List[int]] ): The subset of idxs to use
         """
 
         super().__init__(**kwargs)
         self._star_fname = str(particles_star_fname)
         self._datadir = osp.expanduser(particles_dir) if particles_dir is not None else None
+        self.subset_idxs = subset_idxs
 
     def load_ParticlesStarSet(self):
         ps =  ParticlesStarSet(starFname=self._star_fname, particlesDir=self._datadir)
+        if self.subset_idxs is not None:
+            ps = ps.createSubset(idxs=self.subset_idxs)
+
         ulimit = subprocess.run(["ulimit -n"], check=True, capture_output=True, shell=True)
         assert ulimit.returncode == 0, "Error, ulimit -n command failed"
         ulimit = int(ulimit.stdout.decode().strip())

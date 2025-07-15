@@ -1,4 +1,6 @@
 import argparse
+import functools
+
 import yaml
 import json
 from dataclasses import dataclass, fields, is_dataclass
@@ -393,6 +395,34 @@ class ConfigArgumentParser(AutoArgumentParser):
                         return result
         return None
 
+    def _get_value_from_path(self, config_path: str) -> Any:
+        """Navigate a dot-separated path to get a value from the config object."""
+        try:
+            keys = config_path.split('.')
+            return functools.reduce(getattr, keys, self.config_obj)
+        except AttributeError:
+            return None # Or raise an error
+
+    def _update_defaults_from_config(self, args: argparse.Namespace, sys_argv: List[str]):
+        """
+        After parsing, update the defaults in the 'args' namespace with any
+        values that were changed via --config overrides, but only if the direct
+        argument was not provided by the user.
+        """
+        self.print("\nRe-checking defaults against config overrides...")
+        for arg_name, config_path in self._config_param_mappings.items():
+            # Check if the arg exists in the namespace and was NOT provided on the CLI
+            if hasattr(args, arg_name) and not self._was_arg_provided(arg_name, sys_argv):
+                # Get the potentially updated value from the config object
+                new_default = self._get_value_from_path(config_path)
+                current_val = getattr(args, arg_name)
+
+                # If the value in the config is different from the stale default, update it
+                if new_default is not None and new_default != current_val:
+                    setattr(args, arg_name, new_default)
+                    self.print(
+                        f"Updated default for '{arg_name}' from '{current_val}' to '{new_default}' (from config override)")
+
     def parse_args(self, args=None, namespace=None):
         """Parse arguments, process config overrides, and return cleaned args."""
         # Capture original sys.argv for _was_arg_provided if args is None
@@ -425,6 +455,9 @@ class ConfigArgumentParser(AutoArgumentParser):
         # Process --config (YAML files and key=value assignments) first.
         # These are considered lower precedence than direct command-line arguments.
         self._process_config_args(parsed_args)
+
+        # Update the defaults in the parsed_args namespace based on the just-processed config.
+        self._update_defaults_from_config(parsed_args, _original_sys_argv)
 
         # Check for conflicts between direct args and config overrides.
         # This must happen after _process_config_args because we need to know

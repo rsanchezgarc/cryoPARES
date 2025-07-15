@@ -15,7 +15,6 @@ _RECONSTRUCTOR = None
 
 def worker(worker_id, *args, **kwargs):
     try:
-        # Your existing worker code here
         _worker(worker_id, *args, **kwargs)
     except Exception as e:
         print(f"[Worker {worker_id}] Exception occurred: {e}", file=sys.stderr)
@@ -187,15 +186,6 @@ def reconstruct_starfile(particles_star_fname: str, symmetry: str, output_fname:
                     p.terminate()
             sys.exit(1)
 
-    #     # Wait for all processes to complete
-    #     error = False
-    #     for p in processes:
-    #         p.join()
-    #         error = error or (p.exitcode != 0)
-    #
-    # if error:
-    #     print("One of the workers died!!")
-    #     sys.exit(1)
 
     print("Backprojection done. Reconstructing")
 

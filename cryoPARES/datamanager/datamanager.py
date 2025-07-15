@@ -54,7 +54,8 @@ class DataManager(pl.LightningDataModule):
                  num_data_workers: int = CONFIG_PARAM(),
                  augment_train: bool = CONFIG_PARAM(),
                  only_first_dataset_for_validation: bool = CONFIG_PARAM(),
-                 return_ori_imagen: bool = False
+                 return_ori_imagen: bool = False,
+                 subset_idxs: Optional[List[int]] = None
                  ):
 
         super().__init__()
@@ -75,6 +76,7 @@ class DataManager(pl.LightningDataModule):
         self.augment_train = augment_train
         self.only_first_dataset_for_validation = only_first_dataset_for_validation
         self.return_ori_imagen = return_ori_imagen
+        self.subset_idxs = subset_idxs
 
         if self.augment_train:
             from cryoPARES.datamanager.augmentations import Augmenter
@@ -109,7 +111,8 @@ class DataManager(pl.LightningDataModule):
             mrcsDataset = ParticlesRelionStarDataset(particles_star_fname=partFname, particles_dir=partDir,
                                                      symmetry=self.symmetry, halfset=self.halfset,
                                                      store_data_in_memory=store_data_in_memory,
-                                                     return_ori_imagen=self.return_ori_imagen)
+                                                     return_ori_imagen=self.return_ori_imagen,
+                                                     subset_idxs=self.subset_idxs)
 
             if self.is_global_zero and self.save_train_val_partition_dir is not None:
                 dirname = osp.join(self.save_train_val_partition_dir, partitionName if partitionName is not None else "full")
@@ -124,7 +127,7 @@ class DataManager(pl.LightningDataModule):
         dataset = ConcatDataset(datasets)
         return dataset
 
-    def setup_distributed(self, world_size: int, rank: int):
+    def setup_distributed(self, world_size: int, rank: int): #TODO: This is probably not needed
         """Setup distributed inference.
 
         Args:
@@ -140,7 +143,7 @@ class DataManager(pl.LightningDataModule):
         # If we're in distributed mode (world_size and rank are set)
         if hasattr(self, 'world_size') and hasattr(self, 'rank'):
             # Override any provided sampler with DistributedSampler
-            sampler = DistributedSampler(
+            sampler = DistributedSampler( #TODO: This is probably not needed
                 dataset,
                 num_replicas=self.world_size,
                 rank=self.rank,

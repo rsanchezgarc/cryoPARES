@@ -195,7 +195,7 @@ class Reconstructor(nn.Module):
         #TODO: Implement confidence weighting
         assert self._initialized, "Error, Reconstructor was not initialized"
         rotMats_shape = rotMats.shape
-        assert rotMats_shape[:2] == hwShiftAngs.shape[:2] and rotMats.shape[0] == imgs.shape[0], \
+        assert rotMats_shape[:-2] == hwShiftAngs.shape[:-1] and rotMats.shape[0] == imgs.shape[0], \
                         f"{rotMats_shape}, {hwShiftAngs.shape}, {imgs.shape}"
 
         device = self.get_device()

@@ -20,9 +20,10 @@ from cryoPARES.models.model import PlModel
 from cryoPARES.datamanager.datamanager import DataManager
 from cryoPARES.projmatching.projMatching import ProjectionMatcher
 from cryoPARES.reconstruction.reconstruction import Reconstructor
+from cryoPARES.utils.paths import get_most_recent_file
 
 
-class PartitionInferencer:
+class SingleInferencer:
 
     @inject_defaults_from_config(main_config.inference, update_config_with_args=True)
     def __init__(self,
@@ -41,7 +42,8 @@ class PartitionInferencer:
                  directional_zscore_thr: Optional[float] = CONFIG_PARAM(),
                  perform_localrefinement: bool = CONFIG_PARAM(),
                  perform_reconstruction: bool = CONFIG_PARAM(),
-                 update_progessbar_n_batches: int = CONFIG_PARAM()
+                 update_progessbar_n_batches: int = CONFIG_PARAM(),
+                 subset_idxs: Optional[List[int]] = None,
                  ):
         """
 
@@ -61,6 +63,7 @@ class PartitionInferencer:
         :param perform_localrefinement:
         :param perform_reconstruction:
         :param update_progessbar_n_batches:
+        :param subset_idxs:
         """
 
         self.particles_star_fname = particles_star_fname
@@ -83,9 +86,15 @@ class PartitionInferencer:
         self.perform_reconstruction = perform_reconstruction
         self.update_progessbar_n_batches = update_progessbar_n_batches
 
-        os.makedirs(results_dir, exist_ok=True)
+        if results_dir is not None:
+            os.makedirs(results_dir, exist_ok=True)
 
         self._setup_accelerator()
+        self._pbar = None
+        self._model = None
+        self._reconstructor = None
+        self._datamanager = None
+        self._subset_idxs = subset_idxs
 
     def _setup_accelerator(self):
         """Setup the computation device and count."""
@@ -100,6 +109,15 @@ class PartitionInferencer:
         torch.set_num_threads(max(1, torch.get_num_threads() // device_count))
 
         self.device, self.device_count = accelerator, device_count
+
+    def _setup_reconstructor(self, symmetry: Optional[str]= None):
+        if symmetry is None:
+            symmetry = self._get_symmetry()
+        reconstructor = Reconstructor(symmetry=symmetry)
+        particlesDataset = reconstructor._get_reconstructionParticlesDataset(self.particles_star_fname,
+                                                                             self.particles_dir)
+        self._reconstructor = reconstructor
+        return reconstructor, particlesDataset
 
     def _setup_model(self, rank: Optional[int] = None):
         """Setup the model for inference."""
@@ -121,8 +139,7 @@ class PartitionInferencer:
             localRefiner = None
 
         if self.perform_reconstruction:
-            reconstructor = Reconstructor(symmetry=so3Model.symmetry)
-            reconstructor._get_reconstructionParticlesDataset(self.particles_star_fname, self.particles_dir)
+            reconstructor, particlesDataset = self._setup_reconstructor(so3Model.symmetry)
         else:
             reconstructor = None
 
@@ -149,9 +166,19 @@ class PartitionInferencer:
             model = torch.compile(model)
 
         model.eval()
+        self._model = model
         return model
 
-    def _setup_dataloader(self, rank: Optional[int] = None, world_size: Optional[int] = None):
+    def _get_symmetry(self):
+        hparams = os.path.join(self.checkpoint_dir, self.halfset, "hparams.yaml")
+        try:
+            with open(hparams) as f:
+                symmetry = yaml.safe_load(f)["symmetry"]
+            return symmetry
+        except (FileNotFoundError, yaml.YAMLError, KeyError) as e:
+            raise RuntimeError(f"Failed to load symmetry from {hparams}: {e}")
+
+    def _get_datamanager(self, rank: Optional[int] = None):
         """Setup the dataloader for inference."""
         halfset = None
         if self.halfset == "half1":
@@ -159,13 +186,7 @@ class PartitionInferencer:
         elif self.halfset == "half2":
             halfset = 2
 
-        hparams = os.path.join(self.checkpoint_dir, self.halfset, "hparams.yaml")
-        try:
-            with open(hparams) as f:
-                symmetry = yaml.safe_load(f)["symmetry"]
-        except (FileNotFoundError, yaml.YAMLError, KeyError) as e:
-            raise RuntimeError(f"Failed to load symmetry from {hparams}: {e}")
-
+        symmetry = self._get_symmetry()
         datamanager = DataManager(
             star_fnames=self.particles_star_fname,
             symmetry=symmetry,
@@ -175,13 +196,14 @@ class PartitionInferencer:
             halfset=halfset,
             is_global_zero=rank == 0 if rank is not None else True,
             save_train_val_partition_dir=None,  # Not needed for inference
-            return_ori_imagen=True #Needed for inference
+            return_ori_imagen=True, #Needed for inference,
+            subset_idxs=self._subset_idxs
         )
+        return datamanager
 
-        if rank is not None and world_size is not None:
-            datamanager.setup_distributed(world_size, rank)
-
-        return datamanager.predict_dataloader()
+    def _setup_dataloader(self, rank: Optional[int] = None):
+        self._datamanager = self._get_datamanager(rank)
+        return  self._datamanager.predict_dataloader()
 
     def _process_batch(self, model: PlModel, batch: Dict[str, Any] | None, batch_idx: int):
         """Process a single batch of data using predict_step."""
@@ -211,19 +233,27 @@ class PartitionInferencer:
 
     def run(self):
         if self.halfset == "allParticles":
+            out_list = []
             self.halfset = "half1"
             print(f"Running inference for {self.halfset}")
-            self._run()
-
+            out = self._run()
+            out_list.append(out)
             self.halfset = "half2"
             print(f"Running inference for {self.halfset}")
-            self._run()
+            out = self._run()
+            out_list.append(out)
+            return out
         else:
             return self._run()
 
+    def _get_pbar(self, total):
+        if self._pbar is None:
+            return tqdm(total=total, desc="Processing batches")
+        else:
+            return self._pbar
+
     def _run(self):
         """Main entry point for running async inference."""
-
 
         # Get total dataset info
         dataloader = self._setup_dataloader()
@@ -234,7 +264,7 @@ class PartitionInferencer:
 
         model = self._setup_model()
         all_results = {}
-        pbar = tqdm(total=total_batches, desc="Processing batches")
+        pbar = self._get_pbar(total_batches)
         try:
             with torch.inference_mode():
                 for batch_idx, batch in enumerate(dataloader):
@@ -245,16 +275,15 @@ class PartitionInferencer:
                 result = self._process_batch(model, batch=None, batch_idx=-1) #This flushes the buffer
                 if result:
                     all_results[-1] = result
-            if self.perform_reconstruction:
+            if self.perform_reconstruction and self.results_dir is not None:
                 out_fname = os.path.join(self.results_dir, f"reconstruction_{self.halfset}_nnet.mrc")
                 model.reconstructor.generate_volume(out_fname)
 
             # Aggregate results and save to STAR files
-            self._save_results(all_results, dataset)
+            particles_md = self._save_results(all_results, dataset)
+            return particles_md
         finally:
             pbar.close()
-
-
 
 
     def _save_results(self, all_results: Dict[int, Any], dataset):
@@ -314,9 +343,11 @@ class PartitionInferencer:
                 basename = os.path.basename(particlesSet.starFname).removesuffix(".star")
             else:
                 basename = "particles%d"%datIdx
-            out_fname = os.path.join(self.results_dir, basename + f"_{self.halfset}_nnet.star")
-            print(f"Results were saved at {out_fname}")
-            particlesSet.save(out_fname)
+            if self.results_dir is not None:
+                out_fname = os.path.join(self.results_dir, basename + f"_{self.halfset}_nnet.star")
+                print(f"Results were saved at {out_fname}")
+                particlesSet.save(out_fname)
+            return particles_md
 
     def __enter__(self):
         return self
@@ -325,7 +356,7 @@ class PartitionInferencer:
         return False  # Don't suppress exceptions
 
 if __name__ == "__main__":
-    os.environ[constants.PROJECT_NAME + "__ENTRY_POINT"] = "staticNnetInference.py"
+    os.environ[constants.SCRIPT_ENTRY_POINT] = "inference.py"
     print("---------------------------------------")
     print(" ".join(sys.argv))
     print("---------------------------------------")
@@ -334,13 +365,13 @@ if __name__ == "__main__":
 
     parser = ConfigArgumentParser(prog="infer_cryoPARES", description="Run inference with cryoPARES model",
                                   config_obj=main_config)
-    parser.add_args_from_function(PartitionInferencer.__init__)
+    parser.add_args_from_function(SingleInferencer.__init__)
     args, config_args = parser.parse_args()
-
-    config_fname = max(glob.glob(os.path.join(args.checkpoint_dir, "configs_*.yml")), key=os.path.getmtime)
+    assert os.path.isdir(args.checkpoint_dir), f"Error, checkpoint_dir {args.checkpoint_dir} not found"
+    config_fname = get_most_recent_file(args.checkpoint_dir, "configs_*.yml") #max(glob.glob(os.path.join(args.checkpoint_dir, "configs_*.yml")), key=os.path.getmtime)
     ConfigOverrideSystem.update_config_from_file(main_config, config_fname, drop_paths=["inference", "projmatching"])
 
-    with PartitionInferencer(**vars(args)) as inferencer:
+    with SingleInferencer(**vars(args)) as inferencer:
         inferencer.run()
 
     """

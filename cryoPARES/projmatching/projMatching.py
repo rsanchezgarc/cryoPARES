@@ -54,7 +54,6 @@ class ProjectionMatcher(nn.Module):
         """
 
         super().__init__()
-
         self.grid_distance_degs = grid_distance_degs
         self.grid_step_degs = grid_step_degs
         print(f"Projection matching grid: +/-{self.grid_distance_degs/2} (step {self.grid_step_degs}) degs")

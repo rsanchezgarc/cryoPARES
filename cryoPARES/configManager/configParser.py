@@ -211,18 +211,53 @@ class ConfigOverrideSystem:
                     f"Warning: Config object '{path or config.__class__.__name__}' has no attribute '{key}'. Full path: '{current_path}'")
 
     @staticmethod
+    def _drop_paths_from_dict(overrides: Dict[str, Any], drop_paths: List[str], verbose: bool = False):
+        """
+        Removes specified keys from a nested dictionary in-place.
+
+        :param overrides: The dictionary to modify.
+        :param drop_paths: A list of dot-separated paths to remove.
+        :param verbose: If True, prints warnings for paths that are not found.
+        """
+        if not drop_paths:
+            return
+
+        for path in drop_paths:
+            keys = path.split('.')
+            parent_dict = overrides
+            try:
+                # Navigate to the parent dictionary of the key to be deleted
+                for key in keys[:-1]:
+                    parent_dict = parent_dict[key]
+                # Delete the final key if it exists
+                if keys[-1] in parent_dict:
+                    del parent_dict[keys[-1]]
+            except (KeyError, TypeError):
+                # This can happen if a parent key doesn't exist or is not a dictionary
+                if verbose:
+                    print(f"Warning: Could not drop path '{path}' as it was not found.")
+
+    @staticmethod
     def update_config_from_file(config, config_fname, drop_paths=None, verbose=False):
         overrides = ConfigOverrideSystem.load_yaml_config(config_fname)
-        if drop_paths:
-            for path in drop_paths:
-                name = None
-                current_conf = overrides
-                for name in path.split("."):
-                    parent_config = current_conf
-                    current_conf = current_conf[name]
-                if name:
-                    del parent_config[name]
+        ConfigOverrideSystem._drop_paths_from_dict(overrides, drop_paths, verbose)
+        ConfigOverrideSystem.apply_overrides(config, overrides, verbose=verbose)
+        return config
 
+    @staticmethod
+    def update_config_from_dataclass(config, source_dataclass, drop_paths=None, verbose=False):
+        """
+        Updates a config object with values from a source dataclass object.
+
+        :param config: The config object to update.
+        :param source_dataclass: The dataclass object to read values from.
+        :param drop_paths: A list of dot-separated paths to not update from the source.
+        :param verbose: If True, prints which values are being set.
+        """
+        # Convert the source dataclass to a dictionary of overrides
+        overrides = dataclass_to_dict(source_dataclass)
+        ConfigOverrideSystem._drop_paths_from_dict(overrides, drop_paths, verbose)
+        # Apply the dictionary of overrides to the target config object
         ConfigOverrideSystem.apply_overrides(config, overrides, verbose=verbose)
         return config
 

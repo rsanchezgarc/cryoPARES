@@ -346,7 +346,7 @@ if __name__ == "__main__":
     # from argParseFromDoc import AutoArgumentParser
     # parser = AutoArgumentParser(prog="train partition cryoPARES")
 
-    from cryoPARES.configManager.configParser import ConfigArgumentParser, export_config_to_yaml
+    from cryoPARES.configManager.configParser import ConfigArgumentParser
 
     parser = ConfigArgumentParser(prog="train_partition_cryoPARES", config_obj=main_config)
 

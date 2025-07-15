@@ -114,10 +114,9 @@ class SingleInferencer:
         if symmetry is None:
             symmetry = self._get_symmetry()
         reconstructor = Reconstructor(symmetry=symmetry)
-        particlesDataset = reconstructor._get_reconstructionParticlesDataset(self.particles_star_fname,
-                                                                             self.particles_dir)
+        reconstructor._get_reconstructionParticlesDataset(self.particles_star_fname, self.particles_dir)
         self._reconstructor = reconstructor
-        return reconstructor, particlesDataset
+        return reconstructor
 
     def _setup_model(self, rank: Optional[int] = None):
         """Setup the model for inference."""
@@ -139,7 +138,7 @@ class SingleInferencer:
             localRefiner = None
 
         if self.perform_reconstruction:
-            reconstructor, particlesDataset = self._setup_reconstructor(so3Model.symmetry)
+            reconstructor = self._setup_reconstructor(so3Model.symmetry)
         else:
             reconstructor = None
 

@@ -16,6 +16,7 @@ from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.reconstruction.distributedReconstruct import create_shared_tensor
 from cryoPARES.inference.inference import SingleInferencer
 from cryoPARES.utils.paths import get_most_recent_file
+from cryoPARES.configManager.configParser import ConfigArgumentParser, ConfigOverrideSystem
 
 
 def worker(worker_id, *args, **kwargs):
@@ -27,13 +28,12 @@ def worker(worker_id, *args, **kwargs):
         raise e
 
 
-def _worker(worker_id, pbar_fname, particles_idxs, inferencer_init_kwargs,
+def _worker(worker_id, pbar_fname, particles_idxs, inferencer_init_kwargs, main_config_updated,
             shared_numerator, shared_weights, shared_ctfsq, device=None):
 
     if device is not None:
         torch.cuda.set_device(device)
-
-
+    ConfigOverrideSystem.update_config_from_dataclass(main_config, main_config_updated, verbose=False)
     inferencer_init_kwargs["subset_idxs"] = list(particles_idxs)
     inferencer = SingleInferencer(**inferencer_init_kwargs)
     batch_size = inferencer_init_kwargs["batch_size"]
@@ -142,10 +142,9 @@ def distributed_inference(
 
         inferencer = SingleInferencer(**inferencer_init_kwargs)
         inferencer_init_kwargs["use_cuda"] = use_cuda
-        # reconstructor, particlesDs = inferencer._setup_reconstructor()
+        reconstructor = inferencer._setup_reconstructor()
         dm = inferencer._get_datamanager()
-        n_particles = len(particlesDs)
-
+        n_particles = len(dm.create_dataset(None))
         # Get shapes of result tensors
         numerator_shape = reconstructor.numerator.shape
         weights_shape = reconstructor.weights.shape
@@ -170,7 +169,7 @@ def distributed_inference(
                 p = ctx.Process(
                     target=worker,
                     args=(worker_id, pbar_fname, particles_idxs,
-                          inferencer_init_kwargs,
+                          inferencer_init_kwargs, main_config,
                           shared_numerator, shared_weights, shared_ctfsq, worker_device)
                 )
                 p.start()
@@ -221,7 +220,7 @@ def distributed_inference(
         reconstructor.ctfsq = final_ctfsq
         output_fname  = os.path.join(results_dir, f"reconstruction_{partition}_nnet.mrc")
         reconstructor.generate_volume(output_fname)
-        print("Reconstruction done.")
+        print(f"Reconstruction done for {partition}.")
 
 
 if __name__ == "__main__":
@@ -230,7 +229,6 @@ if __name__ == "__main__":
     print("---------------------------------------")
     print(" ".join(sys.argv))
     print("---------------------------------------")
-    from cryoPARES.configManager.configParser import ConfigArgumentParser, ConfigOverrideSystem
 
     torch.set_float32_matmul_precision(constants.float32_matmul_precision)
 

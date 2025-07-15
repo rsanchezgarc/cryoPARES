@@ -76,14 +76,12 @@ class DataManager(pl.LightningDataModule):
         self.augment_train = augment_train
         self.only_first_dataset_for_validation = only_first_dataset_for_validation
         self.return_ori_imagen = return_ori_imagen
-        self.subset_idxs = subset_idxs
-
         if self.augment_train:
             from cryoPARES.datamanager.augmentations import Augmenter
             self.augmenter = Augmenter()
         else:
             self.augmenter = None
-
+        self._subset_idxs = subset_idxs
 
     @staticmethod
     def _expand_fname(fnameOrList):
@@ -112,7 +110,7 @@ class DataManager(pl.LightningDataModule):
                                                      symmetry=self.symmetry, halfset=self.halfset,
                                                      store_data_in_memory=store_data_in_memory,
                                                      return_ori_imagen=self.return_ori_imagen,
-                                                     subset_idxs=self.subset_idxs)
+                                                     subset_idxs=self._subset_idxs)
 
             if self.is_global_zero and self.save_train_val_partition_dir is not None:
                 dirname = osp.join(self.save_train_val_partition_dir, partitionName if partitionName is not None else "full")

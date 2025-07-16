@@ -137,7 +137,7 @@ class PlModel(RotationPredictionMixin, pl.LightningModule):
         #TODO: Forward with neigs needs to be exposed and selectable via config
         super().__init__()
         self.__init_mixin__()
-        self.lr = lr
+        self.lr = lr #The original LR
         self.symmetry = symmetry
         self.num_augmented_copies_per_batch = num_augmented_copies_per_batch
         self.top_k = top_k
@@ -176,7 +176,7 @@ class PlModel(RotationPredictionMixin, pl.LightningModule):
 
         self.log("loss", loss, prog_bar=True, batch_size=pred_rotmats.shape[0], sync_dist=False)
         self.log("geo_degs",error_degs.mean(), prog_bar=True, on_step=True, on_epoch=True,
-                 batch_size=pred_rotmats.shape[0], sync_dist=False)
+                 batch_size=pred_rotmats.shape[0], sync_dist=True)
 
         if batch_idx == 0:
             # Visualize the predicted rotmats and the ground truth rotmats with error

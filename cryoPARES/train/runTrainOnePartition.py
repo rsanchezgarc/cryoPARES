@@ -23,6 +23,8 @@ from cryoPARES.configManager.inject_defaults import inject_defaults_from_config,
 from cryoPARES.constants import DATA_SPLITS_BASENAME, TRAINING_DONE_TEMPLATE
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.reconstruction.reconstruction import reconstruct_starfile
+from cryoPARES.utils.paths import get_most_recent_file
+from cryoPARES.configManager.configParser import ConfigArgumentParser, ConfigOverrideSystem
 
 
 class TrainerPartition:
@@ -153,7 +155,6 @@ class TrainerPartition:
         from cryoPARES.models.model import PlModel
         kwargs = self._kwargs_for_loading()
         if self.continue_checkpoint_fname or self.finetune_checkpoint_fname:
-            raise NotImplementedError("It seems is overwriting metrics.csv, and it is probably not picking up the right LR ")
             kwargs["map_location"] = torch.device("cpu")
             if self.continue_checkpoint_fname is None:
                 load_fname = self.finetune_checkpoint_fname
@@ -162,14 +163,8 @@ class TrainerPartition:
                 load_fname = self.continue_checkpoint_fname
                 resume_from_checkpoint = self.continue_checkpoint_fname
 
-            pl_model, _continue_checkpoint_fname = PlModel.load_from_checkpoint(load_fname, **kwargs)
+            pl_model = PlModel.load_from_checkpoint(load_fname, **kwargs)
 
-            if (resume_from_checkpoint and
-                    _continue_checkpoint_fname != self.continue_checkpoint_fname):
-                raise RuntimeError(
-                    "Checkpoint has been modified. Either load new weights and reset optimizer, "
-                    "or use unmodified checkpoint."
-                )
         else:
             pl_model = PlModel(**kwargs)
             resume_from_checkpoint = None
@@ -189,7 +184,7 @@ class TrainerPartition:
             "allParticles": None
         }[self.partition]
 
-        return DataManager(
+        dm = DataManager(
             star_fnames=self.particles_star_fname,
             symmetry=self.symmetry,
             augment_train=main_config.datamanager.augment_train,
@@ -199,10 +194,20 @@ class TrainerPartition:
             save_train_val_partition_dir=osp.join(logger1.log_dir, DATA_SPLITS_BASENAME),
             is_global_zero=trainer.is_global_zero
         )
+        return dm
 
-    def run(self):
+    def run(self, config_args):
+
+        #The very first step is to make sure that the old config values are loaded
+        #and then values form the CLI can overwrite them
+        load_fname = self.continue_checkpoint_fname or self.finetune_checkpoint_fname
+        if load_fname:
+            checkpoint_dir = os.path.dirname(os.path.dirname(os.path.dirname(load_fname)))
+            config_fname = get_most_recent_file(checkpoint_dir, "configs_*.yml")
+            ConfigOverrideSystem.update_config_from_file(main_config, config_fname)
+            ConfigOverrideSystem.update_config_from_configstrings(main_config, config_args)
+
         seed_everything(self.train_config.random_seed)
-
         accel, dev_count = self._setup_accelerator()
         logger1, logger2 = self._setup_loggers()
         callbacks, checkpointer = self._setup_callbacks(logger1)
@@ -346,13 +351,12 @@ if __name__ == "__main__":
     # from argParseFromDoc import AutoArgumentParser
     # parser = AutoArgumentParser(prog="train partition cryoPARES")
 
-    from cryoPARES.configManager.configParser import ConfigArgumentParser
 
     parser = ConfigArgumentParser(prog="train_partition_cryoPARES", config_obj=main_config)
 
     parser.add_args_from_function(TrainerPartition.__init__)
     args, config_args = parser.parse_args()
-    TrainerPartition(**vars(args)).run()
+    TrainerPartition(**vars(args)).run(config_args)
 
     """
 python -m cryoPARES.train.runTrainOnePartition --symmetry C1 --particles_star_fname ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/1000particles.star  --train_save_dir /tmp/CryoParesTrain

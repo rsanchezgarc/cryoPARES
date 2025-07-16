@@ -261,6 +261,24 @@ class ConfigOverrideSystem:
         ConfigOverrideSystem.apply_overrides(config, overrides, verbose=verbose)
         return config
 
+
+    @staticmethod
+    def update_config_from_configstrings(config, source_configstrings:List[str], drop_paths=None, verbose=False):
+        """
+        Updates a config object with values from a source dataclass object.
+
+        :param config: The config object to update.
+        :param source_configstrings: The list of strings of the form xxx.xxx=V to read values from.
+        :param drop_paths: A list of dot-separated paths to not update from the source.
+        :param verbose: If True, prints which values are being set.
+        """
+        # Convert the source dataclass to a dictionary of overrides
+        overrides = ConfigOverrideSystem.parse_config_assignments(source_configstrings)
+        ConfigOverrideSystem._drop_paths_from_dict(overrides, drop_paths, verbose)
+        # Apply the dictionary of overrides to the target config object
+        ConfigOverrideSystem.apply_overrides(config, overrides, verbose=verbose)
+        return config
+
 def merge_dicts(d1: Dict[str, Any], d2: Dict[str, Any]) -> Dict[str, Any]:
     """Recursively merge two dictionaries."""
     result = d1.copy()
@@ -444,7 +462,7 @@ class ConfigArgumentParser(AutoArgumentParser):
         values that were changed via --config overrides, but only if the direct
         argument was not provided by the user.
         """
-        self.print("\nRe-checking defaults against config overrides...")
+        # self.print("\nRe-checking defaults against config overrides...")
         for arg_name, config_path in self._config_param_mappings.items():
             # Check if the arg exists in the namespace and was NOT provided on the CLI
             if hasattr(args, arg_name) and not self._was_arg_provided(arg_name, sys_argv):
@@ -487,6 +505,11 @@ class ConfigArgumentParser(AutoArgumentParser):
         # This will populate the `parsed_args` namespace.
         parsed_args = super().parse_args(args_list, namespace)
 
+        # Get the list of args passed to --config, e.g., ["my_file.yaml", "train.n_epochs=20"]
+        config_args_list = getattr(parsed_args, 'config', []).copy(
+                                ) if hasattr(parsed_args, 'config') and parsed_args.config else []
+
+
         # Process --config (YAML files and key=value assignments) first.
         # These are considered lower precedence than direct command-line arguments.
         self._process_config_args(parsed_args)
@@ -501,27 +524,40 @@ class ConfigArgumentParser(AutoArgumentParser):
 
         # Apply direct argument overrides to config. This should happen AFTER --config files,
         # ensuring direct command-line arguments have highest precedence.
-        self._apply_direct_arg_overrides(parsed_args, _original_sys_argv)
+        direct_overrides = self._apply_direct_arg_overrides(parsed_args, _original_sys_argv)
 
         # Remove config arguments from parsed_args so they don't interfere with downstream logic
         # that might not expect them (e.g., if train_model tried to use parsed_args directly for 'config').
-        config_args = getattr(parsed_args, "config", [])
+        config_args = config_args_list + direct_overrides
         for arg_name in self._config_arg_names:
             if hasattr(parsed_args, arg_name):
                 delattr(parsed_args, arg_name)
 
         return parsed_args, config_args
 
+    def _get_cli_arg_name(self, param_dest_name: str) -> str:
+        """Finds the primary option string (e.g., '--batch-size') for a given parameter destination."""
+        for action in self._actions:
+            if action.dest == param_dest_name:
+                # Prefer the first long option string if available
+                for opt_string in action.option_strings:
+                    if opt_string.startswith('--'):
+                        return opt_string
+                # Fallback to the first option string or the destination name
+                return action.option_strings[0] if action.option_strings else param_dest_name
+        return param_dest_name.replace('_', '-')  # Final fallback
+
     def _check_for_conflicts(self, args: argparse.Namespace, sys_argv: List[str]) -> None:
         """
         Check for conflicts between direct arguments and config overrides.
         A conflict occurs if the same config path is targeted by both a direct CLI argument
-        and a --config assignment.
+        and a --config assignment WITH A DIFFERENT VALUE.
         """
         if not hasattr(args, 'config') or not args.config:
             return
 
-        # Parse config overrides from the --config argument to get all affected paths.
+        # Parse config overrides from the --config argument to get all affected paths and values.
+        # (This part of the logic remains the same)
         config_overrides_from_cli = {}
         for config_item in args.config:
             if not (config_item.endswith('.yaml') or config_item.endswith('.yml')):
@@ -531,6 +567,7 @@ class ConfigArgumentParser(AutoArgumentParser):
                 except ValueError as e:
                     print(f"Warning: Could not parse config assignment '{config_item}' for conflict check: {e}")
             else:
+                # YAML file loading logic...
                 config_path_obj = Path(config_item)
                 if config_path_obj.exists():
                     file_overrides = ConfigOverrideSystem.load_yaml_config(config_item)
@@ -538,30 +575,34 @@ class ConfigArgumentParser(AutoArgumentParser):
                 else:
                     print(f"Warning: Config file {config_item} not found for conflict check.")
 
-        # Flatten the dictionary of overrides to get a set of all config paths affected by --config
         override_paths_from_config_arg = set(self._flatten_dict_keys(config_overrides_from_cli))
 
-        # Iterate through all parameters that are mapped to the config (i.e., are CONFIG_PARAMs)
+        # Iterate and check for conflicts
         for param_name_in_func, config_path_in_config_obj in self._config_param_mappings.items():
-            # Check if this specific config_path is also being targeted by the --config argument
             if config_path_in_config_obj in override_paths_from_config_arg:
-                # Now, check if the corresponding direct command-line argument was provided
-                # (e.g., if 'n_epochs' maps to 'train.n_epochs', check if '--n-epochs' was on CLI)
                 if self._was_arg_provided(param_name_in_func, sys_argv):
-                    # Find the actual CLI arg name that maps to this param_name_in_func
-                    cli_arg_name = param_name_in_func.replace('_', '-')  # Default
-                    for action in self._actions:
-                        if action.dest == param_name_in_func:
-                            # Use the first long option string if available, otherwise just dest
-                            cli_arg_name = action.option_strings[0] if action.option_strings else cli_arg_name
-                            break
+                    # --- NEW LOGIC STARTS HERE ---
 
-                    raise ValueError(
-                        f"Conflict: The configuration value '{config_path_in_config_obj}' "
-                        f"is being set by both the direct command-line argument '{cli_arg_name}' "
-                        f"and through the '--config {config_path_in_config_obj}=...' argument. "
-                        f"Please choose only one method to set this value."
-                    )
+                    # 1. Get the value from the direct argument (e.g., --batch-size 10)
+                    direct_arg_value = getattr(args, param_name_in_func)
+
+                    # 2. Get the value from the --config override
+                    try:
+                        keys = config_path_in_config_obj.split('.')
+                        config_override_value = functools.reduce(lambda d, k: d[k], keys, config_overrides_from_cli)
+                    except KeyError:
+                        # This shouldn't happen if the path is in the set, but as a safeguard:
+                        continue
+
+                    # 3. Compare the values and raise an error only if they differ
+                    if direct_arg_value != config_override_value:
+                        cli_arg_name = self._get_cli_arg_name(param_name_in_func)  # Extracted to a helper for clarity
+                        raise ValueError(
+                            f"Conflict: The value for '{config_path_in_config_obj}' is ambiguous.\n"
+                            f"  - Direct argument '{cli_arg_name}' provides: {direct_arg_value}\n"
+                            f"  - A '--config' argument provides: {config_override_value}\n"
+                            f"Please provide only one source or ensure the values match."
+                        )
 
     def _was_arg_provided(self, arg_name: str, sys_argv: List[str]) -> bool:
         """
@@ -603,11 +644,12 @@ class ConfigArgumentParser(AutoArgumentParser):
                 paths.append(current_path)
         return paths
 
-    def _apply_direct_arg_overrides(self, args: argparse.Namespace, sys_argv: List[str]) -> None:
+    def _apply_direct_arg_overrides(self, args: argparse.Namespace, sys_argv: List[str]) -> List[str]:
         """
         Apply direct argument values to their corresponding config parameters.
         Only applies if the argument was explicitly provided by the user.
         """
+        overrides_made = []
         for arg_name, config_path in self._config_param_mappings.items():
             if hasattr(args, arg_name) and self._was_arg_provided(arg_name, sys_argv):
                 arg_value = getattr(args, arg_name)
@@ -641,11 +683,13 @@ class ConfigArgumentParser(AutoArgumentParser):
                             value_to_set = Path(arg_value)
 
                         setattr(target, keys[-1], value_to_set)
+                        overrides_made.append(f"{config_path}={value_to_set}")
                         self.print(
                             f"Set {config_path} = {value_to_set} (from direct arg --{arg_name.replace('_', '-')})")
                     except Exception as e:
                         print(
                             f"Warning: Failed to set config attribute '{config_path}' from direct argument '--{arg_name.replace('_', '-')}' to '{arg_value}': {e}")
+        return overrides_made
 
     def _process_config_args(self, args: argparse.Namespace) -> None:
         """Process config-related arguments and apply overrides from --config."""

@@ -367,7 +367,7 @@ if __name__ == "__main__":
     parser.add_args_from_function(SingleInferencer.__init__)
     args, config_args = parser.parse_args()
     assert os.path.isdir(args.checkpoint_dir), f"Error, checkpoint_dir {args.checkpoint_dir} not found"
-    config_fname = get_most_recent_file(args.checkpoint_dir, "configs_*.yml") #max(glob.glob(os.path.join(args.checkpoint_dir, "configs_*.yml")), key=os.path.getmtime)
+    config_fname = get_most_recent_file(args.checkpoint_dir, "configs_*.yml")
     ConfigOverrideSystem.update_config_from_file(main_config, config_fname, drop_paths=["inference", "projmatching"])
 
     with SingleInferencer(**vars(args)) as inferencer:

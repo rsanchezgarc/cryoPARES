@@ -113,7 +113,8 @@ class DataManager(pl.LightningDataModule):
                                                      subset_idxs=self._subset_idxs)
 
             if self.is_global_zero and self.save_train_val_partition_dir is not None:
-                dirname = osp.join(self.save_train_val_partition_dir, partitionName if partitionName is not None else "full")
+                dirname = osp.join(self.save_train_val_partition_dir, partitionName
+                                                        if partitionName is not None else "full")
                 os.makedirs(dirname, exist_ok=True)
                 fname = osp.join(dirname, f"{i}-particles.star")
                 if not osp.isfile(fname):
@@ -123,35 +124,7 @@ class DataManager(pl.LightningDataModule):
             if self.only_first_dataset_for_validation and partitionName != "train":
                 break
         dataset = ConcatDataset(datasets)
-        return dataset
-
-    def setup_distributed(self, world_size: int, rank: int): #TODO: This is probably not needed
-        """Setup distributed inference.
-
-        Args:
-            world_size: Total number of GPUs/processes
-            rank: Current GPU/process ID
-        """
-        self.world_size = world_size
-        self.rank = rank
-        self.is_global_zero = (rank == 0)
-
-    def _create_dataloader(self, partitionName: Optional[str]=None):
-        dataset = self.create_dataset(partitionName)
-        # If we're in distributed mode (world_size and rank are set)
-        if hasattr(self, 'world_size') and hasattr(self, 'rank'):
-            # Override any provided sampler with DistributedSampler
-            sampler = DistributedSampler( #TODO: This is probably not needed
-                dataset,
-                num_replicas=self.world_size,
-                rank=self.rank,
-                shuffle=partitionName != "train" or not self.trainer.overfit_batches > 0
-            )
-        else:
-            sampler = None
-
         if partitionName in ["train", "val"]:
-            # Original training/validation logic...
             assert self.train_validation_split is not None
             generator = torch.Generator().manual_seed(self.train_validaton_split_seed)
             train_dataset, val_dataset = torch.utils.data.random_split(
@@ -159,44 +132,73 @@ class DataManager(pl.LightningDataModule):
                 self.train_validation_split,
                 generator=generator
             )
-
             if partitionName == "train":
                 dataset = train_dataset
-                print(f"Train dataset {len(train_dataset)}")
-
-                if not hasattr(self, 'world_size'):  # Not distributed
-                    if self.trainer is not None and self.trainer.overfit_batches > 0:
-                        sampler = SequentialSampler(dataset)
-                    else:
-                        sampler = RandomSampler(dataset)
-
-                batch_sampler = MultiInstanceSampler(
-                    sampler=sampler,
-                    batch_size=self.batch_size,
-                    drop_last=True,
-                    num_copies_to_sample=self.num_augmented_copies_per_batch
-                )
-                return DataLoader(
-                    dataset,
-                    batch_sampler=batch_sampler,
-                    num_workers=self.num_data_workers,
-                    persistent_workers=True if self.num_data_workers > 0 else False,
-                    pin_memory=True if self.num_data_workers > 0 else False,
-                )
             else:
                 dataset = val_dataset
-                print(f"Validation dataset {len(val_dataset)}")
+        return dataset
 
-        return DataLoader(
-            dataset,
-            batch_size=self.batch_size,
-            shuffle=False,
-            num_workers=self.num_data_workers,
-            persistent_workers=True if self.num_data_workers > 0 else False,
-            sampler=sampler,
-            pin_memory=True if self.num_data_workers > 0 else False,
-        )
 
+    def _create_dataloader(self, partitionName: Optional[str]=None):
+
+        dataset = self.create_dataset(partitionName)
+
+        if self.trainer is not None:
+            distributed_world_size = getattr(self.trainer, 'world_size', 1)
+            rank = getattr(self.trainer, 'local_rank', 0)
+        else:
+            distributed_world_size = 1
+            rank = 0
+        assert  (rank == 0) == self.is_global_zero
+        if partitionName not in ["train", "val"]:
+            # Logic for test/predict
+            sampler = DistributedSampler(dataset, num_replicas=distributed_world_size, rank=rank) \
+                                        if distributed_world_size > 1 else None
+            return DataLoader(dataset, batch_size=self.batch_size, shuffle=False,
+                              num_workers=self.num_data_workers, sampler=sampler, pin_memory=True)
+
+        if partitionName == "train":
+            print(f"Train dataset {len(dataset)}")
+
+            if distributed_world_size > 1:
+                sampler = DistributedSampler(dataset, num_replicas=distributed_world_size, rank=rank,
+                                             shuffle=not self.trainer.overfit_batches > 0)
+            else:  # Not distributed
+                if self.trainer is not None and self.trainer.overfit_batches > 0:
+                    sampler = SequentialSampler(dataset)
+                else:
+                    sampler = RandomSampler(dataset)
+
+            batch_sampler = MultiInstanceSampler(
+                sampler=sampler,
+                batch_size=self.batch_size,
+                drop_last=True,
+                num_copies_to_sample=self.num_augmented_copies_per_batch
+            )
+            return DataLoader(
+                dataset,
+                batch_sampler=batch_sampler,
+                num_workers=self.num_data_workers,
+                persistent_workers=True if self.num_data_workers > 0 else False,
+                pin_memory=True if self.num_data_workers > 0 else False,
+            )
+        elif partitionName == "val":
+            print(f"Validation dataset {len(dataset)}")
+
+            sampler = DistributedSampler(dataset, num_replicas=distributed_world_size, rank=rank, shuffle=False)\
+                                        if distributed_world_size > 1 else None
+
+            return DataLoader(
+                dataset,
+                batch_size=self.batch_size,
+                shuffle=False,
+                num_workers=self.num_data_workers,
+                persistent_workers=True if self.num_data_workers > 0 else False,
+                sampler=sampler,
+                pin_memory=True if self.num_data_workers > 0 else False,
+            )
+        else:
+            raise ValueError("Error, wrong partition")
 
     def train_dataloader(self):
         return self._create_dataloader(partitionName="train")

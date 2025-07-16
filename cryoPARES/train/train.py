@@ -74,7 +74,7 @@ class Trainer:
         if self.continue_checkpoint_dir is not None:
             _train_save_dir, version_dir = osp.split(self.continue_checkpoint_dir.rstrip("/"))
             if train_save_dir is not None:
-                assert _train_save_dir == train_save_dir, (
+                assert _train_save_dir == train_save_dir.rstrip("/"), (
                     f"Error, when continuing a checkpoint, _train_save_dir ({_train_save_dir}) !="
                     f" train_save_dir ({train_save_dir})")
             self.train_save_dir = _train_save_dir
@@ -146,14 +146,17 @@ class Trainer:
 
     def get_continue_checkpoint_fname(self, partition:Literal["allParticles", "half1", "half2"]):
         if self.continue_checkpoint_dir:
-            return get_most_recent_file(os.path.join(self.continue_checkpoint_dir, partition, "checkpoints"), ".ckpt")
-
+            fname = get_most_recent_file(os.path.join(self.continue_checkpoint_dir, partition, "checkpoints"), "*.ckpt")
+            assert fname is not None, f"Error, checkpoint not found at {self.continue_checkpoint_dir}"
+            return fname
         else:
             return None
 
     def get_finetune_checkpoint_fname(self, partition:Literal["allParticles", "half1", "half2"]):
         if self.finetune_checkpoint_dir:
-            return get_most_recent_file(os.path.join(self.finetune_checkpoint_dir, partition, "checkpoints"), ".ckpt")
+            fname = get_most_recent_file(os.path.join(self.finetune_checkpoint_dir, partition, "checkpoints"), "*.ckpt")
+            assert fname is not None, f"Error, checkpoint not found at {self.continue_checkpoint_dir}"
+            return fname
         else:
             return None
 

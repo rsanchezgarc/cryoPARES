@@ -5,10 +5,12 @@ import time
 from typing import Optional, Literal
 
 import numpy as np
+import pandas as pd
 import torch
 
 from torch import multiprocessing
 from progressBarDistributed import SharedMemoryProgressBar, SharedMemoryProgressBarWorker
+from torch.utils.data import ConcatDataset
 
 from cryoPARES import constants
 from cryoPARES.configManager.inject_defaults import CONFIG_PARAM, inject_defaults_from_config
@@ -19,16 +21,16 @@ from cryoPARES.utils.paths import get_most_recent_file
 from cryoPARES.configManager.configParser import ConfigArgumentParser, ConfigOverrideSystem
 
 
-def worker(worker_id, *args, **kwargs):
+def worker(worker_id, output_q, *args, **kwargs):
     try:
-        _worker(worker_id, *args, **kwargs)
+        _worker(worker_id, output_q, *args, **kwargs)
     except Exception as e:
         print(f"[Worker {worker_id}] Exception occurred: {e}", file=sys.stderr)
         traceback.print_exc()
         raise e
 
 
-def _worker(worker_id, pbar_fname, particles_idxs, inferencer_init_kwargs, main_config_updated,
+def _worker(worker_id, output_q, pbar_fname, particles_idxs, inferencer_init_kwargs, main_config_updated,
             shared_numerator, shared_weights, shared_ctfsq, device=None):
 
     if device is not None:
@@ -36,14 +38,10 @@ def _worker(worker_id, pbar_fname, particles_idxs, inferencer_init_kwargs, main_
     ConfigOverrideSystem.update_config_from_dataclass(main_config, main_config_updated, verbose=False)
     inferencer_init_kwargs["subset_idxs"] = list(particles_idxs)
     inferencer = SingleInferencer(**inferencer_init_kwargs)
-    batch_size = inferencer_init_kwargs["batch_size"]
-    n_parts = len(particles_idxs)
-    n_batches = n_parts // batch_size + int((n_parts%batch_size)!=0)
-    print("n_batches", n_batches)
     with SharedMemoryProgressBarWorker(worker_id, pbar_fname) as pbar:
-        pbar.set_total_steps(n_batches)
         inferencer._pbar = pbar
         out = inferencer.run()
+        output_q.put((worker_id, out))
 
         reconstructor = inferencer._reconstructor
         if reconstructor is not None:
@@ -80,7 +78,8 @@ def distributed_inference(
         directional_zscore_thr: Optional[float] = CONFIG_PARAM(),
         perform_localrefinement: bool = CONFIG_PARAM(),
         perform_reconstruction: bool = CONFIG_PARAM(),
-        update_progessbar_n_batches: int = CONFIG_PARAM()
+        update_progessbar_n_batches: int = CONFIG_PARAM(),
+        check_interval_secs: float = 2.  # seconds
 ):
     """
 
@@ -100,10 +99,11 @@ def distributed_inference(
     :param perform_localrefinement:
     :param perform_reconstruction:
     :param update_progessbar_n_batches:
+    :param check_interval_secs:
     :return:
     """
-
     ctx = multiprocessing.get_context('spawn')
+    os.makedirs(results_dir, exist_ok=True)
 
     if halfset == "allParticles":
         partitions = ["half1", "half2"]
@@ -142,21 +142,28 @@ def distributed_inference(
 
         inferencer = SingleInferencer(**inferencer_init_kwargs)
         inferencer_init_kwargs["use_cuda"] = use_cuda
-        reconstructor = inferencer._setup_reconstructor()
         dm = inferencer._get_datamanager()
-        n_particles = len(dm.create_dataset(None))
+        dataset = dm.create_dataset(None)
+        n_particles = len(dataset)
+
         # Get shapes of result tensors
-        numerator_shape = reconstructor.numerator.shape
-        weights_shape = reconstructor.weights.shape
-        ctfsq_shape = reconstructor.ctfsq.shape
+        reconstructor = inferencer._setup_reconstructor()
+        if reconstructor is not None:
+            numerator_shape = reconstructor.numerator.shape
+            weights_shape = reconstructor.weights.shape
+            ctfsq_shape = reconstructor.ctfsq.shape
 
-        # Create shared memory tensors for results
-        shared_numerator, _ = create_shared_tensor(numerator_shape, ctx=ctx)
-        shared_weights, _ = create_shared_tensor(weights_shape, ctx=ctx)
-        shared_ctfsq, _ = create_shared_tensor(ctfsq_shape, ctx=ctx)
+            # Create shared memory tensors for results
+            shared_numerator, _ = create_shared_tensor(numerator_shape, ctx=ctx)
+            shared_weights, _ = create_shared_tensor(weights_shape, ctx=ctx)
+            shared_ctfsq, _ = create_shared_tensor(ctfsq_shape, ctx=ctx)
+        else:
+            shared_numerator = None
+            shared_weights = None
+            shared_ctfsq = None
 
-
-        with SharedMemoryProgressBar(n_jobs) as pbar:
+        with ctx.Manager() as manager,  SharedMemoryProgressBar(n_jobs) as pbar:
+            output_q = manager.Queue()
             pbar_fname = pbar.shm_name
 
             processes = []
@@ -168,22 +175,32 @@ def distributed_inference(
 
                 p = ctx.Process(
                     target=worker,
-                    args=(worker_id, pbar_fname, particles_idxs,
+                    args=(worker_id, output_q, pbar_fname, particles_idxs,
                           inferencer_init_kwargs, main_config,
                           shared_numerator, shared_weights, shared_ctfsq, worker_device)
                 )
                 p.start()
                 processes.append(p)
 
-            check_interval = 2  # seconds
-            all_done = False
+            results = {}
+            completed_workers = 0
+
             try:
-                while not all_done:
+                while completed_workers < n_jobs:
+                    # Check for completed work in the queue
+                    try:
+                        while not output_q.empty():
+                            worker_id, result = output_q.get_nowait()
+                            results[worker_id] = result
+                            print(f"Received results from worker {worker_id}")
+                    except:
+                        pass  # Queue was empty
+
+                    # Check process health
                     all_done = True
                     for p in processes:
                         if not p.is_alive() and p.exitcode != 0:
                             print(f"Worker {p.pid} died with exit code {p.exitcode}!", file=sys.stderr)
-
                             # Terminate all processes
                             for q in processes:
                                 if q.is_alive():
@@ -194,9 +211,17 @@ def distributed_inference(
                         if p.is_alive():
                             all_done = False
 
-                    time.sleep(check_interval)
+                    if all_done:
+                        # All processes finished, collect any remaining results
+                        while not output_q.empty():
+                            worker_id, result = output_q.get_nowait()
+                            results[worker_id] = result
+                            print(f"Received final results from worker {worker_id}")
+                        break
 
-                # Final join to clean up any remaining zombie processes
+                    time.sleep(check_interval_secs)
+
+                # Final join to clean up
                 for p in processes:
                     p.join()
 
@@ -207,21 +232,71 @@ def distributed_inference(
                         p.terminate()
                 sys.exit(1)
 
-        print("Backprojection done. Reconstructing")
+            # Process and save aggregated results
+            if results:
+                print(f"Aggregating results from {len(results)} workers...")
+                aggregated_results = _aggregate_worker_results(results)
 
-        # Convert shared memory back to tensors
-        final_numerator = torch.frombuffer(shared_numerator.get_obj(), dtype=torch.float32).reshape(numerator_shape)
-        final_weights = torch.frombuffer(shared_weights.get_obj(), dtype=torch.float32).reshape(weights_shape)
-        final_ctfsq = torch.frombuffer(shared_ctfsq.get_obj(), dtype=torch.float32).reshape(ctfsq_shape)
+                # Save aggregated results
+                if results_dir is not None:
+                    if isinstance(dataset, ConcatDataset):
+                        particlesSet = dataset.datasets[0].particles
+                    else:
+                        particlesSet = dataset.particles
+                    particlesSet.particles_md = aggregated_results
+                    results_file = os.path.join(results_dir, f"particles_{partition}_nnet.star")
+                    particlesSet.save(results_file, overwrite=True)
 
-        # set results
-        reconstructor.numerator = final_numerator
-        reconstructor.weights = final_weights
-        reconstructor.ctfsq = final_ctfsq
-        output_fname  = os.path.join(results_dir, f"reconstruction_{partition}_nnet.mrc")
-        reconstructor.generate_volume(output_fname)
-        print(f"Reconstruction done for {partition}.")
+        if reconstructor is not None:
+            print("Backprojection done. Reconstructing")
+            # Convert shared memory back to tensors
+            final_numerator = torch.frombuffer(shared_numerator.get_obj(), dtype=torch.float32).reshape(numerator_shape)
+            final_weights = torch.frombuffer(shared_weights.get_obj(), dtype=torch.float32).reshape(weights_shape)
+            final_ctfsq = torch.frombuffer(shared_ctfsq.get_obj(), dtype=torch.float32).reshape(ctfsq_shape)
 
+            # set results
+            reconstructor.numerator = final_numerator
+            reconstructor.weights = final_weights
+            reconstructor.ctfsq = final_ctfsq
+            output_fname  = os.path.join(results_dir, f"reconstruction_{partition}_nnet.mrc")
+            reconstructor.generate_volume(output_fname)
+            print(f"Reconstruction done for {partition}.")
+
+def _aggregate_worker_results(results):
+    """
+    Aggregate results from multiple workers into a single coherent result.
+
+    Args:
+        results: Dict[worker_id, result] where result is the output from SingleInferencer.run()
+
+    Returns:
+        Aggregated results in the same format as SingleInferencer.run()
+    """
+
+    # Handle the case where results might be lists (if halfset was "allParticles")
+    # or single DataFrames
+    if not results:
+        return None
+
+    # Check if results are lists (allParticles case) or single results
+    first_result = next(iter(results.values()))
+    if isinstance(first_result, list):
+        # This shouldn't happen in distributed mode since we handle partitions separately
+        raise ValueError("Unexpected list result in distributed mode")
+
+    # Aggregate single results
+    all_dataframes = []
+    for worker_id in sorted(results.keys()):
+        result = results[worker_id]
+        if result is not None:
+            all_dataframes.append(result)
+
+    if not all_dataframes:
+        return None
+
+    # Concatenate all results
+    aggregated_result = pd.concat(all_dataframes, ignore_index=True)
+    return aggregated_result
 
 if __name__ == "__main__":
     os.environ['MKL_THREADING_LAYER'] = 'GNU'

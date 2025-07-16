@@ -46,7 +46,8 @@ class ParticlesDataset(Dataset, ABC):
                  ctf_correction: Literal["none", "phase_flip", "ctf_multiply",
                                          "concat_phase_flip", "concat_ctf_multiply"] = CONFIG_PARAM(),
                  reduce_symmetry_in_label:bool = CONFIG_PARAM(),
-                 return_ori_imagen: bool = False
+                 return_ori_imagen: bool = False,
+                 subset_idxs: Optional[List[int]] = None
                  ):
 
         super().__init__()
@@ -62,6 +63,7 @@ class ParticlesDataset(Dataset, ABC):
         
         self.symmetry = symmetry.upper()
         self.halfset = halfset
+        self.subset_idxs = subset_idxs
 
         assert perImg_normalization in (item.value for item in ImgNormalizationType)
         if perImg_normalization == "none":
@@ -122,7 +124,10 @@ class ParticlesDataset(Dataset, ABC):
             _subsetNums = set(subsetNums)
             assert min(_subsetNums) >= 1 and max(_subsetNums) <= 2
             idxs = np.where(subsetNums == self.halfset)[0]
-            self._particles = self.particles.createSubset(idxs=idxs)
+            self._particles = self._particles.createSubset(idxs=idxs)
+
+        if self.subset_idxs is not None:
+            self._particles = self._particles.createSubset(idxs=self.subset_idxs)
 
         if self.min_maxProb is not None:
             maxprob = self._particles.particles_md[RELION_ORI_POSE_CONFIDENCE_NAME]

@@ -241,7 +241,7 @@ class SingleInferencer:
             print(f"Running inference for {self.halfset}")
             out = self._run()
             out_list.append(out)
-            return out
+            return out_list
         else:
             return self._run()
 
@@ -249,6 +249,8 @@ class SingleInferencer:
         if self._pbar is None:
             return tqdm(total=total, desc="Processing batches")
         else:
+            if hasattr(self._pbar, "set_total_steps"):
+                self._pbar.set_total_steps(total)
             return self._pbar
 
     def _run(self):
@@ -337,6 +339,7 @@ class SingleInferencer:
                 particles_md.loc[ids, angles_names] = result_arrays["eulerdegs"][..., k, :].numpy()
                 particles_md.loc[ids, shifts_names] = result_arrays["shifts"][..., k, :].numpy()
                 particles_md.loc[ids, confide_name] = result_arrays["score"][..., k].numpy()
+                #TODO: particles_md.loc[ids, confide_name] seems to NAN
 
             if particlesSet.starFname is not None:
                 basename = os.path.basename(particlesSet.starFname).removesuffix(".star")

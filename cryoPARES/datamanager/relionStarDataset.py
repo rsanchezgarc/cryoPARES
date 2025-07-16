@@ -31,15 +31,12 @@ class ParticlesRelionStarDataset(ParticlesDataset):
             subset_idxs (Optional[List[int]] ): The subset of idxs to use
         """
 
-        super().__init__(**kwargs)
+        super().__init__(subset_idxs=subset_idxs, **kwargs)
         self._star_fname = str(particles_star_fname)
         self._datadir = osp.expanduser(particles_dir) if particles_dir is not None else None
-        self.subset_idxs = subset_idxs
 
     def load_ParticlesStarSet(self):
         ps =  ParticlesStarSet(starFname=self._star_fname, particlesDir=self._datadir)
-        if self.subset_idxs is not None:
-            ps = ps.createSubset(idxs=self.subset_idxs)
 
         ulimit = subprocess.run(["ulimit -n"], check=True, capture_output=True, shell=True)
         assert ulimit.returncode == 0, "Error, ulimit -n command failed"

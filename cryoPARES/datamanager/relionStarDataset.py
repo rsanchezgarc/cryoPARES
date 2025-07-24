@@ -36,7 +36,7 @@ class ParticlesRelionStarDataset(ParticlesDataset):
         self._datadir = osp.expanduser(particles_dir) if particles_dir is not None else None
 
     def load_ParticlesStarSet(self):
-        ps =  ParticlesStarSet(starFname=self._star_fname, particlesDir=self._datadir)
+        ps = ParticlesStarSet(starFname=self._star_fname, particlesDir=self._datadir)
 
         ulimit = subprocess.run(["ulimit -n"], check=True, capture_output=True, shell=True)
         assert ulimit.returncode == 0, "Error, ulimit -n command failed"

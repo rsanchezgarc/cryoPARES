@@ -98,8 +98,8 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
         #tensors.keys() -> ids, imgs, ctfs, rotmats, maxprobs, norm_nn_score
         (maxCorrs, predRotMats, predShiftsAngs,
          comparedWeight) = self.localRefiner.forward(tensors['imgs'], tensors['ctfs'], tensors['rotmats'])
-        score = tensors['maxprobs'] * comparedWeight
-
+        score = torch.where(torch.isnan(comparedWeight), tensors['maxprobs'],
+                            tensors['maxprobs'] * comparedWeight)
         if self.reconstructor is not None:
             self.reconstructor._backproject_batch(tensors['imgs'], tensors['ctfs'],
                            rotMats=predRotMats, hwShiftAngs=predShiftsAngs, zyx_matrices=False)

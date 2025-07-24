@@ -112,6 +112,7 @@ class ParticlesDataset(Dataset, ABC):
     def _load_ParticlesStarSet(self):
         part_set = self.load_ParticlesStarSet()
         self._particles = part_set
+        assert len(part_set) > 0, "Error, no particles were found in the star file"
         if self.halfset is not None:
             if "rlnRandomSubset" not in self._particles.particles_md:
                 half1, half2 = train_test_split(self._particles.particles_md.index, test_size=0.5,

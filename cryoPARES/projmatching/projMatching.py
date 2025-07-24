@@ -210,19 +210,19 @@ class ProjectionMatcher(nn.Module):
         del ctf
         perImgCorr, pixelShiftsXY = self._correlateCrossCorrelation(fimgs[:, None, None, ...], projs)
 
-        maxCorrs, predRotMats, predShiftsAngs, comparedWeight = _analyze_cross_correlation(perImgCorr, pixelShiftsXY,
+        maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight = _analyze_cross_correlation(perImgCorr, pixelShiftsXY,
                                                                            grid_rotmats=expanded_rotmats,
                                                                            return_top_k=self.return_top_k,
                                                                            half_particle_size=self.half_particle_size,
                                                                            vol_voxel_size=self.vol_voxel_size)
         #TODO: PreRotMats comes from multyping the (grid_rotmat @ rotmat)
-        return maxCorrs, predRotMats, predShiftsAngs, comparedWeight
+        return maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight
 
     def forward(self, imgs, ctfs, rotmats):
         with torch.cuda.stream(self.background_stream):
             fimages = self._real_to_fourier(imgs)
-        maxCorrs, predRotMats, predShiftsAngs, comparedWeight = self.align_particles(fimages, ctfs, rotmats)
-        return maxCorrs, predRotMats, predShiftsAngs, comparedWeight
+        maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight = self.align_particles(fimages, ctfs, rotmats)
+        return maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight
 
 #TODO: we should define a _analyze_cross_correlation_FACTORY to use main_config.projmatching properly
 @torch.compile(fullgraph=True, disable=main_config.projmatching.disable_compile_analyze_cc,
@@ -240,11 +240,11 @@ def _analyze_cross_correlation(perImgCorr:torch.Tensor, pixelShiftsXY:torch.Tens
     mean_corr = torch.mean(reshaped_perImgCorr, dim=-1, keepdim=True)
     std_corr = torch.std(reshaped_perImgCorr, dim=-1, keepdim=True)
     comparedWeight = torch.distributions.Normal(mean_corr, std_corr+1e-6).cdf(maxCorrs)  # 1-P(I_i > All_images)
-    predShiftsAngs = -(bestPixelShiftsXY - half_particle_size) * vol_voxel_size
+    predShiftsAngsXY = -(bestPixelShiftsXY - half_particle_size) * vol_voxel_size
     predRotMatsIdxs = maxIdxs % nrots
     predRotMats = grid_rotmats[batch_arange, topk_arange, predRotMatsIdxs]
 
-    return maxCorrs, predRotMats, predShiftsAngs, comparedWeight
+    return maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight
 
 @lru_cache(1)
 def _get_begin_end_from_max_shift(image_shape, max_shift):
@@ -426,7 +426,7 @@ def _test1():
             md = batch[BATCH_MD_NAME]
             # torch.compiler.cudagraph_mark_step_begin()  #<- This is needed for compilation.  #!!!!!!!!!!!!!!!!!!
             fimages = pj._real_to_fourier(imgs) #TODO. I should be able to get the fimages from the rfft_ctf.correct_ctf. I would need to apply a phase shift to reproduce the real space fftshift
-            maxCorrs, predRotMats, predShiftsAngs, comparedWeight = pj.align_particles(fimages, ctfs, rotmats)
+            maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight = pj.align_particles(fimages, ctfs, rotmats)
             break
         for bix, batch in enumerate(tqdm(dl)):
             # print(batch[BATCH_IDS_NAME])
@@ -436,13 +436,13 @@ def _test1():
             md = batch[BATCH_MD_NAME]
             with torch.cuda.stream(pj.background_stream):
                 fimages = pj._real_to_fourier(imgs) #TODO. I should be able to get the fimages from the rfft_ctf.correct_ctf. I would need to apply a phase shift to reproduce the real space fftshift
-            maxCorrs, predRotMats, predShiftsAngs, comparedWeight = pj.align_particles(fimages, ctfs, rotmats)
+            maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight = pj.align_particles(fimages, ctfs, rotmats)
             print("GT Rots\n", torch.rad2deg(matrix_to_euler_angles(rotmats, RELION_EULER_CONVENTION)).squeeze(1)) #TODO: I don't trust matrix_to_euler
             print("Pred Rots\n",torch.rad2deg(matrix_to_euler_angles(predRotMats, RELION_EULER_CONVENTION)).squeeze(1))
 
             print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
             print("GT shifts\n", batch[BATCH_POSE_NAME][1])
-            print("pred shifts\n", predShiftsAngs.squeeze(1))
+            print("pred shifts\n", predShiftsAngsXY.squeeze(1))
             print("---------------------------------------------------")
             print()
 
@@ -452,10 +452,10 @@ def _test1():
                 for i, angName in enumerate(RELION_ANGLES_NAMES):
                     md[angName+suffix] = eulers[:,i]
                 for i, shiftName in enumerate(RELION_SHIFTS_NAMES):
-                    md[shiftName+suffix] = predShiftsAngs[:,topk,i].cpu().numpy()
+                    md[shiftName+suffix] = predShiftsAngsXY[:,topk,i].cpu().numpy()
                 md[PROJECTION_MATCHING_SCORE] = comparedWeight[:,topk,...].cpu().numpy()
             pd_list.append(pd.DataFrame(md))
-            del predRotMats, eulers, predShiftsAngs, comparedWeight
+            del predRotMats, eulers, predShiftsAngsXY, comparedWeight
         optics = getattr(dl.dataset, "particles", dl.dataset.datasets[0].particles).optics_md
         parts = pd.concat(pd_list)
         starfile.write(dict(optics=optics, particles=parts), filename="/tmp/particles.star")

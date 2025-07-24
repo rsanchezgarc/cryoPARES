@@ -113,7 +113,7 @@ class SingleInferencer:
     def _setup_reconstructor(self, symmetry: Optional[str]= None):
         if symmetry is None:
             symmetry = self._get_symmetry()
-        reconstructor = Reconstructor(symmetry=symmetry)
+        reconstructor = Reconstructor(symmetry=symmetry, correct_ctf=True)
         reconstructor._get_reconstructionParticlesDataset(self.particles_star_fname, self.particles_dir)
         self._reconstructor = reconstructor
         return reconstructor
@@ -202,7 +202,7 @@ class SingleInferencer:
 
     def _setup_dataloader(self, rank: Optional[int] = None):
         self._datamanager = self._get_datamanager(rank)
-        return  self._datamanager.predict_dataloader()
+        return self._datamanager.predict_dataloader()
 
     def _process_batch(self, model: PlModel, batch: Dict[str, Any] | None, batch_idx: int):
         """Process a single batch of data using predict_step."""
@@ -224,11 +224,11 @@ class SingleInferencer:
             result = model.flush()
         if result is None:
             return None
-        ids, pred_rotmats, pred_shifts, score, norm_nn_score = result
+        ids, pred_rotmats, pred_shiftsXYangs, score, norm_nn_score = result
         # Convert rotation matrices to euler angles
         euler_degs = torch.rad2deg(matrix_to_euler_angles(pred_rotmats, RELION_EULER_CONVENTION))
 
-        return ids, euler_degs, pred_shifts, score, norm_nn_score
+        return ids, euler_degs, pred_shiftsXYangs, score, norm_nn_score
 
     def run(self):
         if self.halfset == "allParticles":
@@ -274,11 +274,12 @@ class SingleInferencer:
                         all_results[batch_idx] = result
                     pbar.update(1)
                 result = self._process_batch(model, batch=None, batch_idx=-1) #This flushes the buffer
-                if result:
+                if result is not None:
                     all_results[-1] = result
             if self.perform_reconstruction and self.results_dir is not None:
                 out_fname = os.path.join(self.results_dir, f"reconstruction_{self.halfset}_nnet.mrc")
                 model.reconstructor.generate_volume(out_fname)
+                print(f"{out_fname} saved!", flush=True)
 
             # Aggregate results and save to STAR files
             particles_md = self._save_results(all_results, dataset)
@@ -288,17 +289,14 @@ class SingleInferencer:
 
 
     def _save_results(self, all_results: Dict[int, Any], dataset):
-        """Save results to STAR files using original aggregation logic."""
         print("Aggregating results and saving to STAR files...")
-        #TODO: This assumes that the order of the dataset is always fixed. The assumtion is safe if only one
-        #starfile is provided
 
         # Create result tensors
         n_particles = sum(len(v[0])for v in all_results.values())
         result_arrays = {
             'eulerdegs': torch.zeros((n_particles, self.top_k, 3), dtype=torch.float32),
             'score': torch.zeros((n_particles, self.top_k), dtype=torch.float32),
-            'shifts': torch.zeros((n_particles, self.top_k, 2), dtype=torch.float32),
+            'shiftsXYangs': torch.zeros((n_particles, self.top_k, 2), dtype=torch.float32),
             'top1_directional_zscore': torch.zeros((n_particles), dtype=torch.float32),
             'ids': [None]*n_particles
         }
@@ -306,16 +304,16 @@ class SingleInferencer:
         # Fill result arrays
         current_idx = 0
         for batch_idx in sorted(all_results.keys()):
-            idd, euler_degs, pred_shifts, maxprobs, top1_directional_zscore = all_results[batch_idx]
+            idd, euler_degs, pred_shiftsXYangs, maxprobs, top1_directional_zscore = all_results[batch_idx]
 
             batch_size = len(idd)
             end_idx = current_idx + batch_size
 
             result_arrays['eulerdegs'][current_idx:end_idx] = euler_degs.cpu()
             result_arrays['score'][current_idx:end_idx] = maxprobs.cpu()
-            if pred_shifts is None:
-                pred_shifts = torch.zeros(*euler_degs.shape[:-1], 2)
-            result_arrays['shifts'][current_idx:end_idx] = pred_shifts.cpu()
+            if pred_shiftsXYangs is None:
+                pred_shiftsXYangs = torch.zeros(*euler_degs.shape[:-1], 2)
+            result_arrays['shiftsXYangs'][current_idx:end_idx] = pred_shiftsXYangs.cpu()
             result_arrays['top1_directional_zscore'][current_idx:end_idx] = top1_directional_zscore.cpu()
             result_arrays['ids'][current_idx:end_idx] = idd
             current_idx = end_idx
@@ -331,15 +329,15 @@ class SingleInferencer:
             for k in range(self.top_k):
                 suffix = "" if k == 0 else f"_top{k}"
                 angles_names = [x + suffix for x in RELION_ANGLES_NAMES]
-                shifts_names = [x + suffix for x in RELION_SHIFTS_NAMES]
+                shiftsXYangs_names = [x + suffix for x in RELION_SHIFTS_NAMES]
                 confide_name = RELION_PRED_POSE_CONFIDENCE_NAME + suffix
 
                 particles_md[angles_names] = 0.
-                particles_md[shifts_names] = 0.
+                particles_md[shiftsXYangs_names] = 0.
                 particles_md[confide_name] = 0.
 
                 particles_md.loc[ids, angles_names] = result_arrays["eulerdegs"][..., k, :].numpy()
-                particles_md.loc[ids, shifts_names] = result_arrays["shifts"][..., k, :].numpy()
+                particles_md.loc[ids, shiftsXYangs_names] = result_arrays["shiftsXYangs"][..., k, :].numpy()
                 particles_md.loc[ids, confide_name] = result_arrays["score"][..., k].numpy()
                 #TODO: particles_md.loc[ids, confide_name] seems to NAN
 
@@ -351,6 +349,8 @@ class SingleInferencer:
                 out_fname = os.path.join(self.results_dir, basename + f"_{self.halfset}_nnet.star")
                 print(f"Results were saved at {out_fname}")
                 particlesSet.save(out_fname)
+
+
             return particles_md
 
     def __enter__(self):

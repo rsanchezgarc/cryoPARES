@@ -218,10 +218,12 @@ class ParticlesDataset(Dataset, ABC):
 
     def _correctCtfPhase(self, img, md_row):
         ctf, wimg = correct_ctf(img, float(self.particles.optics_md["rlnImagePixelSize"].item()),
-                                dfu=md_row["rlnDefocusU"], dfv=md_row["rlnDefocusV"], dfang=md_row["rlnDefocusAngle"],
+                                dfu=md_row["rlnDefocusU"], dfv=md_row["rlnDefocusV"],
+                                dfang=md_row["rlnDefocusAngle"],
                                 volt=float(self.particles.optics_md["rlnVoltage"][0]),
                                 cs=float(self.particles.optics_md["rlnSphericalAberration"][0]),
-                                w=float(self.particles.optics_md["rlnAmplitudeContrast"][0]), mode=self.ctf_correction)
+                                w=float(self.particles.optics_md["rlnAmplitudeContrast"][0]),
+                                mode=self.ctf_correction, fftshift=True)
         wimg = torch.clamp(wimg, img.min(), img.max())
         wimg = torch.nan_to_num(wimg, nan=img.mean())
         if self. ctf_correction_do_concat:
@@ -244,20 +246,20 @@ class ParticlesDataset(Dataset, ABC):
 
 
         iid = md_row[RELION_IMAGE_FNAME]
-        img_ori = torch.FloatTensor(img_ori).unsqueeze(0)
-        img_ori, ctf_ori = self._correctCtf(img_ori, md_row)
+        img_ori = torch.FloatTensor(img_ori)
+        img, ctf_ori = self._correctCtf(img_ori.unsqueeze(0), md_row)
 
-        if img_ori.isnan().any():
-            raise RuntimeError(f"Error, img with idx {item} is NAN")
+        if img.isnan().any():
+            raise RuntimeError(f"Error, img with idx {item} has NAN")
 
-        img = self.resizeImage(img_ori)
+        img = self.resizeImage(img)
         img = self._normalize(img) #I changed the order of the normalization call, in cesped it was before ctf correction
 
         degEuler = torch.FloatTensor([md_row[name] for name in RELION_ANGLES_NAMES])
         xyShiftAngs = torch.FloatTensor([md_row[name] for name in RELION_SHIFTS_NAMES])
         confidence = torch.FloatTensor([md_row.get(RELION_ORI_POSE_CONFIDENCE_NAME, 1)])
 
-        return iid, img, (degEuler, xyShiftAngs, confidence), md_row.to_dict(), (img_ori[0,...], ctf_ori)
+        return iid, img, (degEuler, xyShiftAngs, confidence), md_row.to_dict(), (img_ori, ctf_ori)
 
     @cached_property
     def symmetry_group(self):

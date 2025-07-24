@@ -126,17 +126,21 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
         return results
 
 
-    def _run_stage2(self, tensors, md):
+    def _run_stage2(self, tensors, md): #TODO: This could be speeded-up if localRefiner and reconstructor
+                                        #TODO: are fed with fourier transformed images
         #tensors.keys() -> ids, imgs, ctfs, rotmats, maxprobs, norm_nn_score
-        (maxCorrs, predRotMats, predShiftsAngs,
+        (maxCorrs, predRotMats, predShiftsAngsXY,
          comparedWeight) = self.localRefiner.forward(tensors['imgs'], tensors['ctfs'], tensors['rotmats'])
         score = torch.where(torch.isnan(comparedWeight), tensors['maxprobs'],
                             tensors['maxprobs'] * comparedWeight)
         if self.reconstructor is not None:
+            # assert all([tensors['imgs'][k].cpu().allclose(self.reconstructor.particlesDataset[int(md["ids"][k].split("@")[0].lstrip("0"))-1][1]) for k in range(tensors["imgs"].size(0))]), "Error, data preprocessing mismatch"
+            # assert all([tensors['ctfs'][k].cpu().allclose(self.reconstructor.particlesDataset[int(md["ids"][k].split("@")[0].lstrip("0"))-1][2]) for k in range(tensors["imgs"].size(0))]), "Error, data preprocessing mismatch"
+            # Both checks pass, hence, the imgs and the ctfs are the same as if they were coming from the standalone
             self.reconstructor._backproject_batch(tensors['imgs'], tensors['ctfs'],
-                           rotMats=predRotMats, hwShiftAngs=predShiftsAngs, zyx_matrices=False)
+                           rotMats=predRotMats, hwShiftAngs=predShiftsAngsXY.flip(-1), zyx_matrices=False)
 
-        return md['ids'], predRotMats, predShiftsAngs, score, tensors['norm_nn_score']
+        return md['ids'], predRotMats, predShiftsAngsXY, score, tensors['norm_nn_score']
 
     def flush(self):
         if self.buffer:

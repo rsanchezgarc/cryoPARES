@@ -87,7 +87,7 @@ def correct_ctf(image, sampling_rate, dfu, dfv, dfang, volt, cs, w, phase_shift=
         ctf, corrected_image: ctf is rfft, can be fftshifted or not. corrected_image is a real space image
     '''
 
-    ctf = compute_ctf_rfft(image.shape[-1], sampling_rate, dfu, dfv, dfang, volt, cs, w, phase_shift, bfactor,
+    ctf = compute_ctf_rfft(image.shape[-2], sampling_rate, dfu, dfv, dfang, volt, cs, w, phase_shift, bfactor,
                            fftshift=fftshift, device=image.device)
 
     # Apply 1D fftshift only on the first dimension (rows)

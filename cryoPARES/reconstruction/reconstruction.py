@@ -12,7 +12,7 @@ import mrcfile
 import torch
 import tqdm
 from starstack import ParticlesStarSet
-from starstack.constants import RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES, RELION_EULER_CONVENTION
+from starstack.constants import RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES, RELION_EULER_CONVENTION, RELION_IMAGE_FNAME
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
 from torch_fourier_shift import fourier_shift_dft_2d
@@ -146,7 +146,7 @@ class Reconstructor(nn.Module):
     def _get_reconstructionParticlesDataset(self, particles_star_fname, particles_dir, subset_idxs=None):
         particlesDataset = ReconstructionParticlesDataset(particles_star_fname, particles_dir,
                                                           correct_ctf=self.correct_ctf, subset_idxs=subset_idxs)
-
+        self.particlesDataset = particlesDataset #TODO: Remove this, only used for debug
         self.set_metadata_from_particles(particlesDataset)
         return particlesDataset
 
@@ -172,7 +172,7 @@ class Reconstructor(nn.Module):
                         multiprocessing_context="fork" if num_dataworkers > 0 else None)
 
         zyx_matrices = False
-        for bidx, (imgs, ctf, rotMats, hwShiftAngs) in enumerate(tqdm.tqdm(dl, desc=f"backprojecting PID({os.getpid()})",
+        for bidx, (ids, imgs, ctf, rotMats, hwShiftAngs) in enumerate(tqdm.tqdm(dl, desc=f"backprojecting PID({os.getpid()})",
                                                                            disable=not verbose)):
             self._backproject_batch(imgs, ctf, rotMats, hwShiftAngs, zyx_matrices)
             if use_only_n_first_batches and bidx > use_only_n_first_batches:
@@ -241,10 +241,6 @@ class Reconstructor(nn.Module):
             )
 
             # Update the volume Fourier space components
-            # self.numerator += torch.view_as_complex(dft_ctf[:2, ...].permute(1, 2, 3, 0).contiguous())
-            # self.numerator[...,0] += dft_ctf[0,...]
-            # self.numerator[...,1] += dft_ctf[1,...]
-            # self.numerator += dft_ctf[:2, ...].permute(1, 2, 3, 0)
             self.numerator += dft_ctf[:2, ...]
             self.ctfsq += dft_ctf[-1, ...]
             self.weights += weights
@@ -321,20 +317,20 @@ class ReconstructionParticlesDataset(Dataset):
             volt = float(self.particles.optics_md["rlnVoltage"][0])
             cs = float(self.particles.optics_md["rlnSphericalAberration"][0])
             w = float(self.particles.optics_md["rlnAmplitudeContrast"][0])
-
+            iid = md_row[RELION_IMAGE_FNAME]
             ctf = compute_ctf_rfft(img.shape[-2], self.sampling_rate, dfu, dfv, dfang, volt, cs, w,
                                    phase_shift=0, bfactor=None, fftshift=True,
                                    device="cpu")
         else:
             ctf = 0 #This is just an indicator that no ctf is going to be used. None cannot be used due to torch DataLoader
 
-        return img, ctf, rotMat, hwShiftAngs
+        return iid, img, ctf, rotMat, hwShiftAngs
 
 def reconstruct_starfile(particles_star_fname: str, symmetry: str, output_fname: str, particles_dir:Optional[str]=None,
                          num_dataworkers: int = 1, batch_size: int = 64, use_cuda: bool = True,
                          correct_ctf: bool = True, eps: float = 1e-3, min_denominator_value: float = 1e-4,
                          use_only_n_first_batches: Optional[int] = None,
-                         float32_matmul_precision: Optional[str] = None):
+                         float32_matmul_precision: Optional[str] = 'high'):
     """
 
     :param particles_star_fname: The particles to reconstruct
@@ -352,7 +348,7 @@ def reconstruct_starfile(particles_star_fname: str, symmetry: str, output_fname:
     :return:
     """
     if float32_matmul_precision is not None:
-        torch.set_float32_matmul_precision(float32_matmul_precision)  # 'high'
+        torch.set_float32_matmul_precision(float32_matmul_precision)
 
     device = "cpu" if not use_cuda else "cuda"
     reconstructor = Reconstructor(symmetry=symmetry, correct_ctf=correct_ctf, eps=eps,
@@ -450,3 +446,5 @@ if __name__ == "__main__":
     """
 --symmetry C1 --particles_star_fname /home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles.star --output_fname /tmp/reconstruction.mrc --use_only_n_first_batches 100    
     """
+
+    #TODO: Fix  Exception ignored in: <_io.BufferedWriter name=6> BrokenPipeError: [Errno 32] Broken pipe

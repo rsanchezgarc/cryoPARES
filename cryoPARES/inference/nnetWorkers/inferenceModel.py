@@ -34,21 +34,26 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
         self.buffer_size = before_refiner_buffer_size
         self.return_top_k = return_top_k
 
-        self.buffer = StreamingBuffer(
-            buffer_size=before_refiner_buffer_size,
-            processing_fn=self._run_stage2,
-        )
-
-    def forward(self, ids, imgs, fullSizeImg, fullSizeCtfs, top_k):
-        if self.normalizedScore_thr:
-            _top_k = 10 if top_k < 10 else top_k
+        if self.normalizedScore_thr is not None:
+            self.buffer = StreamingBuffer(
+                buffer_size=before_refiner_buffer_size,
+                processing_fn=self._run_stage2,
+            )
         else:
-            _top_k = top_k
+            self.buffer = None
+
+    def _firstforward(self, imgs, top_k):
+        _top_k = 10 if top_k < 10 else top_k
         _, _, _, pred_rotmats, maxprobs = self.so3model(imgs, _top_k)
 
         norm_nn_score = self.scoreNormalizer(pred_rotmats[:, 0, ...], maxprobs[:,:10].sum(1))
         pred_rotmats = pred_rotmats[:,:top_k]
         maxprobs = maxprobs[:,:top_k]
+        return pred_rotmats, maxprobs, norm_nn_score
+
+    def forward(self, ids, imgs, fullSizeImg, fullSizeCtfs, top_k):
+
+        pred_rotmats, maxprobs, norm_nn_score = self._firstforward(imgs, top_k)
         if self.normalizedScore_thr is not None:
             passing_mask = (norm_nn_score > self.normalizedScore_thr).squeeze()
             if not passing_mask.any():
@@ -83,13 +88,40 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
                                           "reconstruction")
         return out
 
+    def forward_without_buffer(self, ids, imgs, fullSizeImg, fullSizeCtfs, top_k):
+        """
+        A more efficient forward pass that bypasses the streaming buffer.
+        This is useful when no z-score filtering is applied and we want to process
+        batches directly without buffering.
+        """
+        pred_rotmats, maxprobs, norm_nn_score = self._firstforward(imgs, top_k)
+        if self.localRefiner is not None:
+            tensors = {
+                'imgs': fullSizeImg,
+                'ctfs': fullSizeCtfs,
+                'rotmats': pred_rotmats,
+                'maxprobs': maxprobs,
+                'norm_nn_score': norm_nn_score,
+            }
+            md = {'ids': ids}
+            out = self._run_stage2(tensors, md)
+        else:
+            out = (ids, pred_rotmats, None, maxprobs, norm_nn_score)
+            if self.reconstructor is not None:
+                raise NotImplementedError("Error, at the moment, local refinement is needed before"
+                                          "reconstruction")
+        return out
+
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         ids = batch[BATCH_IDS_NAME]
         imgs = batch[BATCH_PARTICLES_NAME]
         fullSizeImg = batch[BATCH_ORI_IMAGE_NAME]
         fullSizeCtfs = batch[BATCH_ORI_CTF_NAME]
         # metadata = batch[BATCH_MD_NAME]
-        results = self.forward(ids, imgs, fullSizeImg, fullSizeCtfs, top_k=self.return_top_k)
+        if self.normalizedScore_thr is not None:
+            results = self.forward(ids, imgs, fullSizeImg, fullSizeCtfs, top_k=self.return_top_k)
+        else:
+            results = self.forward_without_buffer(ids, imgs, fullSizeImg, fullSizeCtfs, top_k=self.return_top_k)
         # return ids, pred_rotmats, pred_shifts, maxprobs, norm_nn_score, metadata
         return results
 
@@ -107,7 +139,10 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
         return md['ids'], predRotMats, predShiftsAngs, score, tensors['norm_nn_score']
 
     def flush(self):
-        return self.buffer.flush()
+        if self.buffer:
+            return self.buffer.flush()
+        else:
+            return None
 
 def _update_config_for_test():
     main_config.models.image2sphere.lmax = 6

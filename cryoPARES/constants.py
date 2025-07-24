@@ -15,7 +15,7 @@ BATCH_MD_NAME: str = "md"
 BATCH_ORI_IMAGE_NAME: str = "oriparticle"
 BATCH_ORI_CTF_NAME: str = "oriCTF"
 
-DIRECTIONAL_ZSCORE_NAME = "rlnDirectinalZscore"
+DIRECTIONAL_ZSCORE_NAME = "rlnDirectionalZscore"
 PROJECTION_MATCHING_SCORE = "rlnProjMatchScore"
 
 #Name for directories or files

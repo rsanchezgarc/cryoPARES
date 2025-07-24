@@ -193,6 +193,8 @@ class PlModel(RotationPredictionMixin, pl.LightningModule):
                  batch_size=pred_rotmats.shape[0], sync_dist=True)
         self.log("val_geo_degs", error_degs.mean(), prog_bar=True, on_step=False, on_epoch=True,
                  batch_size=pred_rotmats.shape[0], sync_dist=True)
+        self.log("val_median_geo_degs", torch.median(error_degs), prog_bar=True, on_step=False,
+                 on_epoch=True, batch_size=pred_rotmats.shape[0], sync_dist=True)
 
         if batch_idx == 0:
             # Visualize the predicted rotmats and the ground truth rotmats with error
@@ -289,6 +291,7 @@ class PlModel(RotationPredictionMixin, pl.LightningModule):
                     gtRotmats.append(gt_rotmats)
 
                     if self.trainer.overfit_batches is not None and batch_idx > self.trainer.overfit_batches:
+                        print("stoping due to overfit_batches")
                         break
             predRotMats = torch.concat(predRotMats)
             gtRotmats = torch.concat(gtRotmats)

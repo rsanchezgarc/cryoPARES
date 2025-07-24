@@ -313,6 +313,8 @@ class SingleInferencer:
 
             result_arrays['eulerdegs'][current_idx:end_idx] = euler_degs.cpu()
             result_arrays['score'][current_idx:end_idx] = maxprobs.cpu()
+            if pred_shifts is None:
+                pred_shifts = torch.zeros(*euler_degs.shape[:-1], 2)
             result_arrays['shifts'][current_idx:end_idx] = pred_shifts.cpu()
             result_arrays['top1_directional_zscore'][current_idx:end_idx] = top1_directional_zscore.cpu()
             result_arrays['ids'][current_idx:end_idx] = idd

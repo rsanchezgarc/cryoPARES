@@ -6,6 +6,7 @@ import numpy as np
 import torch
 import yaml
 from lightning import seed_everything
+from scipy.spatial.transform import Rotation
 from tqdm import tqdm
 from typing import Optional, List, Literal, Dict, Any, Tuple
 
@@ -48,6 +49,7 @@ class SingleInferencer:
                  perform_reconstruction: bool = CONFIG_PARAM(),
                  update_progessbar_n_batches: int = CONFIG_PARAM(),
                  subset_idxs: Optional[List[int]] = None,
+                 n_first_particles: Optional[int]  = None
                  ):
         """
 
@@ -69,13 +71,16 @@ class SingleInferencer:
         :param perform_reconstruction:
         :param update_progessbar_n_batches:
         :param subset_idxs:
+        :param n_first_particles:
         """
 
         self.particles_star_fname = particles_star_fname
         self.particles_dir = particles_dir
 
         self.checkpoint_dir = checkpoint_dir
-
+        if n_first_particles is not None:
+            assert subset_idxs is None, "Error, only n_first_particles or subset_idxs can be provided"
+            subset_idxs = range(n_first_particles)
         assert os.path.isdir(checkpoint_dir), f"checkpoint_dir {checkpoint_dir} needs to be a directory"
         main_config.datamanager.num_augmented_copies_per_batch = 1  # We have not implemented test-time augmentation
 
@@ -136,9 +141,11 @@ class SingleInferencer:
     def _setup_model(self, rank: Optional[int] = None):
         """Setup the model for inference."""
 
-        so3Model_fname = os.path.join(self.checkpoint_dir, self.model_halfset, "checkpoints",
-                                      BEST_MODEL_SCRIPT_BASENAME)
-        so3Model = torch.jit.load(so3Model_fname)
+        # so3Model_fname = os.path.join(self.checkpoint_dir, self.model_halfset, "checkpoints", BEST_MODEL_SCRIPT_BASENAME)
+        # so3Model = torch.jit.load(so3Model_fname)
+
+        so3Model_fname = os.path.join(self.checkpoint_dir, self.model_halfset, "checkpoints", BEST_CHECKPOINT_BASENAME)
+        so3Model = PlModel.load_from_checkpoint(so3Model_fname)
 
         percentilemodel_fname = os.path.join(self.checkpoint_dir, self.model_halfset, "checkpoints",
                                              BEST_DIRECTIONAL_NORMALIZER)
@@ -233,11 +240,12 @@ class SingleInferencer:
                 batch = model.transfer_batch_to_device(batch, self.device, dataloader_idx=0)
             else:
                 # Fallback: manually transfer tensors
+                non_blocking = True
                 for key, value in batch.items():
                     if isinstance(value, torch.Tensor):
-                        batch[key] = value.to(device, non_blocking=True)
+                        batch[key] = value.to(device, non_blocking=non_blocking)
                     elif isinstance(value, (list, tuple)) and len(value) > 0 and isinstance(value[0], torch.Tensor):
-                        batch[key] = [v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for v in
+                        batch[key] = [v.to(device, non_blocking=non_blocking) if isinstance(v, torch.Tensor) else v for v in
                                       value]
 
             # Use predict_step as requested
@@ -314,7 +322,7 @@ class SingleInferencer:
             all_results = self._process_all_batches(model, dataloader, pbar=pbar)
             print("Aggregating results and saving to STAR files...")
             particles_md = self._save_particles_results(all_results, dataset)
-            print("Materializing reconstruction...")
+            if self.perform_reconstruction: print("Materializing reconstruction...")
             vol = self._save_reconstruction(self.perform_reconstruction)
             return particles_md, vol
         finally:
@@ -387,21 +395,21 @@ class SingleInferencer:
             "Duplicate particle IDs found in the inference results."
 
         # Create a mapping from particle ID to its index in the results array
-        id_to_result_idx = {id_val: i for i, id_val in enumerate(all_processed_ids_np)}
-
         particles_md_list = []
         for datIdx, _dataset in enumerate(dataset.datasets):
             particlesSet = _dataset.particles
             particles_md = particlesSet.particles_md
 
             # Find which of the processed IDs are in the current dataset's index
-            ids_to_update_in_df = particles_md.index.intersection(all_processed_ids_np)
+            ids_to_update_in_df = []
+            result_indices = []
+            for i, id_val in enumerate(all_processed_ids_np):
+                if id_val in particles_md.index:
+                    ids_to_update_in_df.append(id_val)
+                    result_indices.append(i)
 
             if len(ids_to_update_in_df) == 0:
                 continue
-
-            # Get the indices in the result_arrays that correspond to the IDs in this dataset
-            result_indices = [id_to_result_idx[id_val] for id_val in ids_to_update_in_df]
 
             # --- Assertion for shape consistency ---
             num_updates = len(ids_to_update_in_df)
@@ -421,9 +429,19 @@ class SingleInferencer:
                 for col in angles_names + shiftsXYangs_names + [confide_name]:
                     if col not in particles_md.columns:
                         particles_md[col] = 0.0
+                eulerdegs = result_arrays["eulerdegs"][result_indices, k, :].numpy()
 
-                particles_md.loc[ids_to_update_in_df, angles_names] = result_arrays["eulerdegs"][result_indices, k,
-                                                                      :].numpy()
+                ######### Debug code
+                r1 = Rotation.from_euler("ZYZ", eulerdegs, degrees=True)
+                r2 = Rotation.from_euler("ZYZ", particles_md.loc[ids_to_update_in_df, angles_names], degrees=True)
+                err = np.rad2deg((r1.inv() * r2).magnitude())
+                # print("Error degs:", err)
+                print("Median Error degs:", np.median(err))
+                # breakpoint()
+                ######## END of Debug code
+
+                particles_md.loc[ids_to_update_in_df, angles_names] = eulerdegs
+
                 particles_md.loc[ids_to_update_in_df, shiftsXYangs_names] = result_arrays["shiftsXYangs"][
                                                                             result_indices, k, :].numpy()
                 particles_md.loc[ids_to_update_in_df, confide_name] = result_arrays["score"][result_indices, k].numpy()
@@ -465,6 +483,9 @@ if __name__ == "__main__":
     assert os.path.isdir(args.checkpoint_dir), f"Error, checkpoint_dir {args.checkpoint_dir} not found"
     config_fname = get_most_recent_file(args.checkpoint_dir, "configs_*.yml")
     ConfigOverrideSystem.update_config_from_file(main_config, config_fname, drop_paths=["inference", "projmatching"])
+
+    main_config.models.image2sphere.so3components.i2sprojector.rand_fraction_points_to_project = 1
+    #TODO: Remove the previous line, it is for debugging only
 
     with SingleInferencer(**vars(args)) as inferencer:
         inferencer.run()

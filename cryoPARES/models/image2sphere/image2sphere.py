@@ -546,8 +546,26 @@ def _test_rotation_invariance(n_samples=10):
 
     return rotation_stats, baseline_stats
 
+def _test2():
+    _update_config_for_test()
+    b = 4
+    example_batch = get_example_random_batch(b, n_channels=3, seed=42)
+    imgs = example_batch[BATCH_PARTICLES_NAME]
+
+    import torchvision
+    encoder = nn.Sequential(*list(torchvision.models.resnet18(weights=torchvision.models.ResNet18_Weights.IMAGENET1K_V1).children())[:-2])
+
+    model = Image2Sphere(encoder=encoder, symmetry="C1", enforce_symmetry=True, example_batch=example_batch)
+    model.eval()
+    out = model(imgs, top_k=1)
+    print(out[4])
+    out2 = model(imgs[:2], top_k=1)
+    out3 = model(imgs[2:], top_k=1)
+    print(out2[4])
+    print(out3[4])
 
 if __name__ == "__main__":
-    _test()
+    # _test()
     # _test_rotation_invariance()
+    _test2()
     print("Done!")

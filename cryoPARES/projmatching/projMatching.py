@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import starfile
 import torch
+from lightning import seed_everything
 from scipy.spatial.transform import Rotation
 from torch import nn
 from torch.nn import functional as F
@@ -145,8 +146,9 @@ class ProjectionMatcher(nn.Module):
         projs = extract_central_slices_rfft_3d_multichannel(self.reference_vol, self.vol_shape,
                                                             rotation_matrices=rotmats, fftfreq_max= self.fftfreq_max,
                                                             zyx_matrices=False)
-        with torch.cuda.stream(self.background_stream):
-            projs = projs.permute([0, 1, 2, 4, 5, 3]).contiguous()
+        # with torch.cuda.stream(self.background_stream):
+        #     projs = projs.permute([0, 1, 2, 4, 5, 3]).contiguous()
+        projs = projs.permute([0, 1, 2, 4, 5, 3]).contiguous()
         return projs
 
     def _correlateCrossCorrelation(self, parts: torch.Tensor, projs: torch.Tensor) -> Tuple[torch.Tensor,torch.Tensor]:
@@ -189,6 +191,13 @@ class ProjectionMatcher(nn.Module):
         return perImgCorr, pixelShiftsXY
 
     def align_particles(self, fimgs, ctf, rotmats):
+        """
+
+        :param fimgs: Tensor of shape BxLx(L_rfft)x(2_real_img)
+        :param ctf:   Tensor of shape BxLx(L_rfft)
+        :param rotmats: Tensor of shape BxTx3x3
+        :return:
+        """
 
         # expanded_rotmats = torch.einsum("gij, btjk -> btgik", self.grid_rotmats, rotmats)
         expanded_rotmats = torch.matmul(rotmats.unsqueeze(2), self.grid_rotmats.unsqueeze(0).unsqueeze(0))
@@ -204,9 +213,12 @@ class ProjectionMatcher(nn.Module):
         # axes[1, 0].imshow(self._fourier_proj_to_real(cpu_projs)[1, 0, mat_idxs[0], ...])
         # axes[1, 1].imshow(self._fourier_proj_to_real(cpu_projs)[1, 0, mat_idxs[1], ...])
         # plt.show()
-        self.background_stream.synchronize()
+
+        # self.background_stream.synchronize()
+        # torch.cuda.current_stream().wait_stream(self.background_stream)
+
         if self.correct_ctf:
-            projs *= ctf[:, None, None, ..., None] #TODO. Multiply ctf in the particles
+            projs *= ctf[:, None, None, ..., None] #TODO. Multiply ctf.conj() in the particles
         del ctf
         perImgCorr, pixelShiftsXY = self._correlateCrossCorrelation(fimgs[:, None, None, ...], projs)
 
@@ -219,21 +231,22 @@ class ProjectionMatcher(nn.Module):
         return maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight
 
     def forward(self, imgs, ctfs, rotmats):
-        with torch.cuda.stream(self.background_stream):
-            fimages = self._real_to_fourier(imgs)
+        # with torch.cuda.stream(self.background_stream):
+        #     fimages = self._real_to_fourier(imgs)
+        fimages = self._real_to_fourier(imgs)
         maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight = self.align_particles(fimages, ctfs, rotmats)
         return maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight
 
 #TODO: we should define a _analyze_cross_correlation_FACTORY to use main_config.projmatching properly
 @torch.compile(fullgraph=True, disable=main_config.projmatching.disable_compile_analyze_cc,
-               mode=main_config.projmatching.compile_analyze_cc_mode)
+               mode=main_config.projmatching.compile_analyze_cc_mode, dynamic=True)
 def _analyze_cross_correlation(perImgCorr:torch.Tensor, pixelShiftsXY:torch.Tensor, grid_rotmats:torch.Tensor,
                                return_top_k:int, half_particle_size:float,
                                vol_voxel_size:float) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
 
     b, topk, nrots = perImgCorr.shape
     batch_arange= torch.arange(b, device=perImgCorr.device).unsqueeze(1)
-    topk_arange= torch.arange(topk, device=perImgCorr.device).unsqueeze(1)
+
     reshaped_perImgCorr = perImgCorr.reshape(b, -1)
     maxCorrs, maxIdxs = reshaped_perImgCorr.topk(return_top_k, largest=True, sorted=True)
     bestPixelShiftsXY = pixelShiftsXY.reshape(b, -1, 2)[batch_arange, maxIdxs]
@@ -241,8 +254,10 @@ def _analyze_cross_correlation(perImgCorr:torch.Tensor, pixelShiftsXY:torch.Tens
     std_corr = torch.std(reshaped_perImgCorr, dim=-1, keepdim=True)
     comparedWeight = torch.distributions.Normal(mean_corr, std_corr+1e-6).cdf(maxCorrs)  # 1-P(I_i > All_images)
     predShiftsAngsXY = -(bestPixelShiftsXY - half_particle_size) * vol_voxel_size
+
+    topk_input_indices = maxIdxs // nrots
     predRotMatsIdxs = maxIdxs % nrots
-    predRotMats = grid_rotmats[batch_arange, topk_arange, predRotMatsIdxs]
+    predRotMats = grid_rotmats[batch_arange, topk_input_indices, predRotMatsIdxs]
 
     return maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight
 
@@ -262,7 +277,7 @@ def _get_begin_end_from_max_shift(image_shape, max_shift):
 
 #TODO: we should define a _extract_ccor_maxFACTORY to use main_config.projmatching properly
 @torch.compile(disable=main_config.projmatching.disable_compile_analyze_cc,
-               mode=main_config.projmatching.compile_analyze_cc_mode)
+               mode=main_config.projmatching.compile_analyze_cc_mode, dynamic=True)
 def _extract_ccor_max(corrs, max_shift_fraction):
     pixelShiftsXY = torch.empty(corrs.shape[:-2] + (2,), device=corrs.device, dtype=torch.int64)
 
@@ -280,7 +295,7 @@ def _extract_ccor_max(corrs, max_shift_fraction):
 
 #TODO: we should define a correlate_dft_2d_FACTORY to use main_config.projmatching properly
 @torch.compile(fullgraph=True, disable=main_config.projmatching.disable_compile_correlate_dft_2d,
-               mode=main_config.projmatching.compile_correlate_dft_2d_mode)
+               mode=main_config.projmatching.compile_correlate_dft_2d_mode, dynamic=True)
 def correlate_dft_2d(
     parts: torch.Tensor,
     projs: torch.Tensor,
@@ -359,6 +374,7 @@ def compute_dft_3d(
 
 
 def _test0():
+    seed_everything(111)
     device = "cuda"
     batch_size = 16
     input_topk_mats = 2
@@ -382,8 +398,10 @@ def _test0():
     print("DONE", time.time()-t)
 
 def _test1():
+    seed_everything(111)
+
     device = "cuda"
-    batch_size = 32
+    batch_size = 16
 
     torch.set_float32_matmul_precision('high')
     pj = ProjectionMatcher(reference_vol=os.path.expanduser("~/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles_reconstruct.mrc"),
@@ -460,5 +478,69 @@ def _test1():
         parts = pd.concat(pd_list)
         starfile.write(dict(optics=optics, particles=parts), filename="/tmp/particles.star")
 
+def _test3():
+    seed_everything(111)
+    device = "cpu"
+    pj = ProjectionMatcher(reference_vol=os.path.expanduser(
+        "~/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles_reconstruct.mrc"),
+                           grid_distance_degs=10,  # 12
+                           grid_step_degs=5,  # 2
+                           pixel_size=None,
+                           filter_resolution_angst=6,
+                           max_shift_fraction=None,
+                           return_top_k=1,
+                           correct_ctf=False)
+    pj = pj.to(device)
+    from cryoPARES.datamanager.datamanager import DataManager
+    datamanager = DataManager(
+          # star_fnames=[os.path.expanduser("~/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles.star")],
+          star_fnames=[os.path.expanduser("~/cryo/data/preAlignedParticles/EMPIAR-10166/data/projections/proj_noCTF_no_shifts.star")],
+          symmetry="C1",
+          batch_size=32,
+          particles_dir=[os.path.expanduser("~/cryo/data/preAlignedParticles/EMPIAR-10166/data/")],
+          halfset=None,
+          save_train_val_partition_dir=None,
+          is_global_zero=True,
+          return_ori_imagen=True,
+          num_augmented_copies_per_batch=1,
+          num_data_workers=2)
+    dl = datamanager._create_dataloader()
+    for bix, batch in enumerate(dl):
+        imgs = batch[BATCH_ORI_IMAGE_NAME].to(device, non_blocking=True)
+        ctfs = batch[BATCH_ORI_CTF_NAME].to(device, non_blocking=True)
+        rotmats = batch[BATCH_POSE_NAME][0].unsqueeze(1).to(device, non_blocking=True)
+        break
+    imgs = imgs[:1, 0].expand(8, -1,-1)
+    ctfs = ctfs[:1].expand(8, -1, -1)
+    rotmats = rotmats[:1].expand(8, -1, -1, -1)
+
+    batch8 = pj.align_particles(pj._real_to_fourier(imgs), ctfs, rotmats)[1]
+    batch1 = pj.align_particles(pj._real_to_fourier(imgs[:1]), ctfs[:1], rotmats[:1])[1]
+    print(torch.max(torch.abs(batch8[::4] - batch1)))
+
+    # fabricate ONE random particle + CTF and its pose
+    H, W = pj.reference_vol.shape[-2:]
+    img = torch.randn(1, H, H, device=device)
+    ctf = torch.rand(1, H, W, device=device)
+    rotm = torch.eye(3, device=device).expand(1, 1, 3, 3)  # identity pose
+
+    f1 = pj._real_to_fourier(img)  # batch = 1
+    f8 = pj._real_to_fourier(img.expand(8, -1, -1))  # batch = 8
+
+    m1 = pj.align_particles(f1, ctf, rotm)[1][:,0]  # predicted rot for B=1
+    m8 = pj.align_particles(f8, ctf.expand_as(f8[...,0]),
+                            rotm.expand(8, -1, -1, -1))[1][:, 0]  # pick first top‑k
+
+    print(m1)
+    print(m8)
+
+    from cryoPARES.geometry.metrics_angles import rotation_error_rads
+    print("Δ‑angle (deg) between B=1 and B=8:",
+          torch.rad2deg(torch.max(rotation_error_rads(m1, m8))))
+    print("It should be close to 0")
+
+    print("Done")
+
 if __name__ == "__main__":
-    _test1()
+    # _test1()
+    _test3()

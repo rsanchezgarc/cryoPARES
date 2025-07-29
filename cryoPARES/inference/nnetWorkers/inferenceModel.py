@@ -53,7 +53,6 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
 
     def forward(self, ids, imgs, fullSizeImg, fullSizeCtfs, top_k):
 
-        #TODO: The forward using buffer seems to be broken
         pred_rotmats, maxprobs, norm_nn_score = self._firstforward(imgs, top_k)
         if self.normalizedScore_thr is not None:
             passing_mask = (norm_nn_score > self.normalizedScore_thr).squeeze()
@@ -129,18 +128,22 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
         if self.normalizedScore_thr is not None:
             results = self.forward(ids, imgs, fullSizeImg, fullSizeCtfs, top_k=self.return_top_k)
         else:
+
             results = self.forward_without_buffer(ids, imgs, fullSizeImg, fullSizeCtfs, top_k=self.return_top_k)
-        # return ids, pred_rotmats, pred_shifts, maxprobs, norm_nn_score, metadata
+        ## return ids, pred_rotmats, pred_shifts, maxprobs, norm_nn_score
+        # from scipy.spatial.transform import Rotation
+        # from cryoPARES.constants import  BATCH_MD_NAME, RELION_IMAGE_FNAME,RELION_ANGLES_NAMES
+        # import pandas as pd
+        # print(pd.DataFrame(batch[BATCH_MD_NAME])[[RELION_IMAGE_FNAME] + RELION_ANGLES_NAMES])
+        # print(Rotation.from_matrix(results[1][:,0,...].detach().cpu()).as_euler("ZYZ", degrees=True).round(0))
+        # breakpoint()
         return results
-
-
 
     def _run_stage2(self, **kwargs): #TODO: This could be speeded-up if localRefiner and reconstructor
                                         #TODO: are fed with fourier transformed images
         #tensors.keys() -> imgs, ctfs, rotmats, maxprobs, norm_nn_score
         (maxCorrs, predRotMats, predShiftsAngsXY,
          comparedWeight) = self.localRefiner.forward(kwargs['imgs'], kwargs['ctfs'], kwargs['rotmats'])
-
         score = torch.where(torch.isnan(comparedWeight), kwargs['maxprobs']*0.5, kwargs['maxprobs'] * comparedWeight)
 
         if self.reconstructor is not None:

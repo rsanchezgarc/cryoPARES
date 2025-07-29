@@ -53,20 +53,21 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
 
     def forward(self, ids, imgs, fullSizeImg, fullSizeCtfs, top_k):
 
+        #TODO: The forward using buffer seems to be broken
         pred_rotmats, maxprobs, norm_nn_score = self._firstforward(imgs, top_k)
         if self.normalizedScore_thr is not None:
             passing_mask = (norm_nn_score > self.normalizedScore_thr).squeeze()
             if not passing_mask.any():
                 return None
-            valid_indices = torch.where(passing_mask)[0].cpu().tolist()
+            valid_indices = torch.where(passing_mask)[0].to("cpu", non_blocking=True)
             #fimg, ctf, rotmats
             batch_to_add = {
-                'ids': [ids[i] for i in valid_indices],
-                'imgs': fullSizeImg[passing_mask],  # Use the device-specific tensor
+                'imgs': fullSizeImg[passing_mask],
                 'ctfs': fullSizeCtfs[passing_mask],
                 'rotmats': pred_rotmats[passing_mask],
                 'maxprobs': maxprobs[passing_mask],
                 'norm_nn_score': norm_nn_score[passing_mask],
+                'ids': [ids[i] for i in valid_indices.tolist()],
             }
         else:
             batch_to_add = {
@@ -77,7 +78,6 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
                 'maxprobs': maxprobs,
                 'norm_nn_score': norm_nn_score,
             }
-
         if self.localRefiner is not None:
             out = self.buffer.add_batch(batch_to_add)
         else:
@@ -96,15 +96,23 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
         """
         pred_rotmats, maxprobs, norm_nn_score = self._firstforward(imgs, top_k)
         if self.localRefiner is not None:
-            tensors = {
+            kwargs = {
                 'imgs': fullSizeImg,
                 'ctfs': fullSizeCtfs,
                 'rotmats': pred_rotmats,
                 'maxprobs': maxprobs,
                 'norm_nn_score': norm_nn_score,
-            }
-            md = {'ids': ids}
-            out = self._run_stage2(tensors, md)
+                'ids': ids}
+            out = self._run_stage2(**kwargs)
+            # tensors = {
+            #     'imgs': fullSizeImg,
+            #     'ctfs': fullSizeCtfs,
+            #     'rotmats': pred_rotmats,
+            #     'maxprobs': maxprobs,
+            #     'norm_nn_score': norm_nn_score,
+            # }
+            # md = {'ids': ids}
+            # out = self._run_stage2(tensors, md)
         else:
             out = (ids, pred_rotmats, None, maxprobs, norm_nn_score)
             if self.reconstructor is not None:
@@ -126,25 +134,25 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
         return results
 
 
-    def _run_stage2(self, tensors, md): #TODO: This could be speeded-up if localRefiner and reconstructor
+
+    def _run_stage2(self, **kwargs): #TODO: This could be speeded-up if localRefiner and reconstructor
                                         #TODO: are fed with fourier transformed images
-        #tensors.keys() -> ids, imgs, ctfs, rotmats, maxprobs, norm_nn_score
+        #tensors.keys() -> imgs, ctfs, rotmats, maxprobs, norm_nn_score
         (maxCorrs, predRotMats, predShiftsAngsXY,
-         comparedWeight) = self.localRefiner.forward(tensors['imgs'], tensors['ctfs'], tensors['rotmats'])
-        score = torch.where(torch.isnan(comparedWeight), tensors['maxprobs'],
-                            tensors['maxprobs'] * comparedWeight)
+         comparedWeight) = self.localRefiner.forward(kwargs['imgs'], kwargs['ctfs'], kwargs['rotmats'])
+
+        score = torch.where(torch.isnan(comparedWeight), kwargs['maxprobs']*0.5, kwargs['maxprobs'] * comparedWeight)
+
         if self.reconstructor is not None:
-            # assert all([tensors['imgs'][k].cpu().allclose(self.reconstructor.particlesDataset[int(md["ids"][k].split("@")[0].lstrip("0"))-1][1]) for k in range(tensors["imgs"].size(0))]), "Error, data preprocessing mismatch"
-            # assert all([tensors['ctfs'][k].cpu().allclose(self.reconstructor.particlesDataset[int(md["ids"][k].split("@")[0].lstrip("0"))-1][2]) for k in range(tensors["imgs"].size(0))]), "Error, data preprocessing mismatch"
-            # Both checks pass, hence, the imgs and the ctfs are the same as if they were coming from the standalone
-            self.reconstructor._backproject_batch(tensors['imgs'], tensors['ctfs'],
+            self.reconstructor._backproject_batch(kwargs['imgs'], kwargs['ctfs'],
                            rotMats=predRotMats, hwShiftAngs=predShiftsAngsXY.flip(-1), zyx_matrices=False)
 
-        return md['ids'], predRotMats, predShiftsAngsXY, score, tensors['norm_nn_score']
+        return kwargs['ids'], predRotMats, predShiftsAngsXY, score, kwargs['norm_nn_score']
 
     def flush(self):
         if self.buffer:
-            return self.buffer.flush()
+            results = self.buffer.flush()
+            return results
         else:
             return None
 

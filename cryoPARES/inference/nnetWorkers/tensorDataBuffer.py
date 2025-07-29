@@ -1,7 +1,8 @@
-import numpy as np
-import torch
-from typing import List, Dict, Any, Callable, Optional
+import functools
+import itertools
+from typing import Callable, Dict, List, Any, Union
 
+import torch
 from torch import nn
 
 
@@ -9,261 +10,222 @@ class StreamingBuffer(nn.Module):
     def __init__(
             self,
             buffer_size: int,
-            processing_fn: Callable[[Dict[str, torch.Tensor], Dict[str, List]], List[Any]],
-    ):
+            processing_fn: Callable[[Dict[str, torch.Tensor]], Any],
+            max_buffer_capacity: int = None,
+    ) -> None:
         super().__init__()
-        if buffer_size <= 0:
-            raise ValueError("buffer_size must be a positive integer.")
+        if max_buffer_capacity is not None and max_buffer_capacity < buffer_size:
+            raise ValueError("max_buffer_capacity must be greater than or equal to buffer_size")
+
         self.buffer_size = buffer_size
         self.processing_fn = processing_fn
-        self.current_fill = 0
-        self.initialized = False
-        self.tensor_buffers: Dict[str, torch.Tensor] = {}
-        # Stores metadata in a column-oriented format
-        self.metadata_buffers: Dict[str, List] = {}
+        self.max_capacity = max_buffer_capacity or (buffer_size * 2)
 
-    def _initialize(self, sample_item: Dict[str, Any]):
-        for key, value in sample_item.items():
-            if isinstance(value, torch.Tensor):
+        self.tensor_buffers = {}
+        self.list_buffers = {}
+        self.total_items = 0
+
+    def _ensure_buffer_exists(self, key: str, value: Union[torch.Tensor, List]):
+        if isinstance(value, torch.Tensor):
+            if key not in self.tensor_buffers:
+                buffer_shape = (self.max_capacity,) + value.shape[1:]
                 self.tensor_buffers[key] = torch.empty(
-                    (self.buffer_size,) + value.shape, dtype=value.dtype,device=value.device,
+                    buffer_shape, dtype=value.dtype, device=value.device
                 )
-            else:  # For metadata, create a pre-allocated list
-                self.metadata_buffers[key] = [None] * self.buffer_size
-        self.initialized = True
+        elif isinstance(value, list):
+            if key not in self.list_buffers:
+                self.list_buffers[key] = [None] * self.max_capacity
 
-    def to(self, device: str, *args, **kwargs):
-        for key, tensor in self.tensor_buffers.items():
-            self.tensor_buffers[key] = tensor.to(device)
-        return self
-
-    def _process(self) -> None | List[Any]:
-        if self.current_fill == 0:
+    def add_batch(self, batch: Dict[str, Union[torch.Tensor, List[Any]]]) -> Any:
+        new_batch_size = len(next(iter(batch.values()))) if batch else 0
+        if new_batch_size == 0:
             return None
-        active_tensors = {k: v[:self.current_fill].clone() for k, v in self.tensor_buffers.items()}
-        # Create a dictionary of metadata columns
-        active_metadata = {k: v[:self.current_fill] for k, v in self.metadata_buffers.items()}
-        processed_results = self.processing_fn(active_tensors, active_metadata)
-        self.current_fill = 0
-        return processed_results
 
-    def add_batch(self, batch_dict: Dict[str, Any]) -> Optional[List[Any]]:
-        if not batch_dict: return None
-        batch_size = len(next(iter(batch_dict.values()), []))
-        if batch_size == 0: return None
-        if not self.initialized:
-            self._initialize({key: value[0] for key, value in batch_dict.items()})
+        for key, value in batch.items():
+            self._ensure_buffer_exists(key, value)
 
         all_processed_results = []
-        items_added = 0
-        while items_added < batch_size:
-            space = self.buffer_size - self.current_fill
-            if space == 0:
-                results = self._process()
-                if results: all_processed_results.append(results)
-                space = self.buffer_size
 
-            num_to_add = min(batch_size - items_added, space)
-            src, dest = slice(items_added, items_added + num_to_add), slice(self.current_fill,
-                                                                            self.current_fill + num_to_add)
+        buffered_items_available = self.total_items
+        new_batch_items_available = new_batch_size
 
-            for key, value in batch_dict.items():
-                if key in self.tensor_buffers:
-                    self.tensor_buffers[key][dest] = value[src]
-                elif key in self.metadata_buffers:
-                    self.metadata_buffers[key][dest] = value[src]
+        buffered_items_pos = 0
+        new_batch_items_pos = 0
 
-            self.current_fill += num_to_add
-            items_added += num_to_add
+        while buffered_items_available + new_batch_items_available >= self.buffer_size:
+            num_from_buffer = min(buffered_items_available, self.buffer_size)
+            num_from_new = self.buffer_size - num_from_buffer
 
-        if self.current_fill >= self.buffer_size:
-            results = self._process()
-            if results: all_processed_results.append(results)
-        if all_processed_results:
-            transposed_items = zip(*all_processed_results)
-            all_processed_results = [concat_items_along_first_dim(list(col_items)) for col_items in
-                                transposed_items]
-            return all_processed_results
-        else:
+            chunk_to_process = {}
+            for key, new_data in batch.items():
+                if isinstance(new_data, torch.Tensor):
+                    slice1 = self.tensor_buffers[key][buffered_items_pos: buffered_items_pos + num_from_buffer]
+                    slice2 = new_data[new_batch_items_pos: new_batch_items_pos + num_from_new]
+                    if num_from_buffer > 0 and num_from_new > 0:
+                        chunk_to_process[key] = torch.cat((slice1, slice2), dim=0)
+                    else:
+                        chunk_to_process[key] = slice1 if num_from_new == 0 else slice2
+                else:  # list
+                    slice1 = self.list_buffers[key][buffered_items_pos: buffered_items_pos + num_from_buffer]
+                    slice2 = new_data[new_batch_items_pos: new_batch_items_pos + num_from_new]
+                    chunk_to_process[key] = slice1 + slice2
+
+            result = self.processing_fn(**chunk_to_process)
+            all_processed_results.append(result)
+
+            buffered_items_pos += num_from_buffer
+            buffered_items_available -= num_from_buffer
+            new_batch_items_pos += num_from_new
+            new_batch_items_available -= num_from_new
+
+        # 3. Create a single batch of all leftover items.
+        total_leftovers = buffered_items_available + new_batch_items_available
+        self.total_items = total_leftovers
+
+        if total_leftovers > 0:
+            leftover_batch = {}
+            for key, new_data in batch.items():
+                if isinstance(new_data, torch.Tensor):
+                    s1 = self.tensor_buffers[key][buffered_items_pos: buffered_items_pos + buffered_items_available]
+                    s2 = new_data[new_batch_items_pos:]
+                    leftover_batch[key] = torch.cat((s1, s2)) if buffered_items_available > 0 else s2
+                else:  # list
+                    s1 = self.list_buffers[key][buffered_items_pos: buffered_items_pos + buffered_items_available]
+                    s2 = new_data[new_batch_items_pos:]
+                    leftover_batch[key] = s1 + s2
+
+            # 4. Store the single leftover_batch in the clean buffers
+            for key, data in leftover_batch.items():
+                if isinstance(data, torch.Tensor):
+                    self.tensor_buffers[key][:total_leftovers] = data
+                else:
+                    self.list_buffers[key][:total_leftovers] = data
+
+        if not all_processed_results:
             return None
 
-    def flush(self) -> List[Any]:
-        return self._process()
+        return self._combine_results(all_processed_results) if len(all_processed_results) > 1 else \
+        all_processed_results[0]
+
+    def flush(self):
+        if self.total_items == 0:
+            return None
+
+        batch_to_process = {key: buf[:self.total_items] for key, buf in self.tensor_buffers.items()}
+        batch_to_process.update({key: buf[:self.total_items] for key, buf in self.list_buffers.items()})
+
+        result = self.processing_fn(**batch_to_process) if batch_to_process else None
+        self.total_items = 0
+        return result
+
+    def _combine_results(self, all_results):
+        all_results = [res for res in all_results if res is not None]
+        if not all_results: return None
+
+        first_item = all_results[0]
+
+        if isinstance(first_item, torch.Tensor):
+            return torch.cat(all_results, dim=0)
+
+        if isinstance(first_item, (list, tuple)):
+            combined_result = []
+            num_outputs = len(first_item)
+            for i in range(num_outputs):
+                output_parts = [result[i] for result in all_results]
+                if not output_parts: continue
+
+                if isinstance(output_parts[0], torch.Tensor):
+                    combined_result.append(torch.cat(output_parts, dim=0))
+                elif isinstance(output_parts[0], list):
+                    combined_result.append(list(itertools.chain.from_iterable(output_parts)))
+                else:
+                    combined_result.append(output_parts)
+            return combined_result
+
+        else:  # Handle scalar results like int, float
+            return all_results
 
 
-def concat_items_along_first_dim(items):
-    """
-    Concatenates a list of items along their first dimension, handling
-    torch.Tensor, numpy.ndarray, and Python lists.
+# ==================================================================
+#                           TEST FUNCTIONS
+# ==================================================================
 
-    Args:
-        items (list): A list of items of the same type (or convertible types).
+def test_comprehensive_chunking_scenarios():
+    """Tests multiple scenarios for the buffer's chunking logic."""
+    print("\n=== Comprehensive Chunking and Buffering Test ===")
 
-    Returns:
-        The concatenated result, or a list if other types.
-    """
-    if not items:
-        return []
+    scenarios = [
+        ("Small batch, no processing", 5, 4, [], 9),
+        ("Small batch, triggers processing", 7, 8, [10], 5),
+        ("Large batch, multiple chunks, exact", 5, 15, [10, 10], 0),
+        ("Large batch, multiple chunks, with leftovers", 5, 18, [10, 10], 3),
+        ("Empty buffer, large batch with leftovers", 0, 23, [10, 10], 3),
+        ("Empty buffer, small batch", 0, 7, [], 7),
+    ]
 
-    first_item = items[0]
+    for name, initial_items, new_batch_size, expected_chunks, expected_leftovers in scenarios:
+        print(f"\n--- Testing Scenario: {name} ---")
 
-    if isinstance(first_item, torch.Tensor):
-        return torch.cat(items, dim=0)
-    elif isinstance(first_item, np.ndarray):
-        return np.concatenate(items, axis=0)
-    elif isinstance(first_item, list):
-        # Flatten and extend for lists
-        concatenated_list = []
-        for sublist in items:
-            concatenated_list.extend(sublist)
-        return concatenated_list
-    else:
-        # Fallback for other types: simply collect them into a new list
-        # This handles strings, ints, floats, booleans, etc.
-        return list(items)
+        proc_results = []
 
-# ============================================================================
-# Test Battery for StreamingBuffer
-# ============================================================================
-class TestStreamingBuffer:
-    def _setup(self):
-        """Creates a mock processing function that logs calls."""
-        self.mock_call_log = []
+        def proc_fn(**kwargs):
+            chunk_size = kwargs['data'].shape[0]
+            proc_results.append(chunk_size)
+            return chunk_size
 
-        def mock_processing_fn(tensors, metadata):
-            self.mock_call_log.append({'tensors': tensors, 'metadata': metadata})
-            # Return a predictable value, like the IDs
-            return metadata.get('id', [])
+        buffer = StreamingBuffer(buffer_size=10, processing_fn=proc_fn, max_buffer_capacity=20)
 
-        return mock_processing_fn
+        if initial_items > 0:
+            buffer.add_batch({'data': torch.randn(initial_items, 2)})
+        print(f"Initial state: {buffer.total_items} items in buffer.")
+        assert buffer.total_items == initial_items
 
-    def test_initialization(self):
-        print("Running: test_initialization")
-        processing_fn = self._setup()
-        buffer = StreamingBuffer(buffer_size=10, processing_fn=processing_fn)
-        assert buffer.buffer_size == 10 and not buffer.initialized
-        try:
-            StreamingBuffer(buffer_size=0, processing_fn=processing_fn)
-            assert False, "Should raise ValueError for non-positive buffer size"
-        except ValueError:
-            pass  # Expected
-        print("✓ PASSED\n")
+        proc_results.clear()
+        buffer.add_batch({'data': torch.randn(new_batch_size, 2)})
 
-    def test_flush_empty_buffer(self):
-        print("Running: test_flush_empty_buffer")
-        processing_fn = self._setup()
-        buffer = StreamingBuffer(buffer_size=5, processing_fn=processing_fn)
-        results = buffer.flush()
-        assert not results
-        assert len(self.mock_call_log) == 0
-        print("✓ PASSED\n")
+        print(f"add_batch({new_batch_size}) -> Processed chunks: {proc_results}, Leftovers: {buffer.total_items}")
 
-    def test_flush_non_full_buffer(self):
-        print("Running: test_flush_non_full_buffer")
-        processing_fn = self._setup()
-        buffer = StreamingBuffer(buffer_size=10, processing_fn=processing_fn)
-        batch = {'id': [0, 1, 2], 'data': torch.randn(3, 2)}
-        buffer.add_batch(batch)
-        assert buffer.current_fill == 3
+        assert proc_results == expected_chunks
+        assert buffer.total_items == expected_leftovers
 
-        results = buffer.flush()
-        assert results == [0, 1, 2]
-        assert buffer.current_fill == 0
-        print("✓ PASSED\n")
+        if buffer.total_items > 0:
+            flushed_size = buffer.flush()
+            print(f"flush() -> Flushed size: {flushed_size}, Final leftovers: {buffer.total_items}")
+            assert flushed_size == expected_leftovers
+            assert buffer.total_items == 0
 
-    def test_data_correctness_in_processing_fn(self):
-        print("Running: test_data_correctness_in_processing_fn")
-        processing_fn = self._setup()
-        buffer = StreamingBuffer(buffer_size=2, processing_fn=processing_fn)
+        print(f"SCENARIO PASSED.")
 
-        batch = {
-            'id': [10, 20],
-            'name': ['A', 'B'],
-            'data': torch.tensor([[1., 1.], [2., 2.]])
-        }
-        buffer.add_batch(batch)
 
-        assert len(self.mock_call_log) == 1
-        call_data = self.mock_call_log[0]
+def test_mixed_data_types():
+    """Test with mixed tensors and lists."""
+    print("\n=== Mixed Data Types Test ===")
 
-        assert torch.equal(call_data['tensors']['data'], batch['data'])
-        assert call_data['metadata']['id'] == [10, 20]
-        assert call_data['metadata']['name'] == ['A', 'B']
-        print("✓ PASSED\n")
+    def proc_fn(**kwargs):
+        return (kwargs['names'], kwargs['data'])
 
-    def test_no_tensor_data(self):
-        print("Running: test_no_tensor_data")
-        processing_fn = self._setup()
-        buffer = StreamingBuffer(buffer_size=3, processing_fn=processing_fn)
+    buffer = StreamingBuffer(buffer_size=3, processing_fn=proc_fn, max_buffer_capacity=5)
 
-        batch = {'id': [101, 102]}
-        buffer.add_batch(batch)
-        results = buffer.flush()
+    buffer.add_batch({'names': ['A', 'B'], 'data': torch.ones(2, 1)})
+    assert buffer.total_items == 2
 
-        assert results == [101, 102]
-        assert not self.mock_call_log[0]['tensors']  # Tensors dict should be empty
-        print("✓ PASSED\n")
+    results = buffer.add_batch({'names': ['C', 'D', 'E'], 'data': torch.ones(3, 1)})
+    print(f"Processed names: {results[0]}")
+    print(f"Leftover items: {buffer.total_items}")
 
-    def test_reuse_buffer_after_flush(self):
-        print("Running: test_reuse_buffer_after_flush")
-        processing_fn = self._setup()
-        buffer = StreamingBuffer(buffer_size=5, processing_fn=processing_fn)
+    assert results[0] == ['A', 'B', 'C']
+    assert results[1].shape[0] == 3
+    assert buffer.total_items == 2
 
-        buffer.add_batch({'id': list(range(7))})  # Causes one overflow
-        buffer.flush()
-        assert len(self.mock_call_log) == 2
-
-        buffer.add_batch({'id': list(range(100, 103))})
-        results = buffer.flush()
-        assert results == [100, 101, 102]
-        assert len(self.mock_call_log) == 3
-        print("✓ PASSED\n")
-
-    def test_error_on_mismatched_tensor_shape(self):
-        print("Running: test_error_on_mismatched_tensor_shape")
-        processing_fn = self._setup()
-        buffer = StreamingBuffer(buffer_size=5, processing_fn=processing_fn)
-        buffer.add_batch({'id': [1], 'data': torch.randn(1, 2)})  # Initializes with shape (2,)
-
-        try:
-            buffer.add_batch({'id': [2], 'data': torch.randn(1, 3)})  # Mismatched shape (3,)
-            assert False, "Should have raised RuntimeError for mismatched shapes"
-        except RuntimeError:
-            pass  # Expected
-        print("✓ PASSED\n")
-
-    def test_device_placement(self):
-        print("Running: test_device_placement")
-        if not torch.cuda.is_available():
-            print("! SKIPPED: CUDA not available.")
-            return
-
-        processing_fn = self._setup()
-        buffer = StreamingBuffer(buffer_size=2, processing_fn=processing_fn)
-        buffer.to("cuda")
-
-        # Add a batch of CPU tensors
-        buffer.add_batch({'id': [1], 'data': torch.randn(1, 2, device="cuda")})
-        buffer.flush()
-
-        processed_tensors = self.mock_call_log[0]['tensors']
-        assert 'cuda' in str(processed_tensors['data'].device)
-        print("✓ PASSED\n")
-
-    def run_all(self):
-        """Runs all test cases."""
-        print("--- Starting Comprehensive Test Battery for StreamingBuffer ---")
-        self.test_initialization()
-        self.test_flush_empty_buffer()
-        self.test_flush_non_full_buffer()
-        self.test_data_correctness_in_processing_fn()
-        self.test_no_tensor_data()
-        self.test_reuse_buffer_after_flush()
-        self.test_error_on_mismatched_tensor_shape()
-        self.test_device_placement()
-        print("--- All Buffer Tests Completed Successfully ---")
+    flushed = buffer.flush()
+    print(f"Flushed names: {flushed[0]}")
+    assert flushed[0] == ['D', 'E']
+    assert flushed[1].shape[0] == 2
+    assert buffer.total_items == 0
+    print("SCENARIO PASSED.")
 
 
 if __name__ == "__main__":
-    tester = TestStreamingBuffer()
-    tester.run_all()
+    test_comprehensive_chunking_scenarios()
+    print("-" * 50)
+    test_mixed_data_types()

@@ -121,7 +121,7 @@ class DataManager(pl.LightningDataModule):
                     mrcsDataset.saveMd(fname, overwrite=False)
             mrcsDataset.augmenter = self.augmenter if partitionName == "train" else None
             datasets.append(mrcsDataset)
-            if self.only_first_dataset_for_validation and partitionName != "train":
+            if self.only_first_dataset_for_validation and partitionName == "val":
                 break
         dataset = ConcatDataset(datasets)
         if partitionName in ["train", "val"]:

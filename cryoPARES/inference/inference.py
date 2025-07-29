@@ -1,8 +1,11 @@
 import glob
 import os
 import sys
+
+import numpy as np
 import torch
 import yaml
+from lightning import seed_everything
 from tqdm import tqdm
 from typing import Optional, List, Literal, Dict, Any, Tuple
 
@@ -30,7 +33,8 @@ class SingleInferencer:
                  particles_star_fname: str,
                  checkpoint_dir: str,
                  results_dir: str,
-                 halfset: Literal["half1", "half2", "allParticles"] = "allParticles",
+                 data_halfset: Literal["half1", "half2", "allParticles"] = "allParticles",
+                 model_halfset: Literal["half1", "half2", "allCombinations", "matchingHalf"] = "matchingHalf",
                  particles_dir: Optional[str] = None,
                  batch_size: int = CONFIG_PARAM(),
                  num_data_workers: int = CONFIG_PARAM(config=main_config.datamanager),
@@ -50,7 +54,8 @@ class SingleInferencer:
         :param particles_star_fname:
         :param checkpoint_dir:
         :param results_dir:
-        :param halfset:
+        :param data_halfset:
+        :param model_halfset:
         :param particles_dir:
         :param batch_size:
         :param num_data_workers:
@@ -67,17 +72,20 @@ class SingleInferencer:
         """
 
         self.particles_star_fname = particles_star_fname
+        self.particles_dir = particles_dir
+
         self.checkpoint_dir = checkpoint_dir
 
         assert os.path.isdir(checkpoint_dir), f"checkpoint_dir {checkpoint_dir} needs to be a directory"
         main_config.datamanager.num_augmented_copies_per_batch = 1 # We have not implemented test-time augmentation
 
-        self.particles_dir = particles_dir
         self.batch_size = batch_size
         self.use_cuda = use_cuda
         self.n_cpus_if_no_cuda = n_cpus_if_no_cuda
         self.results_dir = results_dir
-        self.halfset = halfset
+        self.data_halfset = data_halfset
+        self.model_halfset = model_halfset
+
         self.compile_model = compile_model
         self.top_k = top_k
         self.reference_map = reference_map
@@ -95,6 +103,7 @@ class SingleInferencer:
         self._reconstructor = None
         self._datamanager = None
         self._subset_idxs = subset_idxs
+        self._last_dataset_processed = 0
 
     def _setup_accelerator(self):
         """Setup the computation device and count."""
@@ -115,20 +124,26 @@ class SingleInferencer:
             symmetry = self._get_symmetry()
         reconstructor = Reconstructor(symmetry=symmetry, correct_ctf=True)
         reconstructor._get_reconstructionParticlesDataset(self.particles_star_fname, self.particles_dir)
-        self._reconstructor = reconstructor
+        self._reconstructor = self._get_reconstructor(self.particles_star_fname, self.particles_dir, symmetry)
+        return reconstructor
+
+    @staticmethod
+    def _get_reconstructor(particles_star_fname, particles_dir, symmetry: str):
+        reconstructor = Reconstructor(symmetry=symmetry, correct_ctf=True)
+        reconstructor._get_reconstructionParticlesDataset(particles_star_fname, particles_dir)
         return reconstructor
 
     def _setup_model(self, rank: Optional[int] = None):
         """Setup the model for inference."""
 
-        so3Model_fname = os.path.join(self.checkpoint_dir, self.halfset, "checkpoints", BEST_MODEL_SCRIPT_BASENAME)
+        so3Model_fname = os.path.join(self.checkpoint_dir, self.model_halfset, "checkpoints", BEST_MODEL_SCRIPT_BASENAME)
         so3Model = torch.jit.load(so3Model_fname)
 
-        percentilemodel_fname = os.path.join(self.checkpoint_dir, self.halfset, "checkpoints", BEST_DIRECTIONAL_NORMALIZER)
+        percentilemodel_fname = os.path.join(self.checkpoint_dir, self.model_halfset, "checkpoints", BEST_DIRECTIONAL_NORMALIZER)
         percentilemodel = torch.load(percentilemodel_fname, weights_only=False)
 
         if self.reference_map is None:
-            reference_map = os.path.join(self.checkpoint_dir, self.halfset, "reconstructions", "0.mrc")
+            reference_map = os.path.join(self.checkpoint_dir, self.model_halfset, "reconstructions", "0.mrc")
         else:
             reference_map = self.reference_map
 
@@ -169,7 +184,7 @@ class SingleInferencer:
         return model
 
     def _get_symmetry(self):
-        hparams = os.path.join(self.checkpoint_dir, self.halfset, "hparams.yaml")
+        hparams = os.path.join(self.checkpoint_dir, self.model_halfset, "hparams.yaml")
         try:
             with open(hparams) as f:
                 symmetry = yaml.safe_load(f)["symmetry"]
@@ -179,11 +194,15 @@ class SingleInferencer:
 
     def _get_datamanager(self, rank: Optional[int] = None):
         """Setup the dataloader for inference."""
-        halfset = None
-        if self.halfset == "half1":
-            halfset = 1
-        elif self.halfset == "half2":
-            halfset = 2
+        data_halfset = None
+        if self.data_halfset == "half1":
+            data_halfset = 1
+        elif self.data_halfset == "half2":
+            data_halfset = 2
+        elif self.data_halfset == "allParticles":
+            data_halfset = None
+        else:
+            raise ValueError(f"Error, not valid self.data_halfset {self.data_halfset}")
 
         symmetry = self._get_symmetry()
         datamanager = DataManager(
@@ -192,7 +211,7 @@ class SingleInferencer:
             particles_dir=self.particles_dir,
             batch_size=self.batch_size,
             augment_train=False,  # No augmentation during inference
-            halfset=halfset,
+            halfset=data_halfset,
             is_global_zero=rank == 0 if rank is not None else True,
             save_train_val_partition_dir=None,  # Not needed for inference
             return_ori_imagen=True, #Needed for inference,
@@ -231,19 +250,32 @@ class SingleInferencer:
         return ids, euler_degs, pred_shiftsXYangs, score, norm_nn_score
 
     def run(self):
-        if self.halfset == "allParticles":
-            out_list = []
-            self.halfset = "half1"
-            print(f"Running inference for {self.halfset}")
-            out = self._run()
-            out_list.append(out)
-            self.halfset = "half2"
-            print(f"Running inference for {self.halfset}")
-            out = self._run()
-            out_list.append(out)
-            return out_list
+        if self.model_halfset == "allCombinations":
+            model_halfset_list = ["half1", "half2"]
+        elif self.model_halfset == "matchingHalf":
+            model_halfset_list = [None]
         else:
-            return self._run()
+            model_halfset_list = [self.model_halfset]
+
+        if self.data_halfset == "allParticles":
+            data_halfset_list = ["half1", "half2"]
+        else:
+            data_halfset_list = [self.data_halfset]
+
+        out_list = []
+        for model_halfset in model_halfset_list:
+            for data_halfset in data_halfset_list:
+                if model_halfset == None:
+                    self.model_halfset = data_halfset
+                else:
+                    self.model_halfset = model_halfset
+                self.data_halfset = data_halfset
+                print(f"Running inference for data {self.data_halfset} with model {self.model_halfset}")
+                out = self._run()
+                out_list.append(out)
+            self._model = None
+        return out_list
+
 
     def _get_pbar(self, total):
         if self._pbar is None:
@@ -253,9 +285,16 @@ class SingleInferencer:
                 self._pbar.set_total_steps(total)
             return self._pbar
 
+    def _get_outsuffix(self, extension):
+        if self.model_halfset == "allParticles":
+            return f"_data_{self.data_halfset}_model_{self.model_halfset}.{extension}"
+        else:
+            return f"_{self.data_halfset}.{extension}"
+
     def _run(self):
         """Main entry point for running async inference."""
 
+        self._last_dataset_processed = 0
         # Get total dataset info
         dataloader = self._setup_dataloader()
         dataset = dataloader.dataset
@@ -263,48 +302,71 @@ class SingleInferencer:
 
         print(f"Processing {len(dataset)} particles in {total_batches} batches")
 
-        model = self._setup_model()
-        all_results = {}
+        if self._model is None:
+            model = self._setup_model()
+        else:
+            model = self._model
+
         pbar = self._get_pbar(total_batches)
         try:
-            with torch.inference_mode():
-                for batch_idx, batch in enumerate(dataloader):
-                    result = self._process_batch(model, batch, batch_idx)
-                    if result:
-                        all_results[batch_idx] = result
-                    pbar.update(1)
-                result = self._process_batch(model, batch=None, batch_idx=-1) #This flushes the buffer
-                if result is not None:
-                    all_results[-1] = result
-            if self.perform_reconstruction and self.results_dir is not None:
-                out_fname = os.path.join(self.results_dir, f"reconstruction_{self.halfset}_nnet.mrc")
-                model.reconstructor.generate_volume(out_fname)
-                print(f"{out_fname} saved!", flush=True)
-
-            # Aggregate results and save to STAR files
-            particles_md = self._save_results(all_results, dataset)
-            return particles_md
+            all_results = self._process_all_batches(model, dataloader, pbar=pbar)
+            print("Aggregating results and saving to STAR files...")
+            particles_md = self._save_particles_results(all_results, dataset)
+            print("Materializing reconstruction...")
+            vol = self._save_reconstruction(self.perform_reconstruction)
+            return particles_md, vol
         finally:
             pbar.close()
 
+    def _process_all_batches(self, model, dataloader, pbar=None):
+        all_results = []
+        with torch.inference_mode():
+            for batch_idx, batch in enumerate(dataloader):
+                result = self._process_batch(model, batch, batch_idx)
+                if result:
+                    all_results.append(result)
+                if pbar is not None: pbar.update(1)
+            result = self._process_batch(model, batch=None, batch_idx=-1)  # batch=None flushes the model buffer
+            if result is not None:
+                all_results.append(result)
+        return all_results
 
-    def _save_results(self, all_results: Dict[int, Any], dataset):
-        print("Aggregating results and saving to STAR files...")
+    def _save_reconstruction(self, save_to_file:bool = True, materialize:bool=True):
+        vol = None
+        if save_to_file and self.results_dir is not None:
+            if save_to_file:
+                if materialize:
+                    out_fname = os.path.join(self.results_dir, f"reconstruction" + self._get_outsuffix("mrc"))
+                    vol = self._model.reconstructor.generate_volume(out_fname)
+                else:
+                    out_fname = os.path.join(self.results_dir, f"mapcomponents" + self._get_outsuffix("npz"))
+                    components = self._model.reconstructor.get_buffers()
+                    components = {k:v.detach().cpu() for k,v in components.items()}
+                    components["sampling_rate"] = np.array([self._model.reconstructor.sampling_rate])
+                    np.savez(out_fname, **components)
+                print(f"{out_fname} saved!", flush=True)
+        return vol
 
-        # Create result tensors
-        n_particles = sum(len(v[0])for v in all_results.values())
+    def _save_particles_results(self, all_results: List[Any], dataset, save_to_file: bool = True):
+
+        # Create result tensors to hold data from all batches
+        n_particles = sum(len(v[0]) for v in all_results)
+        if n_particles == 0:
+            print("Warning: No particle results to save.")
+            return []
+
         result_arrays = {
             'eulerdegs': torch.zeros((n_particles, self.top_k, 3), dtype=torch.float32),
             'score': torch.zeros((n_particles, self.top_k), dtype=torch.float32),
             'shiftsXYangs': torch.zeros((n_particles, self.top_k, 2), dtype=torch.float32),
             'top1_directional_zscore': torch.zeros((n_particles), dtype=torch.float32),
-            'ids': [None]*n_particles
+            'ids': [None] * n_particles
         }
 
-        # Fill result arrays
+        # Fill result arrays by concatenating all batch results
         current_idx = 0
-        for batch_idx in sorted(all_results.keys()):
-            idd, euler_degs, pred_shiftsXYangs, maxprobs, top1_directional_zscore = all_results[batch_idx]
+        for batch_idx, elem in enumerate(all_results):
+            idd, euler_degs, pred_shiftsXYangs, maxprobs, top1_directional_zscore = elem
 
             batch_size = len(idd)
             end_idx = current_idx + batch_size
@@ -318,13 +380,42 @@ class SingleInferencer:
             result_arrays['ids'][current_idx:end_idx] = idd
             current_idx = end_idx
 
-        # Save to STAR files (same logic as original)
+        # Convert the list of all processed IDs to a NumPy array for efficient searching.
+        all_processed_ids_np = np.array(result_arrays["ids"])
+
+        # --- Assertion 1: Check for duplicate IDs in the results ---
+        # This could indicate an upstream problem where particles were processed more than once.
+        assert len(all_processed_ids_np) == len(np.unique(all_processed_ids_np)), \
+            "Duplicate particle IDs found in the inference results."
+
+        particles_md_list = []
+
+        # Iterate through each source dataset to update its metadata
         for datIdx, _dataset in enumerate(dataset.datasets):
             particlesSet = _dataset.particles
             particles_md = particlesSet.particles_md
-            ids = result_arrays["ids"]
-            particles_md[DIRECTIONAL_ZSCORE_NAME] = 0.
-            particles_md.loc[ids, DIRECTIONAL_ZSCORE_NAME] = result_arrays["top1_directional_zscore"].numpy()
+
+            # Create a boolean mask, aligned with `result_arrays`, that is True for
+            # any processed particle ID that is present in the current dataset's index.
+            mask_for_results = np.isin(all_processed_ids_np, particles_md.index.values, assume_unique=True)
+
+            # If no processed particles belong to this dataset, skip to the next one.
+            if not np.any(mask_for_results):
+                continue
+
+            # Get the actual particle ID labels that match. These will be used to
+            # index the DataFrame via `loc` to ensure data is written to the correct rows.
+            ids_to_update_in_df = all_processed_ids_np[mask_for_results]
+
+            # --- Assertion 2: Check for shape consistency ---
+            # The number of IDs to update must match the number of filtered results.
+            num_updates = len(ids_to_update_in_df)
+            assert num_updates == result_arrays["score"][mask_for_results].shape[0], \
+                "Shape mismatch between IDs to update and the filtered result data."
+
+            # Update the DataFrame with the filtered results
+            particles_md.loc[ids_to_update_in_df, DIRECTIONAL_ZSCORE_NAME] = result_arrays["top1_directional_zscore"][
+                mask_for_results].numpy()
 
             for k in range(self.top_k):
                 suffix = "" if k == 0 else f"_top{k}"
@@ -332,26 +423,32 @@ class SingleInferencer:
                 shiftsXYangs_names = [x + suffix for x in RELION_SHIFTS_NAMES]
                 confide_name = RELION_PRED_POSE_CONFIDENCE_NAME + suffix
 
-                particles_md[angles_names] = 0.
-                particles_md[shiftsXYangs_names] = 0.
-                particles_md[confide_name] = 0.
+                # Initialize columns with default values.
+                for col in angles_names + shiftsXYangs_names + [confide_name]:
+                    if col not in particles_md.columns:
+                        particles_md[col] = 0.0
 
-                particles_md.loc[ids, angles_names] = result_arrays["eulerdegs"][..., k, :].numpy()
-                particles_md.loc[ids, shiftsXYangs_names] = result_arrays["shiftsXYangs"][..., k, :].numpy()
-                particles_md.loc[ids, confide_name] = result_arrays["score"][..., k].numpy()
-                #TODO: particles_md.loc[ids, confide_name] seems to NAN
+                # Assign values using the matched IDs for the DataFrame and the boolean mask for the result arrays.
+                particles_md.loc[ids_to_update_in_df, angles_names] = result_arrays["eulerdegs"][mask_for_results, k,
+                                                                      :].numpy()
+                particles_md.loc[ids_to_update_in_df, shiftsXYangs_names] = result_arrays["shiftsXYangs"][
+                                                                            mask_for_results, k, :].numpy()
+                particles_md.loc[ids_to_update_in_df, confide_name] = result_arrays["score"][
+                    mask_for_results, k].numpy()
 
-            if particlesSet.starFname is not None:
-                basename = os.path.basename(particlesSet.starFname).removesuffix(".star")
-            else:
-                basename = "particles%d"%datIdx
-            if self.results_dir is not None:
-                out_fname = os.path.join(self.results_dir, basename + f"_{self.halfset}_nnet.star")
+            particles_md_list.append(particles_md)
+
+            if self.results_dir is not None and save_to_file:
+                if particlesSet.starFname is not None:
+                    basename = os.path.basename(particlesSet.starFname).removesuffix(".star")
+                else:
+                    basename = "particles%d" % self._last_dataset_processed
+
+                out_fname = os.path.join(self.results_dir, basename + self._get_outsuffix("star"))
                 print(f"Results were saved at {out_fname}")
                 particlesSet.save(out_fname)
-
-
-            return particles_md
+            self._last_dataset_processed += 1
+        return particles_md_list
 
     def __enter__(self):
         return self
@@ -360,6 +457,8 @@ class SingleInferencer:
         return False  # Don't suppress exceptions
 
 if __name__ == "__main__":
+
+    seed_everything(111)
     os.environ[constants.SCRIPT_ENTRY_POINT] = "inference.py"
     print("---------------------------------------")
     print(" ".join(sys.argv))

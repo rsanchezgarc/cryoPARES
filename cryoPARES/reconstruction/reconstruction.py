@@ -32,7 +32,7 @@ compiled_insert_central_slices_rfft_3d_multichannel = torch.compile(insert_centr
 
 class Reconstructor(nn.Module):
     def __init__(self, symmetry: str, correct_ctf: bool = True, eps=1e-3,
-                 min_denominator_value=1e-4, *args, **kwargs):
+                 min_denominator_value=None, *args, **kwargs):
 
         numerator = kwargs.pop("numerator", None)
         weights = kwargs.pop("weights", None)
@@ -43,6 +43,8 @@ class Reconstructor(nn.Module):
         self.has_symmetry = self.symmetry != "C1"
         self.correct_ctf = correct_ctf
         self.eps = eps # The Tikhonov constant. Should be 1/SNR, we might want to estimate it per frequency
+        if min_denominator_value is None:
+            min_denominator_value = eps * .1
         self.min_denominator_value = min_denominator_value
 
         self.register_buffer("dummy_buffer", torch.ones(1))
@@ -115,7 +117,7 @@ class Reconstructor(nn.Module):
         if not self.has_symmetry:
             return imgs, ctf, rotMats, hwShiftAngs
 
-        batch_size = imgs.shape[0]
+        # batch_size = imgs.shape[0]
         num_sym_ops = self.sym_matrices.shape[0]
 
         # Expand images - no change needed as Fourier transforms are rotationally invariant
@@ -146,7 +148,7 @@ class Reconstructor(nn.Module):
     def _get_reconstructionParticlesDataset(self, particles_star_fname, particles_dir, subset_idxs=None):
         particlesDataset = ReconstructionParticlesDataset(particles_star_fname, particles_dir,
                                                           correct_ctf=self.correct_ctf, subset_idxs=subset_idxs)
-        self.particlesDataset = particlesDataset #TODO: Remove this, only used for debug
+        # self.particlesDataset = particlesDataset #TODO: Remove self.particlesDataset, it's only used for debug
         self.set_metadata_from_particles(particlesDataset)
         return particlesDataset
 

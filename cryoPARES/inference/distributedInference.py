@@ -233,7 +233,7 @@ def distributed_inference(
                 sys.exit(1)
 
             # Process and save aggregated results
-            if results:
+            if results: #TODO: Check what happens with several starfiles
                 print(f"Aggregating results from {len(results)} workers...")
                 aggregated_results = _aggregate_worker_results(results)
 

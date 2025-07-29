@@ -74,8 +74,8 @@ class Trainer:
         if self.continue_checkpoint_dir is not None:
             _train_save_dir, version_dir = osp.split(self.continue_checkpoint_dir.rstrip("/"))
             if train_save_dir is not None:
-                assert _train_save_dir == train_save_dir.rstrip("/"), (
-                    f"Error, when continuing a checkpoint, _train_save_dir ({_train_save_dir}) !="
+                assert os.path.abspath(_train_save_dir) == os.path.abspath(train_save_dir.rstrip("/")), (
+                    f"Error, when continuing a checkpoint, _train_save_dir ({_train_save_dir}) =="
                     f" train_save_dir ({train_save_dir})")
             self.train_save_dir = _train_save_dir
         else:

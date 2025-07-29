@@ -77,7 +77,7 @@ class SingleInferencer:
         self.checkpoint_dir = checkpoint_dir
 
         assert os.path.isdir(checkpoint_dir), f"checkpoint_dir {checkpoint_dir} needs to be a directory"
-        main_config.datamanager.num_augmented_copies_per_batch = 1 # We have not implemented test-time augmentation
+        main_config.datamanager.num_augmented_copies_per_batch = 1  # We have not implemented test-time augmentation
 
         self.batch_size = batch_size
         self.use_cuda = use_cuda
@@ -119,7 +119,7 @@ class SingleInferencer:
 
         self.device, self.device_count = accelerator, device_count
 
-    def _setup_reconstructor(self, symmetry: Optional[str]= None):
+    def _setup_reconstructor(self, symmetry: Optional[str] = None):
         if symmetry is None:
             symmetry = self._get_symmetry()
         reconstructor = Reconstructor(symmetry=symmetry, correct_ctf=True)
@@ -136,10 +136,12 @@ class SingleInferencer:
     def _setup_model(self, rank: Optional[int] = None):
         """Setup the model for inference."""
 
-        so3Model_fname = os.path.join(self.checkpoint_dir, self.model_halfset, "checkpoints", BEST_MODEL_SCRIPT_BASENAME)
+        so3Model_fname = os.path.join(self.checkpoint_dir, self.model_halfset, "checkpoints",
+                                      BEST_MODEL_SCRIPT_BASENAME)
         so3Model = torch.jit.load(so3Model_fname)
 
-        percentilemodel_fname = os.path.join(self.checkpoint_dir, self.model_halfset, "checkpoints", BEST_DIRECTIONAL_NORMALIZER)
+        percentilemodel_fname = os.path.join(self.checkpoint_dir, self.model_halfset, "checkpoints",
+                                             BEST_DIRECTIONAL_NORMALIZER)
         percentilemodel = torch.load(percentilemodel_fname, weights_only=False)
 
         if self.reference_map is None:
@@ -214,7 +216,7 @@ class SingleInferencer:
             halfset=data_halfset,
             is_global_zero=rank == 0 if rank is not None else True,
             save_train_val_partition_dir=None,  # Not needed for inference
-            return_ori_imagen=True, #Needed for inference,
+            return_ori_imagen=True,  # Needed for inference,
             subset_idxs=self._subset_idxs
         )
         return datamanager
@@ -235,7 +237,8 @@ class SingleInferencer:
                     if isinstance(value, torch.Tensor):
                         batch[key] = value.to(device, non_blocking=True)
                     elif isinstance(value, (list, tuple)) and len(value) > 0 and isinstance(value[0], torch.Tensor):
-                        batch[key] = [v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for v in value]
+                        batch[key] = [v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for v in
+                                      value]
 
             # Use predict_step as requested
             result = model.predict_step(batch, batch_idx=batch_idx, dataloader_idx=0)
@@ -275,7 +278,6 @@ class SingleInferencer:
                 out_list.append(out)
             self._model = None
         return out_list
-
 
     def _get_pbar(self, total):
         if self._pbar is None:
@@ -331,7 +333,7 @@ class SingleInferencer:
                 all_results.append(result)
         return all_results
 
-    def _save_reconstruction(self, save_to_file:bool = True, materialize:bool=True):
+    def _save_reconstruction(self, save_to_file: bool = True, materialize: bool = True):
         vol = None
         if save_to_file and self.results_dir is not None:
             if save_to_file:
@@ -341,7 +343,7 @@ class SingleInferencer:
                 else:
                     out_fname = os.path.join(self.results_dir, f"mapcomponents" + self._get_outsuffix("npz"))
                     components = self._model.reconstructor.get_buffers()
-                    components = {k:v.detach().cpu() for k,v in components.items()}
+                    components = {k: v.detach().cpu() for k, v in components.items()}
                     components["sampling_rate"] = np.array([self._model.reconstructor.sampling_rate])
                     np.savez(out_fname, **components)
                 print(f"{out_fname} saved!", flush=True)
@@ -380,42 +382,35 @@ class SingleInferencer:
             result_arrays['ids'][current_idx:end_idx] = idd
             current_idx = end_idx
 
-        # Convert the list of all processed IDs to a NumPy array for efficient searching.
         all_processed_ids_np = np.array(result_arrays["ids"])
-
-        # --- Assertion 1: Check for duplicate IDs in the results ---
-        # This could indicate an upstream problem where particles were processed more than once.
         assert len(all_processed_ids_np) == len(np.unique(all_processed_ids_np)), \
             "Duplicate particle IDs found in the inference results."
 
-        particles_md_list = []
+        # Create a mapping from particle ID to its index in the results array
+        id_to_result_idx = {id_val: i for i, id_val in enumerate(all_processed_ids_np)}
 
-        # Iterate through each source dataset to update its metadata
+        particles_md_list = []
         for datIdx, _dataset in enumerate(dataset.datasets):
             particlesSet = _dataset.particles
             particles_md = particlesSet.particles_md
 
-            # Create a boolean mask, aligned with `result_arrays`, that is True for
-            # any processed particle ID that is present in the current dataset's index.
-            mask_for_results = np.isin(all_processed_ids_np, particles_md.index.values, assume_unique=True)
+            # Find which of the processed IDs are in the current dataset's index
+            ids_to_update_in_df = particles_md.index.intersection(all_processed_ids_np)
 
-            # If no processed particles belong to this dataset, skip to the next one.
-            if not np.any(mask_for_results):
+            if len(ids_to_update_in_df) == 0:
                 continue
 
-            # Get the actual particle ID labels that match. These will be used to
-            # index the DataFrame via `loc` to ensure data is written to the correct rows.
-            ids_to_update_in_df = all_processed_ids_np[mask_for_results]
+            # Get the indices in the result_arrays that correspond to the IDs in this dataset
+            result_indices = [id_to_result_idx[id_val] for id_val in ids_to_update_in_df]
 
-            # --- Assertion 2: Check for shape consistency ---
-            # The number of IDs to update must match the number of filtered results.
+            # --- Assertion for shape consistency ---
             num_updates = len(ids_to_update_in_df)
-            assert num_updates == result_arrays["score"][mask_for_results].shape[0], \
+            assert num_updates == len(result_indices), \
                 "Shape mismatch between IDs to update and the filtered result data."
 
-            # Update the DataFrame with the filtered results
+            # Update the DataFrame with the correctly ordered results
             particles_md.loc[ids_to_update_in_df, DIRECTIONAL_ZSCORE_NAME] = result_arrays["top1_directional_zscore"][
-                mask_for_results].numpy()
+                result_indices].numpy()
 
             for k in range(self.top_k):
                 suffix = "" if k == 0 else f"_top{k}"
@@ -423,18 +418,15 @@ class SingleInferencer:
                 shiftsXYangs_names = [x + suffix for x in RELION_SHIFTS_NAMES]
                 confide_name = RELION_PRED_POSE_CONFIDENCE_NAME + suffix
 
-                # Initialize columns with default values.
                 for col in angles_names + shiftsXYangs_names + [confide_name]:
                     if col not in particles_md.columns:
                         particles_md[col] = 0.0
 
-                # Assign values using the matched IDs for the DataFrame and the boolean mask for the result arrays.
-                particles_md.loc[ids_to_update_in_df, angles_names] = result_arrays["eulerdegs"][mask_for_results, k,
+                particles_md.loc[ids_to_update_in_df, angles_names] = result_arrays["eulerdegs"][result_indices, k,
                                                                       :].numpy()
                 particles_md.loc[ids_to_update_in_df, shiftsXYangs_names] = result_arrays["shiftsXYangs"][
-                                                                            mask_for_results, k, :].numpy()
-                particles_md.loc[ids_to_update_in_df, confide_name] = result_arrays["score"][
-                    mask_for_results, k].numpy()
+                                                                            result_indices, k, :].numpy()
+                particles_md.loc[ids_to_update_in_df, confide_name] = result_arrays["score"][result_indices, k].numpy()
 
             particles_md_list.append(particles_md)
 
@@ -456,8 +448,8 @@ class SingleInferencer:
     def __exit__(self, exc_type, exc_val, exc_tb):
         return False  # Don't suppress exceptions
 
-if __name__ == "__main__":
 
+if __name__ == "__main__":
     seed_everything(111)
     os.environ[constants.SCRIPT_ENTRY_POINT] = "inference.py"
     print("---------------------------------------")
@@ -478,5 +470,5 @@ if __name__ == "__main__":
         inferencer.run()
 
     """
-    
+
     """

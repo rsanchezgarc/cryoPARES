@@ -51,19 +51,21 @@ def materialize_volume(
         except Exception as e:
             print(f"Error loading {f_path}: {e}")
             continue
+        try:
+            numerator = torch.from_numpy(data['numerator'])
+            weights = torch.from_numpy(data['weights'])
+            ctfsq = torch.from_numpy(data['ctfsq'])
 
-        numerator = torch.from_numpy(data['numerator'])
-        weights = torch.from_numpy(data['weights'])
-        ctfsq = torch.from_numpy(data['ctfsq'])
-
-        if total_numerator is None:
-            total_numerator, total_weights, total_ctfsq = numerator, weights, ctfsq
-            sampling_rate = data['sampling_rate'].item()
-            box_size = total_numerator.shape[1]
-        else:
-            total_numerator += numerator
-            total_weights += weights
-            total_ctfsq += ctfsq
+            if total_numerator is None:
+                total_numerator, total_weights, total_ctfsq = numerator, weights, ctfsq
+                sampling_rate = data['sampling_rate'].item()
+                box_size = total_numerator.shape[1]
+            else:
+                total_numerator += numerator
+                total_weights += weights
+                total_ctfsq += ctfsq
+        finally:
+            data.close()
 
     if total_numerator is None:
         print("Error: Could not load data from any input files. Aborting.")

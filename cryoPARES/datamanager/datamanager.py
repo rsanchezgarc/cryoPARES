@@ -149,7 +149,7 @@ class DataManager(pl.LightningDataModule):
         else:
             distributed_world_size = 1
             rank = 0
-        assert  (rank == 0) == self.is_global_zero
+        assert (rank == 0) == self.is_global_zero
         if partitionName not in ["train", "val"]:
             # Logic for test/predict
             sampler = DistributedSampler(dataset, num_replicas=distributed_world_size, rank=rank) \

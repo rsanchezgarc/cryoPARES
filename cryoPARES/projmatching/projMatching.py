@@ -146,8 +146,11 @@ class ProjectionMatcher(nn.Module):
         projs = extract_central_slices_rfft_3d_multichannel(self.reference_vol, self.vol_shape,
                                                             rotation_matrices=rotmats, fftfreq_max= self.fftfreq_max,
                                                             zyx_matrices=False)
+
+        # self.background_stream.wait_stream(torch.cuda.current_stream())
         # with torch.cuda.stream(self.background_stream):
         #     projs = projs.permute([0, 1, 2, 4, 5, 3]).contiguous()
+        # projs.record_stream(self.background_stream)
         projs = projs.permute([0, 1, 2, 4, 5, 3]).contiguous()
         return projs
 

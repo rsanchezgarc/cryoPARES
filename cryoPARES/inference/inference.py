@@ -141,11 +141,12 @@ class SingleInferencer:
     def _setup_model(self, rank: Optional[int] = None):
         """Setup the model for inference."""
 
-        # so3Model_fname = os.path.join(self.checkpoint_dir, self.model_halfset, "checkpoints", BEST_MODEL_SCRIPT_BASENAME)
-        # so3Model = torch.jit.load(so3Model_fname)
-
-        so3Model_fname = os.path.join(self.checkpoint_dir, self.model_halfset, "checkpoints", BEST_CHECKPOINT_BASENAME)
-        so3Model = PlModel.load_from_checkpoint(so3Model_fname)
+        try:
+            so3Model_fname = os.path.join(self.checkpoint_dir, self.model_halfset, "checkpoints", BEST_MODEL_SCRIPT_BASENAME)
+            so3Model = torch.jit.load(so3Model_fname)
+        except IOError:
+            so3Model_fname = os.path.join(self.checkpoint_dir, self.model_halfset, "checkpoints", BEST_CHECKPOINT_BASENAME)
+            so3Model = PlModel.load_from_checkpoint(so3Model_fname)
 
         percentilemodel_fname = os.path.join(self.checkpoint_dir, self.model_halfset, "checkpoints",
                                              BEST_DIRECTIONAL_NORMALIZER)
@@ -484,8 +485,6 @@ if __name__ == "__main__":
     config_fname = get_most_recent_file(args.checkpoint_dir, "configs_*.yml")
     ConfigOverrideSystem.update_config_from_file(main_config, config_fname, drop_paths=["inference", "projmatching"])
 
-    main_config.models.image2sphere.so3components.i2sprojector.rand_fraction_points_to_project = 1
-    #TODO: Remove the previous line, it is for debugging only
 
     with SingleInferencer(**vars(args)) as inferencer:
         inferencer.run()

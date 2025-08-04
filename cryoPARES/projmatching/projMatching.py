@@ -72,8 +72,25 @@ class ProjectionMatcher(nn.Module):
         self._store_reference_vol(reference_vol, pixel_size)
         self._store_so3_grid_rotmats()
 
-        self._correlateF = self._correlateCrossCorrelation
-        self.background_stream = torch.cuda.Stream()
+        if not main_config.projmatching.disable_compile_analyze_cc:
+            self._analyze_cross_correlation = torch.compile(_analyze_cross_correlation, fullgraph=True,
+                                                            mode=main_config.projmatching.compile_analyze_cc_mode,
+                                                            dynamic=True)
+            self._extract_ccor_max = torch.compile(_extract_ccor_max, fullgraph=True,
+                                                            mode=main_config.projmatching.compile_analyze_cc_mode,
+                                                            dynamic=True)
+        else:
+            self._analyze_cross_correlation = _analyze_cross_correlation
+            self._extract_ccor_max = _extract_ccor_max
+
+        if main_config.projmatching.disable_compile_correlate_dft_2d:
+            self.correlate_dft_2d = correlate_dft_2d
+        else:
+            self.correlate_dft_2d = torch.compile(fullgraph=True,
+                                              mode=main_config.projmatching.compile_correlate_dft_2d_mode,
+                                              dynamic=True)
+
+        self.background_stream = torch.cuda.Stream() #TODO: This is not
 
     def _store_reference_vol(self, reference_vol: MAP_AS_ARRAY_OR_FNAME_TYPE,
                              pixel_size: Optional[float] = None):
@@ -160,7 +177,7 @@ class ProjectionMatcher(nn.Module):
         # parts = self._normalize_fourier_img(parts)
         # projs = self._normalize_fourier_img(projs)
 
-        corrs = correlate_dft_2d(parts, projs)
+        corrs = self.correlate_dft_2d(parts, projs)
 
         # from matplotlib import pyplot as plt
         # f, axes = plt.subplots(3,1)
@@ -175,7 +192,7 @@ class ProjectionMatcher(nn.Module):
         # axes[0].imshow(corr_dft2d[0].abs().log().cpu(), cmap="gray")
         # axes[2].imshow(corrs[0, 0, 5], cmap="gray"); plt.show()
 
-        perImgCorr, pixelShiftsXY = _extract_ccor_max(corrs, self.max_shift_fraction)
+        perImgCorr, pixelShiftsXY = self._extract_ccor_max(corrs, self.max_shift_fraction)
 
         # from matplotlib import pyplot as plt
         # f, axes = plt.subplots(1,3)
@@ -221,11 +238,12 @@ class ProjectionMatcher(nn.Module):
         # torch.cuda.current_stream().wait_stream(self.background_stream)
 
         if self.correct_ctf:
-            projs *= ctf[:, None, None, ..., None] #TODO. Multiply ctf.conj() in the particles
+            projs *= ctf[:, None, None, ..., None] #TODO. Multiply ctf.conj() in the particles and not in the projs
         del ctf
         perImgCorr, pixelShiftsXY = self._correlateCrossCorrelation(fimgs[:, None, None, ...], projs)
 
-        maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight = _analyze_cross_correlation(perImgCorr, pixelShiftsXY,
+        maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight = self._analyze_cross_correlation(perImgCorr,
+                                                                           pixelShiftsXY,
                                                                            grid_rotmats=expanded_rotmats,
                                                                            return_top_k=self.return_top_k,
                                                                            half_particle_size=self.half_particle_size,
@@ -240,9 +258,7 @@ class ProjectionMatcher(nn.Module):
         maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight = self.align_particles(fimages, ctfs, rotmats)
         return maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight
 
-#TODO: we should define a _analyze_cross_correlation_FACTORY to use main_config.projmatching properly
-@torch.compile(fullgraph=True, disable=main_config.projmatching.disable_compile_analyze_cc,
-               mode=main_config.projmatching.compile_analyze_cc_mode, dynamic=True)
+
 def _analyze_cross_correlation(perImgCorr:torch.Tensor, pixelShiftsXY:torch.Tensor, grid_rotmats:torch.Tensor,
                                return_top_k:int, half_particle_size:float,
                                vol_voxel_size:float) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -278,9 +294,6 @@ def _get_begin_end_from_max_shift(image_shape, max_shift):
 
     return h0, h1, w0, w1
 
-#TODO: we should define a _extract_ccor_maxFACTORY to use main_config.projmatching properly
-@torch.compile(disable=main_config.projmatching.disable_compile_analyze_cc,
-               mode=main_config.projmatching.compile_analyze_cc_mode, dynamic=True)
 def _extract_ccor_max(corrs, max_shift_fraction):
     pixelShiftsXY = torch.empty(corrs.shape[:-2] + (2,), device=corrs.device, dtype=torch.int64)
 
@@ -296,9 +309,7 @@ def _extract_ccor_max(corrs, max_shift_fraction):
 
     return perImgCorr, pixelShiftsXY
 
-#TODO: we should define a correlate_dft_2d_FACTORY to use main_config.projmatching properly
-@torch.compile(fullgraph=True, disable=main_config.projmatching.disable_compile_correlate_dft_2d,
-               mode=main_config.projmatching.compile_correlate_dft_2d_mode, dynamic=True)
+
 def correlate_dft_2d(
     parts: torch.Tensor,
     projs: torch.Tensor,
@@ -545,5 +556,6 @@ def _test3():
     print("Done")
 
 if __name__ == "__main__":
+    _test0()
     # _test1()
-    _test3()
+    # _test3()

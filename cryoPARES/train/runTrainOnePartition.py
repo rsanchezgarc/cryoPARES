@@ -208,7 +208,8 @@ class TrainerPartition:
             config_fname = get_most_recent_file(checkpoint_dir, "configs_*.yml")
             ConfigOverrideSystem.update_config_from_file(main_config, config_fname)
             ConfigOverrideSystem.update_config_from_configstrings(main_config, config_args)
-
+        print("Main config:")
+        print(main_config)
         seed_everything(self.train_config.random_seed)
         accel, dev_count = self._setup_accelerator()
         logger1, logger2 = self._setup_loggers()

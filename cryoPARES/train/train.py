@@ -89,8 +89,8 @@ class Trainer:
 
         self._save_command_info()
         self._save_env_vars()
-        self._save_config_vals()
         self._copy_code_files()
+        self._save_config_vals()
 
     def _save_command_info(self):
         from cryoPARES.utils.checkpointUtils import get_version_to_use
@@ -121,10 +121,15 @@ class Trainer:
 
     def _save_config_vals(self):
         from cryoPARES.utils.checkpointUtils import get_version_to_use
+        if self.continue_checkpoint_dir:
+            prefix = 'continueConfigs_'
+        else:
+            prefix = 'configs_'
+        #TODO: How to deal with finetuning
         basename = get_version_to_use(
             self.experiment_root,
-            basename='configs_',
-            path_pattern=r'(configs_)(\d+)(\.yml)$',
+            basename=prefix,
+            path_pattern=fr'({prefix}_)(\d+)(\.yml)$',
             extension="yml"
         )
         fname = osp.join(self.experiment_root, basename)
@@ -170,7 +175,6 @@ class Trainer:
         """
         from cryoPARES.train.runTrainOnePartition import execute_trainOnePartition, check_if_training_partion_done
         torch.set_float32_matmul_precision(constants.float32_matmul_precision)
-        print(main_config)
 
         if self.finetune_checkpoint_dir is not None:
             self._save_finetune_checkpoint_info()

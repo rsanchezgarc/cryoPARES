@@ -26,7 +26,7 @@ from cryoPARES.reconstruction.insert_central_slices_rfft_3d import insert_centra
 from cryoPARES.utils.paths import FNAME_TYPE
 
 
-# os.environ["CUDA_VISIBLE_DEVICES"] = "-1" # I noticed that torch.com tries to compile in the GPU as well even if all the tensors are in the CPU
+# os.environ["CUDA_VISIBLE_DEVICES"] = "-1" # I noticed that torch.compile tries to compile in the GPU as well even if all the tensors are in the CPU
 compiled_insert_central_slices_rfft_3d_multichannel = torch.compile(insert_central_slices_rfft_3d_multichannel, mode=None)  # mode="max-autotune")
 # compiled_insert_central_slices_rfft_3d_multichannel = insert_central_slices_rfft_3d_multichannel
 

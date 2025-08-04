@@ -1,70 +1,93 @@
 # CryoPARES: Cryo-EM Pose Assignment for Related Experiments via Supervised deep learning
 
-CryoPARES is a software package for assigning three-dimensional (3D) poses to two-dimensional (2D) cryo-electron microscopy (cryo-EM) particle images. It offers two main functionalities: supervised deep learning for initial pose estimation and local refinement through projection matching.
+CryoPARES is a software package for assigning poses to 2D cryo-electron microscopy (cryo-EM) particle images. 
+It offers two main functionalities: supervised deep learning for initial pose estimation and local refinement through projection matching.
 
-This project is built on PyTorch and PyTorch Lightning, and it is designed to be highly configurable and extensible.
+## Core Concept: Supervised Learning for Cryo-EM
 
-## Key Features
+CryoPARES utilizes a **supervised learning** approach to accelerate the 3D reconstruction process for related cryo-EM experiments.
+The core idea is to leverage the results of a high-quality, initial 3D reconstruction to train a deep learning model.
+This model then learns the complex relationship between a 2D particle image and its corresponding 3D orientation.
 
-*   **Supervised Pose Estimation:** Utilizes deep learning models to predict the 3D pose (2 rotational angles and 3 shifts) of 2D particle images.
-*   **Projection Matching:** Refines particle poses by performing a local search around an initial orientation, comparing particle images against projections of a 3D reference map.
-*   **Flexible Configuration:** A powerful configuration system allows for fine-grained control over all parameters. Settings can be specified in YAML files or overridden directly from the command line.
-*   **RELION Compatibility:** Seamlessly reads and writes RELION `.star` files, making it compatible with existing cryo-EM data processing pipelines.
-*   **Reproducibility:** Automatically saves the code, environment variables, and configuration used for each run, ensuring full reproducibility of results.
+This workflow is divided into two main phases:
+
+*   **Training:** In this phase, you use a pre-existing, high-resolution dataset (where particle poses have already been determined by
+traditional methods) to train a CryoPARES model. This process creates a highly specialized "expert" model that can recognize and assign
+* poses to particles of that specific macromolecule.
+
+*   **Inference:** Once the model is trained, you can use it for inference on new datasets of the *same* or *very similar* molecules 
+(e.g., the same protein with a different ligand bound). Because the model has already learned the features of the molecule, it can predict
+particle poses almost instantly, bypassing the computationally expensive and time-consuming alignment steps of traditional workflows. 
+This is especially powerful for applications like drug screening, where many similar datasets need to be processed quickly.
+
+This "train once, infer many times" paradigm allows for near real-time 3D reconstruction, providing rapid feedback during data 
+collection and analysis.
+
+For a detailed explanation of the method, please refer to our paper:
+[Supervised Deep Learning for Efficient Cryo-EM Image Alignment in Drug Discovery](https://www.biorxiv.org/content/10.1101/2025.03.04.641536v2)
 
 ## Installation
 
-It is recommended to use a virtual environment (e.g., conda or venv).
+It is strongly recommended to use a virtual environment (e.g., conda) to avoid conflicts with other packages.
+
+1.  **Create and activate a conda environment:**
+
+    ```bash
+    conda create -n cryopares python=3.12
+    conda activate cryopares
+    ```
+
+### Option 1: Install from GitHub (Recommended for Users)
+
+This is the simplest way to install cryoPARES.
+
+```bash
+pip install git+https://github.com/rsanchezgarc/cryoPARES.git
+```
+
+### Option 2: Install from a Local Clone (Recommended for Developers)
+
+This method is recommended if you want to modify the cryoPARES source code.
 
 1.  **Clone the repository:**
+
     ```bash
     git clone https://github.com/rsanchezgarc/cryoPARES.git
     cd cryoPARES
     ```
 
 2.  **Install dependencies:**
+
     ```bash
     pip install -r requirements.txt
     ```
 
-3.  **Install the package:**
+3.  **Install the package in editable mode:**
+
+    This allows you to make changes to the code without having to reinstall the package.
+
     ```bash
     pip install -e .
     ```
 
-## Configuration System
+## Usage
 
-CryoPARES uses a flexible configuration system that allows you to manage settings from multiple sources.
+**IMPORTANT:** CryoPARES keeps a file handler open for each `.mrcs` file referenced in the `.star` file. This can lead to a
+"Too many open files" error if the number of particle files is larger than the system's limit. 
+Before running training or inference, it is highly recommended to increase the open file limit by running 
+the following command in your terminal:
 
-### Configuration Methods
-1.  **YAML Files:** Create a `.yaml` file with your desired parameters.
-2.  **Command-Line Overrides:** Pass `KEY=VALUE` pairs to the program. Use dot notation to specify nested parameters (e.g., `models.image2sphere.lmax=6`).
-3.  **Direct Arguments:** Use standard command-line flags (e.g., `--batch_size 32`).
+```bash
+ulimit -n 65536
+```
 
-### Precedence and Conflict Resolution
-The settings are applied in the following order of precedence (highest first):
-1.  **Direct Command-Line Arguments** (e.g., `--batch_size 32`)
-2.  **`--config` Command-Line Overrides** (e.g., `--config train.batch_size=32`)
-3.  **`--config` YAML Files** (e.g., `--config my_config.yaml`)
-4.  **Default Configuration**
+CryoPARES has two main modes of operation: training and inference. Particles need to be provided as RELION 3.1+ starfile(s).
 
-**Important:** If you specify the same parameter via a direct argument (e.g., `--batch_size 32`) and a `--config` override (e.g., `--config train.batch_size=64`), the program will raise a conflict error. You must provide the value from only one source or ensure they are identical.
+### Training
 
-### Viewing and Exporting Configurations
-*   **Show all available options:** Run any main script with `--show-config` to print a comprehensive list of all parameters, their current values, and their paths.
-    ```bash
-    python -m cryoPARES.train.train --show-config
-    ```
-*   **Export the final configuration:** Use `--export-config` to save the final, merged configuration to a YAML file. This is useful for documenting a run.
-    ```bash
-    python -m cryoPARES.train.train --export-config final_config.yaml
-    ```
+The `cryoPARES.train.train` module is used to train a new model for pose estimation. Training needs to be done first using 
+a pre-aligned dataset of particles. While not mandatory, we encourage using particles alignments estimated with RELION.
 
-## Core Programs
-
-### 1. Training (`cryoPARES.train.train`)
-
-This program trains a model to predict particle poses from a `.star` file containing aligned particles.
 
 **Usage:**
 ```bash
@@ -72,23 +95,36 @@ python -m cryoPARES.train.train [ARGUMENTS] --config [CONFIG_OVERRIDES]
 ```
 
 **Key Arguments:**
+
 *   `--symmetry`: The point group symmetry of the molecule (e.g., `C1`, `D7`).
 *   `--particles_star_fname`: Path to the input `.star` file with pre-aligned particles.
+*   `--particles_dir`: Optional root directory for the particle files. If the paths in the `.star` file are relative, this directory will be prepended to them. For example, if `--particles_dir` is `/path/to/particles` and a particle path in the `.star` file is `MotionCorr/job01/extract/particle_001.mrcs`, the final path will be `/path/to/particles/MotionCorr/job01/extract/particle_001.mrcs`. This is similar to RELION's project directory concept. If this argument is not provided, it is assumed that the particle files are in the same directory as the `.star` file.
 *   `--train_save_dir`: Directory to save model checkpoints, logs, and other outputs.
 *   `--n_epochs`: Number of training epochs.
 *   `--batch_size`: Number of particles per batch.
+*   `--num_data_workers`: Number of parallel data loading workers. One CPU each. Set it to 0 to read and process the data in the main thread
 *   `--continue_checkpoint_dir`: Continue training from a previous run.
 *   `--finetune_checkpoint_dir`: Fine-tune a pre-trained model on a new dataset.
 
-**Outputs:**
-*   A training directory containing:
-    *   Model checkpoints (`.ckpt` files).
-    *   TensorBoard logs.
-    *   A copy of the source code, environment, and configuration for reproducibility.
+**Important Training Parameters (in config files):**
 
-### 2. Inference (`cryoPARES.inference.inference`)
+You can override these parameters from the command line using the `--config KEY=VALUE` syntax. The `--config` needs to be
+the last CLI argument provided. Several `KEY=VALUE` can be provided one after another
 
-This is the main script for using a trained model to predict poses for a new set of particles. It can optionally perform local refinement using projection matching and reconstruct a 3D map.
+*   **`datamanager.particlesDataset.desired_sampling_rate_angs`**: The desired sampling rate in Angstroms per pixel. Particle images are first rescaled (upsampled or downsampled) to match this value.
+*   **`datamanager.particlesDataset.desired_image_size_px`**: The final size of the particle images in pixels. After rescaling to the desired sampling rate, images are cropped or padded to this size. This should typically be set to the particle's box size after rescaling.
+*   **`datamanager.particlesDataset.mask_radius_angs`**: The radius of the circular mask to be applied to the particle images, in Angstroms. If not provided, a mask with a radius of half the box size will be used.
+*   **`train.learning_rate`**: The initial learning rate for the optimizer. (Default: `1e-3`)
+*   **`train.weight_decay`**: The weight decay for the optimizer. (Default: `1e-5`)
+*   **`train.accumulate_grad_batches`**: The number of batches to accumulate gradients over. This can be used to simulate a larger batch size. (Default: `16`)
+
+### Inference
+
+The `cryoPARES.inference.inference` module is used to predict poses for a new set of particles using a trained model. It can be run in two modes: static and daemon.
+
+#### Static Mode
+
+In static mode, the inference is run on a fixed set of particles, that again, need to be provided as RELION 3.1+ starfiles.
 
 **Usage:**
 ```bash
@@ -96,23 +132,104 @@ python -m cryoPARES.inference.inference [ARGUMENTS] --config [CONFIG_OVERRIDES]
 ```
 
 **Key Arguments:**
+
 *   `--particles_star_fname`: Path to the input `.star` file of particles needing pose assignment.
+*   `--particles_dir`: Optional root directory for the particle files. If the paths in the `.star` file are relative, this directory will be prepended to them. For example, if `--particles_dir` is `/path/to/particles` and a particle path in the `.star` file is `MotionCorr/job01/extract/particle_001.mrcs`, the final path will be `/path/to/particles/MotionCorr/job01/extract/particle_001.mrcs`. This is similar to RELION's project directory concept. If this argument is not provided, it is assumed that the particle files are in the same directory as the `.star` file.
 *   `--checkpoint_dir`: Path to the directory containing the trained model created by `train.py`.
 *   `--results_dir`: Directory where the output `.star` file and reconstruction will be saved.
-*   `--perform_localrefinement`: If set, enables pose refinement using projection matching. This requires a `--reference_map`.
-*   `--perform_reconstruction`: If set, reconstructs a 3D map from the final poses.
-*   `--reference_map`: Path to a reference `.mrc` map, required for local refinement and reconstruction.
-*   `--top_k`: Predict the top K poses for each particle.
+*   `--batch_size`: Number of particles per batch.
+*   `--num_data_workers`: Number of parallel data loading workers. One CPU each. Set it to 0 to read and process the data in the main thread
+*   `--NOT_perform_localrefinement`: If set, disables pose refinement using projection matching. 
+*   `--NOT_perform_reconstruction`: If set, disables the reconstruction of a 3D map from the final poses.
+*   `--reference_map`: Path to a reference `.mrc` used for local refinement and reconstruction. If not provided, it will use half-maps reconstructed from the training set.
+*   `--top_k`: Predict the top K poses for each particle. Poses beyond top-1 are added to the output starfile as additonal columns with a suffix of "_top%d" 
 
-**Key Configuration Parameters:**
-*   `inference.directional_zscore_thr`: A crucial parameter for filtering particles. It is a threshold on the confidence score of the neural network's prediction. Particles with a score below this threshold can be discarded.
-*   `projmatching.grid_distance_degs`: The most important parameter for local refinement. It defines the angular search range (in degrees) around the neural network's predicted orientation.
-*   `projmatching.grid_step_degs`: The step size for the angular search during refinement.
+**Half-Set Selection (`--data_halfset` and `--model_halfset`)**
 
-**Outputs:**
-*   An output directory containing:
-    *   A new `.star` file (`*_nnet.star`) with the predicted poses and confidence scores.
-    *   If `--perform_reconstruction` is used, reconstructed half-maps (`reconstruction_half1_nnet.mrc`, `reconstruction_half2_nnet.mrc`) are generated.
+To avoid overfitting and to ensure a fair evaluation, cryo-EM datasets are often split into two halves (half1 and half2). CryoPARES uses this concept for both the data and the model.
+
+*   `--data_halfset`: Specifies which half of the data to use for inference.
+    *   `half1`: Use only the particles from the first half of the dataset.
+    *   `half2`: Use only the particles from the second half of the dataset.
+    *   `allParticles`: Use all particles from the dataset. (Default)
+
+*   `--model_halfset`: Specifies which trained model to use for inference. During training, CryoPARES creates two models, one for each half of the training data.
+    *   `half1`: Use the model trained on the first half of the training data.
+    *   `half2`: Use the model trained on the second half of the training data.
+    *   `matchingHalf`: Use the model from the corresponding half of the data (e.g., `half1` data with `half1` model). This is the default and recommended setting.
+    *   `allCombinations`: Run inference for all possible combinations of data and model halves (e.g., `half1` data with `half1` model, `half1` data with `half2` model, etc.). 
+
+**Important Inference Parameters (in config files):**
+
+*   **`inference.directional_zscore_thr`**: A crucial parameter for filtering particles. It is a threshold on the confidence score of the neural network's prediction. Particles with a score below this threshold can be discarded.
+*   **`projmatching.grid_distance_degs`**: The most important parameter for local refinement. It defines the angular search range (in degrees) around the neural network's predicted orientation.
+*   **`projmatching.grid_step_degs`**: The step size for the angular search during refinement.
+
+#### Daemon Mode
+
+In daemon mode, the inference script runs continuously and watches for new particles to be added to a directory. This is useful for processing particles as they are being generated.
+
+The daemon workflow consists of three main components:
+
+1.  **Queue Manager:** A central server that manages a queue of jobs.
+2.  **Spooling Filler:** A script that monitors a directory for new `.star` files and adds them to the queue.
+3.  **Daemon Inferencer:** One or more worker processes that take jobs from the queue and perform inference.
+
+**Workflow:**
+
+1.  **Start the Queue Manager:**
+
+    This script creates the central queue. It should be run once and kept running in the background.
+
+    ```bash
+    python -m cryoPARES.inference.daemonWorkers.queueManager
+    ```
+
+2.  **Start the Spooling Filler:**
+
+    This script watches a directory for new `.star` files and adds them to the queue.
+
+    ```bash
+    python -m cryoPARES.inference.daemonWorkers.spoolingFiller --directory /path/to/watch
+    ```
+
+    You can also use other mechanisms to add jobs to the queue.
+
+3.  **Start the Daemon Inferencer(s):**
+
+    You can start as many inferencer workers as you want. Each worker will take jobs from the queue and process them in parallel. **Important:** Each worker must have its own results directory.
+
+    ```bash
+    # Worker 1
+    python -m cryoPARES.inference.daemonInference --checkpoint_dir /path/to/checkpoint --results_dir /path/to/results_worker1 --particles_dir /path/to/particles
+
+    # Worker 2
+    python -m cryoPARES.inference.daemonInference --checkpoint_dir /path/to/checkpoint --results_dir /path/to/results_worker2 --particles_dir /path/to/particles
+    ```
+
+4.  **Materialize the Volume:**
+
+    You can materialize the final 3D volume from the partial results at any time, even while the inferencers are still running. The script will combine all the available partial results.
+
+    ```bash
+    python -m cryoPARES.inference.daemonWorkers.materializeVolume --input_files "/path/to/results_*/mapcomponents_*.npz" --output_mrc /path/to/final_map.mrc
+    ```
+
+### Configuration System
+
+CryoPARES uses a flexible configuration system that allows you to manage settings from multiple sources.
+
+*   **`--show-config`:** To see all available options, run any main script with the `--show-config` flag. This will print a comprehensive list of all parameters, their current values, and their paths.
+
+    ```bash
+    python -m cryoPARES.train.train --show-config
+    ```
+
+*   **YAML Files:** Create a `.yaml` file with your desired parameters.
+*   **Command-Line Overrides:** Pass `KEY=VALUE` pairs to the program. Use dot notation to specify nested parameters (e.g., `models.image2sphere.lmax=6`).
+*   **Direct Arguments:** Use standard command-line flags (e.g., `--batch_size 32`).
+
+**Precedence:** Direct command-line arguments override `--config` overrides, which override YAML files, which override the default configuration.
 
 ## Example Workflow
 
@@ -121,6 +238,7 @@ python -m cryoPARES.inference.inference [ARGUMENTS] --config [CONFIG_OVERRIDES]
     python -m cryoPARES.train.train \
         --symmetry C1 \
         --particles_star_fname /path/to/aligned_particles.star \
+        --particles_dir /path/to/particles \
         --train_save_dir /path/to/training_output \
         --n_epochs 10 \
         --config models.image2sphere.lmax=6
@@ -130,6 +248,7 @@ python -m cryoPARES.inference.inference [ARGUMENTS] --config [CONFIG_OVERRIDES]
     ```bash
     python -m cryoPARES.inference.inference \
         --particles_star_fname /path/to/new_particles.star \
+        --particles_dir /path/to/particles \
         --checkpoint_dir /path/to/training_output/version_0 \
         --results_dir /path/to/inference_results \
         --perform_localrefinement True \
@@ -137,34 +256,3 @@ python -m cryoPARES.inference.inference [ARGUMENTS] --config [CONFIG_OVERRIDES]
         --reference_map /path/to/initial_model.mrc \
         --config projmatching.grid_distance_degs=15 inference.directional_zscore_thr=2.0
     ```
-
-## Project Structure
-
-```
-cryoPARES/
-├───configs/         # Default configuration files.
-├───datamanager/     # Data loading, datasets, and augmentations.
-├───geometry/        # Utilities for 3D geometry and rotations.
-├───models/          # Deep learning model architectures.
-├───inference/       # Scripts for running inference.
-├───projmatching/    # Projection matching implementation.
-├───reconstruction/  # 3D reconstruction tools.
-├───train/           # Model training scripts.
-└───utils/           # Miscellaneous utility functions.
-```
-
-## Citation
-
-If you use CryoPARES in your research, please cite:
-
-*(Placeholder for citation information)*
-
-## License
-
-This project is distributed under the terms of the [LICENSE_NAME](LICENSE) license.
-
-## Contact
-
-Ruben Sanchez-Garcia - ruben.sanchez-garcia@stats.ox.ac.uk
-
-Project Link: [https://github.com/rsanchezgarc/cryoPARES](https://github.com/rsanchezgarc/cryoPARES)

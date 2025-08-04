@@ -34,6 +34,7 @@ class TrainerPartition:
                  partition: Literal["allParticles", "half1", "half2"] = "allParticles",
                  continue_checkpoint_fname: Optional[str] = None, finetune_checkpoint_fname: Optional[str] = None,
                  find_lr: bool = False, compile_model: bool = False, val_check_interval: Optional[float] = None,
+                 num_data_workers: int = CONFIG_PARAM(config=main_config.datamanager),
                  overfit_batches: Optional[int] = None):
         """Initialize trainer for a single partition.
 
@@ -49,6 +50,7 @@ class TrainerPartition:
             find_lr: Use automatic learning rate finder (GPU only)
             compile_model: Use torch 2.0 compilation
             val_check_interval: Fraction of epoch between validations
+            num_data_workers: The number of workers (one CPU process each, to be used to load data)
             overfit_batches: Number of batches to use if overfitting
         """
         self.symmetry = symmetry

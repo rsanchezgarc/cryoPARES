@@ -19,7 +19,8 @@ class Trainer:
     @inject_defaults_from_config(main_config.train, update_config_with_args=True)
     def __init__(self, symmetry: str, particles_star_fname: List[str], train_save_dir: str,
                  particles_dir: Optional[List[str]] = None, n_epochs: int = CONFIG_PARAM(),
-                 batch_size: int = CONFIG_PARAM(),
+                 batch_size: int = CONFIG_PARAM(), #CONFIG_PARAM status with update_config_with_args gets updated in config directly
+                 num_data_workers: int = CONFIG_PARAM(config=main_config.datamanager), #CONFIG_PARAM status with update_config_with_args gets updated in config directly
                  split_halfs: bool = True,
                  continue_checkpoint_dir: Optional[str] = None, finetune_checkpoint_dir: Optional[str] = None,
                  compile_model: bool = False, val_check_interval: Optional[float] = None,
@@ -35,6 +36,7 @@ class Trainer:
             particles_dir: The directory where the particles of the particlesStarFname are located. If not, it is assumed os.dirname(particlesStarFname)
             n_epochs: The number of epochs
             batch_size: The batch size
+            num_data_workers: Number of parallel data loading workers. One CPU each. Set it to 0 to read and process the data in the same thread
             split_halfs: If True, it trains a model for each half of the data
             continue_checkpoint_dir: The path of a pre-trained model to continue training.
             finetune_checkpoint_dir: The path of a pre-trained model to do finetunning

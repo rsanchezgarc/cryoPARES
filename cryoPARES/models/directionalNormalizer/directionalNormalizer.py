@@ -30,14 +30,14 @@ class DirectionalPercentileNormalizer(nn.Module):
     3. The in-plane rotation dimension has consistent size (n_psi) across all cones
     """
     @inject_defaults_from_config(default_config=main_config.models.directionalNormalizer)
-    def __init__(self, symmetry: str = "C1", hp_order: int = CONFIG_PARAM()):
+    def __init__(self, symmetry: str, hp_order: int = CONFIG_PARAM()):
         super().__init__()
 
         self.hp_order = hp_order
         self.symmetry = symmetry.upper()
 
         # Initialize SO3 grid
-        self.so3_grid = SO3OutputGrid(lmax=1, hp_order=self.hp_order, symmetry=self.symmetry)
+        self.so3_grid = SO3OutputGrid(lmax=1, hp_order=self.hp_order, symmetry=self.symmetry) #lmax is irrelevant in here
         self.n_so3_pixels = self.so3_grid.output_rotmats.shape[0]
         # Calculate grid dimensions
         self.n_cones = hp.nside2npix(hp.order2nside(hp_order))

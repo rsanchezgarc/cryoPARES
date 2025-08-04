@@ -290,8 +290,8 @@ class PlModel(RotationPredictionMixin, pl.LightningModule):
                     gt_rotmats = batch[self.BATCH_POSE_NAME][0]
                     gtRotmats.append(gt_rotmats)
 
-                    if self.trainer.overfit_batches is not None and batch_idx > self.trainer.overfit_batches:
-                        print("stoping due to overfit_batches")
+                    if self.trainer.overfit_batches and batch_idx > self.trainer.overfit_batches:
+                        print("stopping due to overfit_batches")
                         break
             predRotMats = torch.concat(predRotMats)
             gtRotmats = torch.concat(gtRotmats)

@@ -1,6 +1,7 @@
 import glob
 import os
 import sys
+import warnings
 
 import numpy as np
 import torch
@@ -144,14 +145,23 @@ class SingleInferencer:
         try:
             so3Model_fname = os.path.join(self.checkpoint_dir, self.model_halfset, "checkpoints", BEST_MODEL_SCRIPT_BASENAME)
             so3Model = torch.jit.load(so3Model_fname)
-        except IOError:
-            so3Model_fname = os.path.join(self.checkpoint_dir, self.model_halfset, "checkpoints", BEST_CHECKPOINT_BASENAME)
-            so3Model = PlModel.load_from_checkpoint(so3Model_fname)
+        except (ValueError, IOError):
+            try:
+                so3Model_fname = os.path.join(self.checkpoint_dir, self.model_halfset, "checkpoints", BEST_CHECKPOINT_BASENAME)
+                so3Model = PlModel.load_from_checkpoint(so3Model_fname)
+            except FileNotFoundError:
+                so3Model_fname = os.path.join(self.checkpoint_dir, self.model_halfset, "checkpoints", "last.ckpt")
+                so3Model = PlModel.load_from_checkpoint(so3Model_fname)
 
-        percentilemodel_fname = os.path.join(self.checkpoint_dir, self.model_halfset, "checkpoints",
-                                             BEST_DIRECTIONAL_NORMALIZER)
-        percentilemodel = torch.load(percentilemodel_fname, weights_only=False)
-
+        try:
+            percentilemodel_fname = os.path.join(self.checkpoint_dir, self.model_halfset, "checkpoints",
+                                                 BEST_DIRECTIONAL_NORMALIZER)
+            percentilemodel = torch.load(percentilemodel_fname, weights_only=False)
+        except FileNotFoundError:
+            assert self.directional_zscore_thr is None, ("Error, if no percentilemodel available, you cannot set a "
+                                                         "directional_zscore_thr")
+            warnings.warn(f"No percentilemodel found at ({percentilemodel_fname}). Directional normalized z-scores"
+                          f"won't be computed!!!")
         if self.reference_map is None:
             reference_map = os.path.join(self.checkpoint_dir, self.model_halfset, "reconstructions", "0.mrc")
         else:

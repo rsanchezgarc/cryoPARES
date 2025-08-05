@@ -16,7 +16,7 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
     @inject_defaults_from_config(main_config.inference, update_config_with_args=False)
     def __init__(self,
                  so3model: Union[nn.Module, ScriptModule],
-                 scoreNormalizer: Union[nn.Module, ScriptModule],
+                 scoreNormalizer: Union[nn.Module, ScriptModule, None],
                  normalizedScore_thr: float | None,
                  localRefiner: ProjectionMatcher | None,
                  reconstructor: Reconstructor | None = None,
@@ -45,8 +45,10 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
     def _firstforward(self, imgs, top_k):
         _top_k = 10 if top_k < 10 else top_k
         _, _, _, pred_rotmats, maxprobs = self.so3model(imgs, _top_k)
-
-        norm_nn_score = self.scoreNormalizer(pred_rotmats[:, 0, ...], maxprobs[:,:10].sum(1))
+        if self.scoreNormalizer:
+            norm_nn_score = self.scoreNormalizer(pred_rotmats[:, 0, ...], maxprobs[:,:10].sum(1))
+        else:
+            norm_nn_score = torch.nan * torch.ones_like(maxprobs[:,0])
         pred_rotmats = pred_rotmats[:,:top_k]
         maxprobs = maxprobs[:,:top_k]
         return pred_rotmats, maxprobs, norm_nn_score
@@ -78,7 +80,10 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
                 'norm_nn_score': norm_nn_score,
             }
         if self.localRefiner is not None:
-            out = self.buffer.add_batch(batch_to_add)
+            if self.buffer is not None:
+                out = self.buffer.add_batch(batch_to_add)
+            else:
+                out = self._run_stage2(**batch_to_add)
         else:
             out = (batch_to_add['ids'], batch_to_add['rotmats'], None, batch_to_add['maxprobs'],
                     batch_to_add['norm_nn_score'])
@@ -198,7 +203,7 @@ def _test():
     so3Model = Image2Sphere(symmetry=symmetry, num_augmented_copies_per_batch=1)
     percentilemodel = DirectionalPercentileNormalizer(symmetry=symmetry)
     percentilemodel.fit(torch.FloatTensor(Rotation.random(5000).as_matrix()), torch.rand(5000))
-    normalizedScore_thr = -50
+    normalizedScore_thr = None #-50
 
     localRefiner = ProjectionMatcher(
         reference_vol="/home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles_reconstruct.mrc",

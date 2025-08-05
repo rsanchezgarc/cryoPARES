@@ -154,7 +154,8 @@ class Trainer:
     def get_continue_checkpoint_fname(self, partition:Literal["allParticles", "half1", "half2"]):
         if self.continue_checkpoint_dir:
             fname = get_most_recent_file(os.path.join(self.continue_checkpoint_dir, partition, "checkpoints"), "*.ckpt")
-            assert fname is not None, f"Error, checkpoint not found at {self.continue_checkpoint_dir}"
+            # assert fname is not None, f"Error, checkpoint not found at {self.continue_checkpoint_dir}"
+            warnings.warn( f"Error, checkpoint not found at {self.continue_checkpoint_dir}")
             return fname
         else:
             return None

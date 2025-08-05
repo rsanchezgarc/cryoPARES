@@ -52,7 +52,8 @@ class SingleInferencer:
                  perform_reconstruction: bool = CONFIG_PARAM(),
                  update_progessbar_n_batches: int = CONFIG_PARAM(),
                  subset_idxs: Optional[List[int]] = None,
-                 n_first_particles: Optional[int]  = None
+                 n_first_particles: Optional[int]  = None,
+                 show_debug_stats: bool = False,
                  ):
         """
 
@@ -68,13 +69,14 @@ class SingleInferencer:
         :param n_cpus_if_no_cuda:
         :param compile_model:
         :param top_k:
-        :param reference_map: If not provided, it will be tried to load from the checkpointç
+        :param reference_map: If not provided, it will be tried to load from the checkpoint
         :param directional_zscore_thr:
         :param perform_localrefinement:
         :param perform_reconstruction:
         :param update_progessbar_n_batches:
         :param subset_idxs:
         :param n_first_particles:
+        :param show_debug_stats:
         """
 
         self.particles_star_fname = particles_star_fname
@@ -101,6 +103,7 @@ class SingleInferencer:
         self.perform_localrefinement = perform_localrefinement
         self.perform_reconstruction = perform_reconstruction
         self.update_progessbar_n_batches = update_progessbar_n_batches
+        self.show_debug_stats = show_debug_stats
 
         if results_dir is not None:
             os.makedirs(results_dir, exist_ok=True)
@@ -448,21 +451,17 @@ class SingleInferencer:
                         particles_md[col] = 0.0
                 eulerdegs = result_arrays["eulerdegs"][result_indices, k, :].numpy()
 
-                ######### Debug code
-                # r1 = Rotation.from_euler("ZYZ", eulerdegs, degrees=True)
-                # r2 = Rotation.from_euler("ZYZ", particles_md.loc[ids_to_update_in_df, angles_names], degrees=True)
-                # err = np.rad2deg((r1.inv() * r2).magnitude())
-                # # print("Error degs:", err)
-                r1 = torch.FloatTensor(Rotation.from_euler(RELION_EULER_CONVENTION,
-                                                           eulerdegs,
-                                                           degrees=True).as_matrix())
-                r2 = torch.FloatTensor(Rotation.from_euler(RELION_EULER_CONVENTION,
-                                                           particles_md.loc[ids_to_update_in_df, angles_names],
-                                                           degrees=True).as_matrix())
-                err = torch.rad2deg(rotation_error_with_sym(r1, r2, symmetry=self.symmetry))
-                print(f"Median Error degs (top-{k+1}):", np.median(err))
-                # breakpoint()
-                ######## END of Debug code
+                if self.show_debug_stats:
+                    ######## Debug code
+                    r1 = torch.FloatTensor(Rotation.from_euler(RELION_EULER_CONVENTION,
+                                                               eulerdegs,
+                                                               degrees=True).as_matrix())
+                    r2 = torch.FloatTensor(Rotation.from_euler(RELION_EULER_CONVENTION,
+                                                               particles_md.loc[ids_to_update_in_df, angles_names],
+                                                               degrees=True).as_matrix())
+                    err = torch.rad2deg(rotation_error_with_sym(r1, r2, symmetry=self.symmetry))
+                    print(f"Median Error degs (top-{k+1}):", np.median(err))
+                    ######## END of Debug code
 
                 particles_md.loc[ids_to_update_in_df, angles_names] = eulerdegs
 

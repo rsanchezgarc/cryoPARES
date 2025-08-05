@@ -162,6 +162,7 @@ class SingleInferencer:
                                                          "directional_zscore_thr")
             warnings.warn(f"No percentilemodel found at ({percentilemodel_fname}). Directional normalized z-scores"
                           f"won't be computed!!!")
+            percentilemodel = None
         if self.reference_map is None:
             reference_map = os.path.join(self.checkpoint_dir, self.model_halfset, "reconstructions", "0.mrc")
         else:

@@ -114,7 +114,12 @@ class Augmenter(AugmenterBase):
         Returns:
 
         """
+
+        #Cloning is critical to avoid data corruption afterwards
         img = img.clone()
+        degEuler = degEuler.clone()
+        shiftFraction = shiftFraction.clone()
+
         applied_transforms = []
         n_rounds = self._get_nrounds()
         for round in range(n_rounds):

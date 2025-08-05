@@ -163,7 +163,7 @@ class SingleInferencer:
             assert self.directional_zscore_thr is None, ("Error, if no percentilemodel available, you cannot set a "
                                                          "directional_zscore_thr")
             warnings.warn(f"No percentilemodel found at ({percentilemodel_fname}). Directional normalized z-scores"
-                          f"won't be computed!!!")
+                          f" won't be computed!!!")
             percentilemodel = None
         if self.reference_map is None:
             reference_map = os.path.join(self.checkpoint_dir, self.model_halfset, "reconstructions", "0.mrc")
@@ -460,7 +460,7 @@ class SingleInferencer:
                                                            particles_md.loc[ids_to_update_in_df, angles_names],
                                                            degrees=True).as_matrix())
                 err = torch.rad2deg(rotation_error_with_sym(r1, r2, symmetry=self.symmetry))
-                print(f"Median Error degs (top-{k}):", np.median(err))
+                print(f"Median Error degs (top-{k+1}):", np.median(err))
                 # breakpoint()
                 ######## END of Debug code
 

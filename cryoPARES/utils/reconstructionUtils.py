@@ -25,8 +25,8 @@ def get_vol(vol: MAP_AS_ARRAY_OR_FNAME_TYPE, pixel_size: float | None,
     data = data.to(DEFAULT_DTYPE_PROJMATCHING).to(device)
     return data, pixel_size
 
-def write_vol(vol:torch.tensor, fname, pixel_size):
-    mrcfile.write(fname, vol.numpy(), overwrite=True, voxel_size=pixel_size)
+def write_vol(vol:torch.tensor, fname, pixel_size, overwrite=True):
+    mrcfile.write(fname, vol.numpy().astype(np.float32), overwrite=overwrite, voxel_size=pixel_size)
 
 
 def get_rotmat(degAngles, convention:str=RELION_EULER_CONVENTION, device="cpu"):

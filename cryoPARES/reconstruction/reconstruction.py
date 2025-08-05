@@ -24,7 +24,7 @@ from cryoPARES.geometry.symmetry import getSymmetryGroup
 from cryoPARES.reconstruction.insert_central_slices_rfft_3d import insert_central_slices_rfft_3d_multichannel
 # from torch_fourier_slice import insert_central_slices_rfft_3d_multichannel
 from cryoPARES.utils.paths import FNAME_TYPE
-
+from cryoPARES.utils.reconstructionUtils import write_vol
 
 # os.environ["CUDA_VISIBLE_DEVICES"] = "-1" # I noticed that torch.compile tries to compile in the GPU as well even if all the tensors are in the CPU
 compiled_insert_central_slices_rfft_3d_multichannel = torch.compile(insert_central_slices_rfft_3d_multichannel, mode=None)  # mode="max-autotune")
@@ -280,8 +280,7 @@ class Reconstructor(nn.Module):
         vol = dft.to(device) / self.get_sincsq(dft.shape, device)
 
         if fname is not None:
-            mrcfile.write(fname, data=vol.detach().cpu().numpy(), overwrite=overwrite_fname,
-                          voxel_size=self.sampling_rate)
+            write_vol(vol.detach().cpu(), fname, self.sampling_rate, overwrite=overwrite_fname)
         return vol
 
 class ReconstructionParticlesDataset(Dataset):

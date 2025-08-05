@@ -129,7 +129,7 @@ class SingleInferencer:
 
     def _setup_reconstructor(self, symmetry: Optional[str] = None):
         if symmetry is None:
-            symmetry = self._get_symmetry()
+            symmetry = self.symmetry
         reconstructor = Reconstructor(symmetry=symmetry, correct_ctf=True)
         reconstructor._get_reconstructionParticlesDataset(self.particles_star_fname, self.particles_dir)
         self._reconstructor = self._get_reconstructor(self.particles_star_fname, self.particles_dir, symmetry)
@@ -207,6 +207,9 @@ class SingleInferencer:
         return model
 
     @cached_property
+    def symmetry(self):
+        return self._get_symmetry()
+
     def _get_symmetry(self):
         hparams = os.path.join(self.checkpoint_dir, self.model_halfset, "hparams.yaml")
         try:
@@ -228,10 +231,9 @@ class SingleInferencer:
         else:
             raise ValueError(f"Error, not valid self.data_halfset {self.data_halfset}")
 
-        symmetry = self._get_symmetry()
         datamanager = DataManager(
             star_fnames=self.particles_star_fname,
-            symmetry=symmetry,
+            symmetry=self.symmetry,
             particles_dir=self.particles_dir,
             batch_size=self.batch_size,
             augment_train=False,  # No augmentation during inference
@@ -457,7 +459,7 @@ class SingleInferencer:
                 r2 = torch.FloatTensor(Rotation.from_euler(RELION_EULER_CONVENTION,
                                                            particles_md.loc[ids_to_update_in_df, angles_names],
                                                            degrees=True).as_matrix())
-                err = torch.rad2deg(rotation_error_with_sym(r1, r2, symmetry=self._get_symmetry()))
+                err = torch.rad2deg(rotation_error_with_sym(r1, r2, symmetry=self.symmetry))
                 print(f"Median Error degs (top-{k}):", np.median(err))
                 # breakpoint()
                 ######## END of Debug code

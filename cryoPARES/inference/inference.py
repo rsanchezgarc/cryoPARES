@@ -52,31 +52,32 @@ class SingleInferencer:
                  perform_reconstruction: bool = CONFIG_PARAM(),
                  update_progessbar_n_batches: int = CONFIG_PARAM(),
                  subset_idxs: Optional[List[int]] = None,
-                 n_first_particles: Optional[int]  = None,
+                 n_first_particles: Optional[int] = None,
                  show_debug_stats: bool = False,
                  ):
         """
+        Initializes the SingleInferencer for running inference on a set of particles.
 
-        :param particles_star_fname:
-        :param checkpoint_dir:
-        :param results_dir:
-        :param data_halfset:
-        :param model_halfset:
-        :param particles_dir:
-        :param batch_size:
-        :param num_data_workers:
-        :param use_cuda:
-        :param n_cpus_if_no_cuda:
-        :param compile_model:
-        :param top_k:
-        :param reference_map: If not provided, it will be tried to load from the checkpoint
-        :param directional_zscore_thr:
-        :param perform_localrefinement:
-        :param perform_reconstruction:
-        :param update_progessbar_n_batches:
-        :param subset_idxs:
-        :param n_first_particles:
-        :param show_debug_stats:
+        :param particles_star_fname: Path to the STAR file containing particle information.
+        :param checkpoint_dir: Directory where the trained model checkpoints are stored.
+        :param results_dir: Directory where the inference results will be saved.
+        :param data_halfset: Specifies which half-set of the data to use ("half1", "half2", or "allParticles").
+        :param model_halfset: Specifies which half-set of the model to use ("half1", "half2", "allCombinations", or "matchingHalf").
+        :param particles_dir: Directory where the particle images are located. If None, paths in the STAR file are assumed to be absolute.
+        :param batch_size: The number of particles to process in each batch.
+        :param num_data_workers: The number of worker processes to use for data loading.
+        :param use_cuda: Whether to use a CUDA-enabled GPU for inference.
+        :param n_cpus_if_no_cuda: The number of CPU cores to use if CUDA is not available.
+        :param compile_model: Whether to compile the model using `torch.compile` for potential speed-up.
+        :param top_k: The number of top predictions to consider for each particle.
+        :param reference_map: Path to the reference map for local refinement. If not provided, it will be loaded from the checkpoint.
+        :param directional_zscore_thr: The threshold for the directional Z-score to filter particles.
+        :param perform_localrefinement: Whether to perform local refinement of the particle poses.
+        :param perform_reconstruction: Whether to perform 3D reconstruction from the inferred poses.
+        :param update_progessbar_n_batches: The number of batches after which the progress bar is updated.
+        :param subset_idxs: A list of indices to process a subset of particles.
+        :param n_first_particles: The number of first particles to process. Cannot be used with `subset_idxs`.
+        :param show_debug_stats: Whether to print debug statistics, such as rotation errors.
         """
 
         self.particles_star_fname = particles_star_fname
@@ -117,7 +118,9 @@ class SingleInferencer:
         self._last_dataset_processed = 0
 
     def _setup_accelerator(self):
-        """Setup the computation device and count."""
+        """
+        Sets up the computational device (CPU or CUDA) and determines the number of available devices.
+        """
         if self.use_cuda and torch.cuda.is_available():
             accelerator = "cuda"
             device_count = torch.cuda.device_count()
@@ -131,6 +134,11 @@ class SingleInferencer:
         self.device, self.device_count = accelerator, device_count
 
     def _setup_reconstructor(self, symmetry: Optional[str] = None):
+        """
+        Initializes the Reconstructor object, which is responsible for 3D reconstruction from 2D particle images.
+
+        :param symmetry: The symmetry of the object being reconstructed. If not provided, it's retrieved from the class's `symmetry` attribute.
+        """
         if symmetry is None:
             symmetry = self.symmetry
         reconstructor = Reconstructor(symmetry=symmetry, correct_ctf=True)
@@ -140,12 +148,25 @@ class SingleInferencer:
 
     @staticmethod
     def _get_reconstructor(particles_star_fname, particles_dir, symmetry: str):
+        """
+        Creates and configures a Reconstructor instance.
+
+        :param particles_star_fname: Path to the STAR file containing particle information.
+        :param particles_dir: Directory where particle data is stored.
+        :param symmetry: The symmetry of the object.
+        :return: An initialized Reconstructor object.
+        """
         reconstructor = Reconstructor(symmetry=symmetry, correct_ctf=True)
         reconstructor._get_reconstructionParticlesDataset(particles_star_fname, particles_dir)
         return reconstructor
 
     def _setup_model(self, rank: Optional[int] = None):
-        """Setup the model for inference."""
+        """
+        Loads and configures the machine learning model for inference. This includes loading the main model,
+        the percentile model for score normalization, and setting up the local refiner and reconstructor if enabled.
+
+        :param rank: The rank of the current process in a distributed setup.
+        """
 
         try:
             so3Model_fname = os.path.join(self.checkpoint_dir, self.model_halfset, "checkpoints", BEST_MODEL_SCRIPT_BASENAME)
@@ -211,9 +232,18 @@ class SingleInferencer:
 
     @cached_property
     def symmetry(self):
+        """
+        The symmetry of the model, loaded from the hyperparameters file.
+        """
         return self._get_symmetry()
 
     def _get_symmetry(self):
+        """
+        Retrieves the symmetry value from the `hparams.yaml` file in the checkpoint directory.
+
+        :return: The symmetry value.
+        :raises RuntimeError: If the symmetry cannot be loaded from the file.
+        """
         hparams = os.path.join(self.checkpoint_dir, self.model_halfset, "hparams.yaml")
         try:
             with open(hparams) as f:
@@ -223,7 +253,12 @@ class SingleInferencer:
             raise RuntimeError(f"Failed to load symmetry from {hparams}: {e}")
 
     def _get_datamanager(self, rank: Optional[int] = None):
-        """Setup the dataloader for inference."""
+        """
+        Initializes the DataManager, which is responsible for loading and preparing the particle data.
+
+        :param rank: The rank of the current process in a distributed setup.
+        :return: An initialized DataManager object.
+        """
         data_halfset = None
         if self.data_halfset == "half1":
             data_halfset = 1
@@ -249,11 +284,24 @@ class SingleInferencer:
         return datamanager
 
     def _setup_dataloader(self, rank: Optional[int] = None):
+        """
+        Creates the data loader for inference.
+
+        :param rank: The rank of the current process in a distributed setup.
+        :return: The PyTorch DataLoader for inference.
+        """
         self._datamanager = self._get_datamanager(rank)
         return self._datamanager.predict_dataloader()
 
     def _process_batch(self, model: PlModel, batch: Dict[str, Any] | None, batch_idx: int):
-        """Process a single batch of data using predict_step."""
+        """
+        Processes a single batch of data through the model and returns the predictions.
+
+        :param model: The inference model.
+        :param batch: The batch of data to process. If None, it flushes the model's buffer.
+        :param batch_idx: The index of the current batch.
+        :return: A tuple containing the particle IDs, predicted Euler angles, shifts, scores, and normalized scores. Returns None if there are no results.
+        """
         device = self.device
         if batch is not None:
             if hasattr(model, 'transfer_batch_to_device'):
@@ -281,6 +329,12 @@ class SingleInferencer:
         return ids, euler_degs, pred_shiftsXYangs, score, norm_nn_score
 
     def run(self):
+        """
+        Runs the inference process. It iterates through the specified data and model half-sets,
+        performing inference for each combination.
+
+        :return: A list of tuples, where each tuple contains the particle metadata and the reconstructed volume for each inference run.
+        """
         if self.model_halfset == "allCombinations":
             model_halfset_list = ["half1", "half2"]
         elif self.model_halfset == "matchingHalf":
@@ -308,6 +362,12 @@ class SingleInferencer:
         return out_list
 
     def _get_pbar(self, total):
+        """
+        Initializes or updates a progress bar for tracking the inference process.
+
+        :param total: The total number of batches to process.
+        :return: The progress bar object.
+        """
         if self._pbar is None:
             return tqdm(total=total, desc="Processing batches")
         else:
@@ -316,13 +376,24 @@ class SingleInferencer:
             return self._pbar
 
     def _get_outsuffix(self, extension):
+        """
+        Generates a suffix for the output file names based on the current data and model half-sets.
+
+        :param extension: The file extension.
+        :return: The generated file suffix.
+        """
         if self.model_halfset == "allParticles":
             return f"_data_{self.data_halfset}_model_{self.model_halfset}.{extension}"
         else:
             return f"_{self.data_halfset}.{extension}"
 
     def _run(self):
-        """Main entry point for running async inference."""
+        """
+        The main private method that executes a single inference run. It sets up the data loader and model,
+        processes all batches, and saves the results.
+
+        :return: A tuple containing the particle metadata and the reconstructed volume.
+        """
 
         self._last_dataset_processed = 0
         # Get total dataset info
@@ -349,6 +420,14 @@ class SingleInferencer:
             pbar.close()
 
     def _process_all_batches(self, model, dataloader, pbar=None):
+        """
+        Iterates through all batches in the data loader, processes them, and collects the results.
+
+        :param model: The inference model.
+        :param dataloader: The data loader.
+        :param pbar: The progress bar.
+        :return: A list of results from processing each batch.
+        """
         all_results = []
         with torch.inference_mode():
             for batch_idx, batch in enumerate(dataloader):
@@ -362,6 +441,13 @@ class SingleInferencer:
         return all_results
 
     def _save_reconstruction(self, save_to_file: bool = True, materialize: bool = True):
+        """
+        Saves the reconstructed volume to a file.
+
+        :param save_to_file: Whether to save the volume to a file.
+        :param materialize: Whether to generate the full volume or save the components.
+        :return: The reconstructed volume, or None if not generated.
+        """
         vol = None
         if save_to_file and self.results_dir is not None:
             if save_to_file:
@@ -378,6 +464,14 @@ class SingleInferencer:
         return vol
 
     def _save_particles_results(self, all_results: List[Any], dataset, save_to_file: bool = True):
+        """
+        Aggregates the results from all batches and saves them to STAR files.
+
+        :param all_results: A list of results from all processed batches.
+        :param dataset: The dataset containing the particle information.
+        :param save_to_file: Whether to save the results to STAR files.
+        :return: A list of pandas DataFrames containing the particle metadata with the inference results.
+        """
 
         # Create result tensors to hold data from all batches
         n_particles = sum(len(v[0]) for v in all_results)

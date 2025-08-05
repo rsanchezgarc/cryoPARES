@@ -2,6 +2,7 @@ import glob
 import os
 import sys
 import warnings
+from functools import cached_property
 
 import numpy as np
 import torch
@@ -19,7 +20,8 @@ from cryoPARES.configManager.configParser import ConfigOverrideSystem
 from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.constants import BEST_DIRECTIONAL_NORMALIZER, BEST_CHECKPOINT_BASENAME, BEST_MODEL_SCRIPT_BASENAME
-from cryoPARES.geometry.convert_angles import matrix_to_euler_angles
+from cryoPARES.geometry.convert_angles import matrix_to_euler_angles, euler_angles_to_matrix
+from cryoPARES.geometry.metrics_angles import rotation_error_with_sym
 from cryoPARES.inference.nnetWorkers.inferenceModel import InferenceModel
 from cryoPARES.models.model import PlModel
 from cryoPARES.datamanager.datamanager import DataManager
@@ -204,6 +206,7 @@ class SingleInferencer:
         self._model = model
         return model
 
+    @cached_property
     def _get_symmetry(self):
         hparams = os.path.join(self.checkpoint_dir, self.model_halfset, "hparams.yaml")
         try:
@@ -444,11 +447,18 @@ class SingleInferencer:
                 eulerdegs = result_arrays["eulerdegs"][result_indices, k, :].numpy()
 
                 ######### Debug code
-                r1 = Rotation.from_euler("ZYZ", eulerdegs, degrees=True)
-                r2 = Rotation.from_euler("ZYZ", particles_md.loc[ids_to_update_in_df, angles_names], degrees=True)
-                err = np.rad2deg((r1.inv() * r2).magnitude())
-                # print("Error degs:", err)
-                print("Median Error degs:", np.median(err))
+                # r1 = Rotation.from_euler("ZYZ", eulerdegs, degrees=True)
+                # r2 = Rotation.from_euler("ZYZ", particles_md.loc[ids_to_update_in_df, angles_names], degrees=True)
+                # err = np.rad2deg((r1.inv() * r2).magnitude())
+                # # print("Error degs:", err)
+                r1 = torch.FloatTensor(Rotation.from_euler(RELION_EULER_CONVENTION,
+                                                           eulerdegs,
+                                                           degrees=True).as_matrix())
+                r2 = torch.FloatTensor(Rotation.from_euler(RELION_EULER_CONVENTION,
+                                                           particles_md.loc[ids_to_update_in_df, angles_names],
+                                                           degrees=True).as_matrix())
+                err = torch.rad2deg(rotation_error_with_sym(r1, r2, symmetry=self._get_symmetry()))
+                print(f"Median Error degs (top-{k}):", np.median(err))
                 # breakpoint()
                 ######## END of Debug code
 

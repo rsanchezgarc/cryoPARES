@@ -108,15 +108,6 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
                 'norm_nn_score': norm_nn_score,
                 'ids': ids}
             out = self._run_stage2(**kwargs)
-            # tensors = {
-            #     'imgs': fullSizeImg,
-            #     'ctfs': fullSizeCtfs,
-            #     'rotmats': pred_rotmats,
-            #     'maxprobs': maxprobs,
-            #     'norm_nn_score': norm_nn_score,
-            # }
-            # md = {'ids': ids}
-            # out = self._run_stage2(tensors, md)
         else:
             out = (ids, pred_rotmats, None, maxprobs, norm_nn_score)
             if self.reconstructor is not None:

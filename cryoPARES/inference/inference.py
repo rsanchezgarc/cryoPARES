@@ -544,8 +544,9 @@ class SingleInferencer:
                 for col in angles_names + shiftsXYangs_names + [confide_name]:
                     if col not in particles_md.columns:
                         particles_md[col] = 0.0
-                eulerdegs = result_arrays["eulerdegs"][result_indices, k, :].numpy()
 
+                eulerdegs = result_arrays["eulerdegs"][result_indices, k, :].numpy()
+                shiftsXYangs = result_arrays["shiftsXYangs"][result_indices, k, :].numpy()
                 if self.show_debug_stats:
                     ######## Debug code
                     r1 = torch.FloatTensor(Rotation.from_euler(RELION_EULER_CONVENTION,
@@ -554,14 +555,16 @@ class SingleInferencer:
                     r2 = torch.FloatTensor(Rotation.from_euler(RELION_EULER_CONVENTION,
                                                                particles_md.loc[ids_to_update_in_df, angles_names],
                                                                degrees=True).as_matrix())
-                    err = torch.rad2deg(rotation_error_with_sym(r1, r2, symmetry=self.symmetry))
-                    print(f"Median Error degs (top-{k+1}):", np.median(err))
+                    ang_err = torch.rad2deg(rotation_error_with_sym(r1, r2, symmetry=self.symmetry))
+
+                    s2 = particles_md.loc[ids_to_update_in_df, shiftsXYangs_names].values
+                    shift_error = np.sqrt(((shiftsXYangs - s2)**2).sum(-1))
+                    print(f"Median Ang   Error degs (top-{k+1}):", np.median(ang_err))
+                    print(f"Median Shift Error Angs (top-{k+1}):", np.median(shift_error))
                     ######## END of Debug code
 
                 particles_md.loc[ids_to_update_in_df, angles_names] = eulerdegs
-
-                particles_md.loc[ids_to_update_in_df, shiftsXYangs_names] = result_arrays["shiftsXYangs"][
-                                                                            result_indices, k, :].numpy()
+                particles_md.loc[ids_to_update_in_df, shiftsXYangs_names] = shiftsXYangs
                 particles_md.loc[ids_to_update_in_df, confide_name] = result_arrays["score"][result_indices, k].numpy()
 
             particles_md_list.append(particles_md)

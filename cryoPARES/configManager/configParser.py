@@ -319,7 +319,7 @@ class ConfigArgumentParser(AutoArgumentParser):
     """AutoArgumentParser with integrated config override support."""
 
     def __init__(self, verbose=False, *args, config_obj: Optional[Any] = main_config, **kwargs):
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs, allow_abbrev=False)
         self.verbose = verbose
         self.config_obj = config_obj
         self._config_arg_names = []

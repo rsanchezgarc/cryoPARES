@@ -226,7 +226,7 @@ class Reconstructor(nn.Module):
 
         if self.has_symmetry:
             imgs, ctf, rotMats, hwShiftAngs = self._expand_with_symmetry(imgs, ctf, rotMats, hwShiftAngs)
-
+            imgs = imgs.contiguous()
         if self.correct_ctf:
             ctf = ctf.to(imgs.device)
             imgs *= ctf
@@ -374,22 +374,26 @@ def _test():
     reconstructor = __backproject_test()
     vol = reconstructor.generate_volume(fname="/tmp/reconstructed_volume.mrc", device="cpu")
 
-    relion_vol = torch.as_tensor(
-        mrcfile.read("/home/sanchezg/cryo/myProjects/cryoPARES/cryoPARES/reconstruction/relion_reconstruct.mrc"),
-        dtype=torch.float32)
-    from torch_fourier_shell_correlation import fsc
-    fsc_result = fsc(vol, relion_vol)
-    print(fsc_result)
+    relion_vol = None
+    try:
+        relion_vol = torch.as_tensor(
+            mrcfile.read("/home/sanchezg/cryo/myProjects/cryoPARES/cryoPARES/reconstruction/relion_reconstruct.mrc"),
+            dtype=torch.float32)
+        from torch_fourier_shell_correlation import fsc
+        fsc_result = fsc(vol, relion_vol)
+        print(fsc_result)
+    except FileNotFoundError:
+        pass
 
     from matplotlib import pyplot as plt
     f, axes = plt.subplots(2,3, squeeze=False)
     axes[0, 0].imshow(vol[..., vol.shape[-1]//2])
     axes[0, 1].imshow(vol[..., vol.shape[-2]//2, :])
     axes[0, 2].imshow(vol[vol.shape[0]//2, ...])
-
-    axes[1, 0].imshow(relion_vol[..., relion_vol.shape[-1]//2])
-    axes[1, 1].imshow(relion_vol[..., relion_vol.shape[-2]//2, :])
-    axes[1, 2].imshow(relion_vol[relion_vol.shape[0]//2, ...])
+    if relion_vol is not None:
+        axes[1, 0].imshow(relion_vol[..., relion_vol.shape[-1]//2])
+        axes[1, 1].imshow(relion_vol[..., relion_vol.shape[-2]//2, :])
+        axes[1, 2].imshow(relion_vol[relion_vol.shape[0]//2, ...])
 
     plt.show()
     print()

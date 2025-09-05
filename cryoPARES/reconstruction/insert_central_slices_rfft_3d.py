@@ -7,8 +7,6 @@ from einops import einops
 from torch_fourier_slice._grids import _central_slice_fftfreq_grid
 from torch_image_interpolation import insert_into_image_3d
 
-# from torch_image_interpolation import insert_into_image_3d
-
 from cryoPARES.projmatching.extract_central_slices_as_real import _fftfreq_to_dft_coordinates, _rfft_shape_tuple
 
 

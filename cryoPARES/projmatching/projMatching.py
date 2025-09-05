@@ -15,6 +15,7 @@ from scipy.spatial.transform import Rotation
 from torch import nn
 from torch.nn import functional as F
 
+from cryoPARES.configManager.configParser import ConfigArgumentParser, ConfigOverrideSystem
 from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.projmatching.extract_central_slices_as_real import extract_central_slices_rfft_3d_multichannel
@@ -24,11 +25,20 @@ from torch_grid_utils.shapes_2d import circle #TODO we can use other things to l
 from cryoPARES.geometry.convert_angles import euler_angles_to_matrix, matrix_to_euler_angles
 from cryoPARES.geometry.grids import so3_near_identity_grid_cartesianprod
 from cryoPARES.projmatching.fftOps import _real_to_fourier_2d, _fourier_proj_to_real_2d
-from cryoPARES.utils.paths import MAP_AS_ARRAY_OR_FNAME_TYPE
+from cryoPARES.utils.paths import MAP_AS_ARRAY_OR_FNAME_TYPE, get_most_recent_file
 from cryoPARES.utils.reconstructionUtils import get_vol
-from cryoPARES.constants import (RELION_EULER_CONVENTION, BATCH_PARTICLES_NAME, BATCH_POSE_NAME,
-                                 BATCH_ORI_IMAGE_NAME, BATCH_ORI_CTF_NAME, BATCH_IDS_NAME, BATCH_MD_NAME,
-                                 RELION_ANGLES_NAMES, PROJECTION_MATCHING_SCORE, RELION_SHIFTS_NAMES)
+from cryoPARES.constants import (
+    RELION_EULER_CONVENTION,
+    BATCH_PARTICLES_NAME,
+    BATCH_POSE_NAME,
+    BATCH_ORI_IMAGE_NAME,
+    BATCH_ORI_CTF_NAME,
+    BATCH_IDS_NAME,
+    BATCH_MD_NAME,
+    RELION_ANGLES_NAMES,
+    PROJECTION_MATCHING_SCORE,
+    RELION_SHIFTS_NAMES,
+)
 
 
 class ProjectionMatcher(nn.Module):
@@ -41,11 +51,11 @@ class ProjectionMatcher(nn.Module):
                  max_shift_fraction: Optional[float] = CONFIG_PARAM(),
                  return_top_k: int = 1,
                  correct_ctf: bool = CONFIG_PARAM(),
-                 ): #TODO: Add downsampling of the volume particles for speed
+                 ):
         """
 
         :param reference_vol:
-        :param grid_distance_degs: ~Cone width
+        :param grid_distance_degs]: ~Cone width
         :param grid_step_degs:
         :param pixel_size:
         :param filter_resolution_angst:
@@ -277,7 +287,6 @@ def _analyze_cross_correlation(perImgCorr:torch.Tensor, pixelShiftsXY:torch.Tens
     topk_input_indices = maxIdxs // nrots
     predRotMatsIdxs = maxIdxs % nrots
     predRotMats = grid_rotmats[batch_arange, topk_input_indices, predRotMatsIdxs]
-
     return maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight
 
 @lru_cache(1)
@@ -555,7 +564,143 @@ def _test3():
 
     print("Done")
 
+@inject_defaults_from_config(default_config=main_config.projmatching)
+def aling_starfile(
+        star_fname: str,
+        out_fname: str,
+        reference_vol: str,
+        particles_dir: Optional[str]=None,
+        grid_distance_degs: float = CONFIG_PARAM(),
+        grid_step_degs: float = CONFIG_PARAM(),
+        filter_resolution_angst: Optional[float] = CONFIG_PARAM(),
+        max_shift_fraction: Optional[float] = CONFIG_PARAM(),
+        return_top_k: int = 1,
+        correct_ctf: bool = CONFIG_PARAM(),
+        batch_size:int=32, use_cuda:bool=True, num_data_workers:int=2,
+        show_debug_stats: bool = False,
+        n_first_particles: Optional[int] = None):
+    """
+
+    :param star_fname:
+    :param out_fname:
+    :param reference_vol:
+    :param particles_dir:
+    :param grid_distance_degs:
+    :param grid_step_degs:
+    :param filter_resolution_angst:
+    :param max_shift_fraction:
+    :param return_top_k:
+    :param correct_ctf:
+    :param batch_size:
+    :param use_cuda:
+    :param num_data_workers:
+    :param show_debug_stats:
+    :param n_first_particles:
+    :return:
+    """
+    from tqdm import tqdm
+    from cryoPARES.datamanager.datamanager import DataManager
+    if show_debug_stats:
+        from cryoPARES.geometry.metrics_angles import rotation_error_with_sym
+
+    pj = ProjectionMatcher(reference_vol=os.path.expanduser(reference_vol),
+                           grid_distance_degs=grid_distance_degs,
+                           grid_step_degs=grid_step_degs,
+                           pixel_size=None,
+                           filter_resolution_angst=filter_resolution_angst,
+                           max_shift_fraction=max_shift_fraction,
+                           return_top_k=return_top_k,
+                           correct_ctf=correct_ctf)
+    if use_cuda:
+        device = "cuda"
+    else:
+        device = "cpu"
+    pj = pj.to(device)
+
+    if n_first_particles is not None:
+        subset_idxs = range(n_first_particles)
+    datamanager = DataManager(
+          star_fnames=star_fname,
+          symmetry="C1", #We don't use symmetry for local projMatching
+          batch_size=batch_size,
+          particles_dir=particles_dir,
+          halfset=None,
+          save_train_val_partition_dir=None,
+          is_global_zero=True,
+          return_ori_imagen=True,
+          num_augmented_copies_per_batch=1,
+          num_data_workers=num_data_workers,
+          subset_idxs=subset_idxs)
+
+    pd_list = []
+    dl = datamanager._create_dataloader()
+
+    if show_debug_stats:
+        all_ang_errors = []
+        all_shift_errors = []
+
+    with torch.inference_mode():
+        for bix, batch in enumerate(tqdm(dl, desc="Aligning particles")):
+            imgs = batch[BATCH_ORI_IMAGE_NAME].to(device, non_blocking=True)
+            ctfs = batch[BATCH_ORI_CTF_NAME].to(device, non_blocking=True)
+            rotmats = batch[BATCH_POSE_NAME][0].unsqueeze(1).to(device, non_blocking=True)
+            md = batch[BATCH_MD_NAME]
+            fimages = pj._real_to_fourier(imgs)
+            maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight = pj.align_particles(fimages, ctfs, rotmats)
+
+            if show_debug_stats:
+                gt_rotmats = rotmats.squeeze(1)
+                pred_rotmats_top1 = predRotMats[:, 0, ...]
+                ang_err = torch.rad2deg(rotation_error_with_sym(pred_rotmats_top1, gt_rotmats, symmetry="C1"))
+                all_ang_errors.append(ang_err.cpu().numpy())
+
+                gt_shifts = batch[BATCH_POSE_NAME][1]
+                pred_shifts_top1 = predShiftsAngsXY[:, 0, ...]
+                shift_error = torch.sqrt(((pred_shifts_top1 - gt_shifts.to(device))**2).sum(-1))
+                all_shift_errors.append(shift_error.cpu().numpy())
+
+            for topk in range(return_top_k):
+                suffix = "" if topk == 0 else f"_top{topk}"
+                eulers = Rotation.from_matrix(predRotMats.cpu().numpy()[:,topk,...]
+                                              ).as_euler(RELION_EULER_CONVENTION, degrees=True)
+                for i, angName in enumerate(RELION_ANGLES_NAMES):
+                    md[angName+suffix] = eulers[:,i]
+                for i, shiftName in enumerate(RELION_SHIFTS_NAMES):
+                    md[shiftName+suffix] = predShiftsAngsXY[:,topk,i].cpu().numpy()
+                md[PROJECTION_MATCHING_SCORE + suffix] = comparedWeight[:,topk].cpu().numpy()
+            pd_list.append(pd.DataFrame(md))
+
+    optics = getattr(dl.dataset, "particles", dl.dataset.datasets[0].particles).optics_md
+    parts = pd.concat(pd_list)
+    starfile.write(dict(optics=optics, particles=parts), filename=out_fname, overwrite=True)
+
+    if show_debug_stats:
+        all_ang_errors = np.concatenate(all_ang_errors)
+        all_shift_errors = np.concatenate(all_shift_errors)
+
+        print("\n--- Error Report (Top-1) ---")
+        median_ang_err = np.median(all_ang_errors)
+        iqr_ang_err = np.subtract(*np.percentile(all_ang_errors, [75, 25]))
+        print(f"Angular Error (degs):\n  Median: {median_ang_err:.4f}\n  IQR:    {iqr_ang_err:.4f}")
+
+        median_shift_err = np.median(all_shift_errors)
+        iqr_shift_err = np.subtract(*np.percentile(all_shift_errors, [75, 25]))
+        print(f"Shift Error (Angstroms):\n  Median: {median_shift_err:.4f}\n  IQR:    {iqr_shift_err:.4f}")
+        print("--------------------------\n")
+
+    print(f"Aligned starfile saved at {out_fname}")
+
+def main():
+    parser = ConfigArgumentParser(prog="projMatching_cryoPARES", description="Run local projection matching for a given starfile.",
+                                  config_obj=main_config)
+    parser.add_args_from_function(aling_starfile)
+    args, config_args = parser.parse_args()
+    aling_starfile(**vars(args))
+
+
 if __name__ == "__main__":
-    _test0()
+    # _test0()
     # _test1()
     # _test3()
+
+    main()

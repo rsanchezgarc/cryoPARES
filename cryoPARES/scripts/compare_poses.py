@@ -4,8 +4,12 @@ import torch
 import starfile
 import warnings
 import matplotlib.pyplot as plt
+from cesped.constants import RELION_EULER_CONVENTION
+
 from cryoPARES.geometry.convert_angles import euler_angles_to_matrix
 from cryoPARES.geometry.symmetry import getSymmetryGroup
+from scipy.spatial.transform import Rotation
+from scipy.optimize import minimize
 
 
 def get_angular_distance(r_pred, r_true, symmetry_ops):
@@ -25,6 +29,38 @@ def get_angular_distance(r_pred, r_true, symmetry_ops):
 
     distances = torch.acos((trace_clipped - 1) / 2)
     return torch.min(distances).item()
+
+
+def apply_transformation(angles, transform_matrix):
+    """Apply a transformation matrix to a set of Euler angles."""
+    R = euler_angles_to_matrix(angles, convention=RELION_EULER_CONVENTION)
+    R_transformed = torch.matmul(torch.from_numpy(transform_matrix).float(), R)
+    # Convert back to angles using scipy
+    R_scipy = Rotation.from_matrix(R_transformed.numpy())
+    return torch.from_numpy(R_scipy.as_euler(RELION_EULER_CONVENTION)).float()
+
+
+def optimize_transformation(angles_pred_list, angles_true_list, symmetry_ops):
+    """Find the optimal transformation matrix that aligns two sets of angles."""
+
+    def objective(params):
+        R_transform = torch.from_numpy(Rotation.from_euler('xyz', params, degrees=True).as_matrix()).float()
+
+        total_error = 0
+        for angles_pred, angles_true in zip(angles_pred_list, angles_true_list):
+            r_pred = euler_angles_to_matrix(angles_pred, convention=RELION_EULER_CONVENTION)
+            r_true = euler_angles_to_matrix(angles_true, convention=RELION_EULER_CONVENTION)
+            r_true_transformed = torch.matmul(R_transform, r_true)
+            error = get_angular_distance(r_pred, r_true_transformed, symmetry_ops)
+            total_error += error
+
+        return total_error / len(angles_pred_list)
+
+    initial_guess = [0, 0, 0]
+    result = minimize(objective, initial_guess, method='Nelder-Mead')
+    optimal_transform = Rotation.from_euler('xyz', result.x, degrees=True).as_matrix()
+
+    return optimal_transform, result.fun
 
 
 def plot_angular_errors(angular_errors, output_prefix=None):
@@ -132,7 +168,8 @@ def main():
     parser.add_argument('--plot-all', action='store_true', help='Show all scatter plots.')
     parser.add_argument('--save-plots', type=str,
                         help='Save plots with this prefix (e.g., "experiment1" -> "experiment1_angular_errors.png")')
-
+    parser.add_argument('--skip-frame-alignment', action='store_true',
+                        help='Skip trying to find optimal alignment between reference frames')
     args = parser.parse_args()
 
     # Read starfiles using the starfile library
@@ -156,29 +193,54 @@ def main():
     # Get symmetry operations
     symmetry_ops = getSymmetryGroup(args.symmetry, as_matrix=True)
 
-    angular_errors = []
-    shift_errors = []
-    shift_x_errors = []
-    shift_y_errors = []
+    # First pass: collect all angles and shifts
+    angles_pred_list = []
+    angles_true_list = []
+    shifts_pred_list = []
+    shifts_true_list = []
 
     for _, row in merged_df.iterrows():
-        # Angular error
         angles_pred = torch.deg2rad(
             torch.tensor([row['rlnAngleRot_pred'], row['rlnAngleTilt_pred'], row['rlnAnglePsi_pred']],
                          dtype=torch.float32))
         angles_true = torch.deg2rad(
             torch.tensor([row['rlnAngleRot_gt'], row['rlnAngleTilt_gt'], row['rlnAnglePsi_gt']], dtype=torch.float32))
 
-        r_pred = euler_angles_to_matrix(angles_pred, convention='ZYZ')
-        r_true = euler_angles_to_matrix(angles_true, convention='ZYZ')
+        shift_pred = np.array([row['rlnOriginXAngst_pred'], row['rlnOriginYAngst_pred']])
+        shift_true = np.array([row['rlnOriginXAngst_gt'], row['rlnOriginYAngst_gt']])
+
+        angles_pred_list.append(angles_pred)
+        angles_true_list.append(angles_true)
+        shifts_pred_list.append(shift_pred)
+        shifts_true_list.append(shift_true)
+
+    # Apply frame alignment if requested
+    transform_matrix = np.eye(3)
+    if not args.skip_frame_alignment:
+        print("Optimizing reference frame alignment...")
+        transform_matrix, min_error = optimize_transformation(angles_pred_list, angles_true_list, symmetry_ops)
+        print(f"Optimal alignment found with mean error: {min_error:.2f}°\n{transform_matrix.round(2)}\n-----------------")
+
+    # Second pass: calculate errors with aligned frames
+    angular_errors = []
+    shift_errors = []
+    shift_x_errors = []
+    shift_y_errors = []
+
+    for i, (angles_pred, angles_true, shift_pred, shift_true) in enumerate(
+            zip(angles_pred_list, angles_true_list, shifts_pred_list, shifts_true_list)):
+        # Angular error
+        if not args.skip_frame_alignment:
+            # Apply transformation to true angles
+            angles_true = apply_transformation(angles_true, transform_matrix)
+
+        r_pred = euler_angles_to_matrix(angles_pred, convention=RELION_EULER_CONVENTION)
+        r_true = euler_angles_to_matrix(angles_true, convention=RELION_EULER_CONVENTION)
 
         angular_errors.append(np.rad2deg(get_angular_distance(r_pred, r_true, symmetry_ops)))
 
         # Shift error
-        shift_pred = np.array([row['rlnOriginXAngst_pred'], row['rlnOriginYAngst_pred']])
-        shift_true = np.array([row['rlnOriginXAngst_gt'], row['rlnOriginYAngst_gt']])
         shift_diff = shift_pred - shift_true
-
         shift_x_errors.append(shift_diff[0])
         shift_y_errors.append(shift_diff[1])
         shift_errors.append(np.linalg.norm(shift_diff))

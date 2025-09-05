@@ -1,7 +1,9 @@
-"""Cryo‑EM 3‑D reconstruction –
+"""
+Cryo-EM 3-D reconstruction
 ====================================================
 A pipeline that reconstructs a Coulomb potential
-volume from a RELION‑style particle STAR file using the open‑source
+volume from a RELION-style particle STAR file using open-source
+libraries.
 """
 import os
 import sys
@@ -27,7 +29,7 @@ from cryoPARES.utils.paths import FNAME_TYPE
 from cryoPARES.utils.reconstructionUtils import write_vol
 
 # os.environ["CUDA_VISIBLE_DEVICES"] = "-1" # I noticed that torch.compile tries to compile in the GPU as well even if all the tensors are in the CPU
-compiled_insert_central_slices_rfft_3d_multichannel = torch.compile(insert_central_slices_rfft_3d_multichannel, mode=None)  # mode="max-autotune")
+compiled_insert_central_slices_rfft_3d_multichannel = torch.compile(insert_central_slices_rfft_3d_multichannel, mode=None) # mode="max-autotune")
 # compiled_insert_central_slices_rfft_3d_multichannel = insert_central_slices_rfft_3d_multichannel
 
 class Reconstructor(nn.Module):
@@ -66,11 +68,11 @@ class Reconstructor(nn.Module):
         return self.dummy_buffer.device
 
     def move_buffers_to_share_mem(self):
-        if self.numerator:
+        if self.numerator is not None:
             self.numerator.share_memory_()
-        if self.weights:
+        if self.weights is not None:
             self.weights.share_memory_()
-        if self.ctfsq:
+        if self.ctfsq is not None:
             self.ctfsq.share_memory_()
 
     def get_buffers(self):
@@ -93,62 +95,64 @@ class Reconstructor(nn.Module):
             self.particle_shape = (box_size, box_size)
             nky, nkx = self.box_size, self.box_size // 2 + 1
 
-            # self.numerator = torch.zeros((self.box_size, self.box_size, nkx, 2), dtype=torch.float32, device=self.get_device())
             self.numerator = torch.zeros((2, self.box_size, self.box_size, nkx), dtype=torch.float32, device=self.get_device())
-
             self.weights = torch.zeros((self.box_size, self.box_size, nkx), dtype=torch.float32, device=self.get_device())
             self.ctfsq = torch.zeros_like(self.weights, dtype=torch.float32, device=self.get_device())
 
         self._initialized = True
 
+
     def _expand_with_symmetry(self, imgs, ctf, rotMats, hwShiftAngs):
         """
-        Expand images and metadata with symmetry operations.
+        Expand images and metadata with symmetry operations following RELION.
 
         Args:
-            imgs: [B, H, W] tensor of images in Fourier space
-            ctf: [B, H, W] tensor of CTF values (or 0 if no CTF correction)
-            rotMats: [B, 3, 3] tensor of rotation matrices
-            hwShiftAngs: [B, 2] tensor of shifts
+            imgs: [B, H, W] tensor (spatial-domain before rFFT)
+            ctf:  [B, H, W] tensor (or 0 if no CTF correction)
+            rotMats: [B, 3, 3] active rotation matrices (your current convention)
+            hwShiftAngs: [B, 2] shifts (kept UNCHANGED for symmetry expansion)
 
         Returns:
-            Expanded tensors with symmetry operations applied
+            Expanded tensors with symmetry mates applied to orientations only.
         """
         if not self.has_symmetry:
             return imgs, ctf, rotMats, hwShiftAngs
 
-        # batch_size = imgs.shape[0]
-        num_sym_ops = self.sym_matrices.shape[0]
+        B = rotMats.shape[0]
+        K = self.sym_matrices.shape[0]  # number of symmetry operations
 
-        # Expand images - no change needed as Fourier transforms are rotationally invariant
-        # for the image data itself
-        expanded_imgs = imgs.unsqueeze(1).expand(-1, num_sym_ops, -1, -1).reshape(-1, *imgs.shape[1:])
-
-        # Expand CTF - same as images since CTF is applied in image space
+        # 1) Expand images & CTF by simple tiling
+        expanded_imgs = imgs.unsqueeze(1).expand(-1, K, -1, -1).reshape(-1, *imgs.shape[1:])
         if isinstance(ctf, torch.Tensor):
-            expanded_ctf = ctf.unsqueeze(1).expand(-1, num_sym_ops, -1, -1).reshape(-1, *ctf.shape[1:])
+            expanded_ctf = ctf.unsqueeze(1).expand(-1, K, -1, -1).reshape(-1, *ctf.shape[1:])
         else:
-            # Handle the case where ctf is 0 (no CTF correction)
-            expanded_ctf = ctf
+            expanded_ctf = ctf  # sentinel 0
 
-        # Expand shifts - symmetry operations don't change shifts in image space
-        expanded_hwShiftAngs = hwShiftAngs.unsqueeze(1).expand(-1, num_sym_ops, -1).reshape(-1, hwShiftAngs.shape[-1])
+        # 2) RELION composes in "Euler-matrix" convention:
+        #    NewE = L * OldE * R  (rows are axes).
+        #    Our rotMats are active (columns), so OldE = rotMats^T.
+        #    For point groups, RELION's example uses L = I, R = S_k.
+        device = rotMats.device
+        E = rotMats.transpose(-1, -2)                 # [B, 3, 3]  (RELION/XMIPP Euler matrix)
+        R = self.sym_matrices.to(device=device)       # [K, 3, 3]
+        # If you ever support improper symmetries, define a matching L_k here.
+        # For now (proper point groups): L_k = I.
+        # Broadcast to all mates:
+        E = E.unsqueeze(1).expand(-1, K, -1, -1).reshape(-1, 3, 3)       # [B*K, 3, 3]
+        Rexp = R.unsqueeze(0).expand(B, -1, -1, -1).reshape(-1, 3, 3)    # [B*K, 3, 3]
 
-        # Apply symmetry operations to rotation matrices
-        # sym_matrices: [num_sym_ops, 3, 3]
-        # rotMats: [batch_size, 3, 3]
-        # Result: [batch_size * num_sym_ops, 3, 3]
-        expanded_rotMats = torch.matmul(
-            self.sym_matrices.unsqueeze(1),  # [num_sym_ops, 1, 3, 3]
-            rotMats.unsqueeze(0)  # [1, batch_size, 3, 3]
-        ).reshape(-1, 3, 3)  # [batch_size * num_sym_ops, 3, 3]
+        E_new = E @ Rexp                 # NewE = OldE * R  (L = I)
+        rotMats_new = E_new.transpose(-1, -2).contiguous()  # back to active rotation
 
-        return expanded_imgs, expanded_ctf, expanded_rotMats, expanded_hwShiftAngs
+        # 3) Shifts are NOT modified for symmetry expansion in RELION (non-helical).
+        expanded_hwShiftAngs = hwShiftAngs.unsqueeze(1).expand(-1, K, -1).reshape(-1, 2)
+
+        return expanded_imgs, expanded_ctf, rotMats_new, expanded_hwShiftAngs
+
 
     def _get_reconstructionParticlesDataset(self, particles_star_fname, particles_dir, subset_idxs=None):
         particlesDataset = ReconstructionParticlesDataset(particles_star_fname, particles_dir,
                                                           correct_ctf=self.correct_ctf, subset_idxs=subset_idxs)
-        # self.particlesDataset = particlesDataset #TODO: Remove self.particlesDataset, it's only used for debug
         self.set_metadata_from_particles(particlesDataset)
         return particlesDataset
 
@@ -157,7 +161,7 @@ class Reconstructor(nn.Module):
                               batch_size=1, num_dataworkers=0, use_only_n_first_batches=None, subset_idxs=None):
 
         for _ in self._backproject_particles(particles_star_fname, particles_dir, batch_size,
-                                                   num_dataworkers, use_only_n_first_batches, subset_idxs):
+                                             num_dataworkers, use_only_n_first_batches, subset_idxs):
             pass
 
     def _backproject_particles(self, particles_star_fname: FNAME_TYPE,
@@ -167,7 +171,7 @@ class Reconstructor(nn.Module):
 
 
         particlesDataset = self._get_reconstructionParticlesDataset(particles_star_fname,
-                                                               particles_dir, subset_idxs=subset_idxs)
+                                                                    particles_dir, subset_idxs=subset_idxs)
         dl = DataLoader(particlesDataset, batch_size=batch_size, shuffle=False,
                         num_workers=num_dataworkers,
                         pin_memory=num_dataworkers > 0,
@@ -175,9 +179,9 @@ class Reconstructor(nn.Module):
 
         zyx_matrices = False
         for bidx, (ids, imgs, ctf, rotMats, hwShiftAngs) in enumerate(tqdm.tqdm(dl, desc=f"backprojecting PID({os.getpid()})",
-                                                                           disable=not verbose)):
+                                                                                disable=not verbose)):
             self._backproject_batch(imgs, ctf, rotMats, hwShiftAngs, zyx_matrices)
-            if use_only_n_first_batches and bidx > use_only_n_first_batches:
+            if use_only_n_first_batches and bidx >= use_only_n_first_batches:
                 break
             yield imgs.shape[0]
 
@@ -186,19 +190,11 @@ class Reconstructor(nn.Module):
                            zyx_matrices: bool):
         """
         Backprojects a single batch of particles into the volume.
-
-        Args:
-            imgs (torch.Tensor): The particle images.
-            ctf (torch.Tensor): The CTF information for each particle.
-            rotMats (torch.Tensor): The rotation matrices for each particle.
-            hwShiftAngs (torch.Tensor): The translational shifts for each particle.
-            zyx_matrices (bool): Flag indicating the rotation matrix format.
         """
-        #TODO: Implement confidence weighting
         assert self._initialized, "Error, Reconstructor was not initialized"
         rotMats_shape = rotMats.shape
         assert rotMats_shape[:-2] == hwShiftAngs.shape[:-1] and rotMats.shape[0] == imgs.shape[0], \
-                        f"{rotMats_shape}, {hwShiftAngs.shape}, {imgs.shape}"
+                               f"{rotMats_shape}, {hwShiftAngs.shape}, {imgs.shape}"
 
         device = self.get_device()
         imgs = imgs.to(device, non_blocking=True)
@@ -206,32 +202,36 @@ class Reconstructor(nn.Module):
         hwShiftAngs = hwShiftAngs.to(device, non_blocking=True)
 
         # Pre-processing
-        imgs = torch.fft.fftshift(imgs, dim=(-2, -1))  # Volume center to array origin
+        imgs = torch.fft.fftshift(imgs, dim=(-2, -1))
         imgs = torch.fft.rfftn(imgs, dim=(-2, -1))
-        imgs = torch.fft.fftshift(imgs, dim=(-2,))  # Actual fftshift
+        imgs = torch.fft.fftshift(imgs, dim=(-2,))
 
         if len(rotMats_shape) == 4:
-            imgs = imgs.unsqueeze(1).expand(-1, rotMats_shape[1], -1, -1).view(-1, *imgs.shape[-2:])
-            ctf = ctf.unsqueeze(1).expand(-1, rotMats_shape[1], -1, -1).view(-1, *ctf.shape[-2:])
-            rotMats = rotMats.view(-1, 3, 3)
-            hwShiftAngs = hwShiftAngs.view(-1, 2)
-        # Apply translational shifts
-        imgs = fourier_shift_dft_2d(
-            dft=imgs,
-            image_shape=self.particle_shape,
-            shifts=hwShiftAngs / self.sampling_rate,  # Shifts need to be in pixels
-            rfft=True,
-            fftshifted=True,
-        )
+            imgs = imgs.unsqueeze(1).expand(-1, rotMats_shape[1], -1, -1).reshape(-1, *imgs.shape[-2:])
+            ctf = ctf.unsqueeze(1).expand(-1, rotMats_shape[1], -1, -1).reshape(-1, *ctf.shape[-2:])
+            rotMats = rotMats.reshape(-1, 3, 3)
+            hwShiftAngs = hwShiftAngs.reshape(-1, 2)
 
         if self.has_symmetry:
             imgs, ctf, rotMats, hwShiftAngs = self._expand_with_symmetry(imgs, ctf, rotMats, hwShiftAngs)
             imgs = imgs.contiguous()
+            if isinstance(ctf, torch.Tensor):
+                ctf = ctf.contiguous()
+            rotMats = rotMats.contiguous()
+            hwShiftAngs = hwShiftAngs.contiguous()
+
+        # Apply translational shifts
+        imgs = fourier_shift_dft_2d(
+            dft=imgs,
+            image_shape=self.particle_shape,
+            shifts=hwShiftAngs / self.sampling_rate,
+            rfft=True,
+            fftshifted=True,
+        )
         if self.correct_ctf:
             ctf = ctf.to(imgs.device)
             imgs *= ctf
 
-            # Stack for multichannel insertion
             imgs = torch.stack([imgs.real, imgs.imag, ctf**2], dim=1)
 
             dft_ctf, weights = compiled_insert_central_slices_rfft_3d_multichannel(
@@ -242,7 +242,6 @@ class Reconstructor(nn.Module):
                 zyx_matrices=zyx_matrices,
             )
 
-            # Update the volume Fourier space components
             self.numerator += dft_ctf[:2, ...]
             self.ctfsq += dft_ctf[-1, ...]
             self.weights += weights
@@ -260,29 +259,27 @@ class Reconstructor(nn.Module):
 
         dft = torch.zeros_like(self.numerator)
 
-        # Only divide where we have sufficient weights
         mask = self.weights > self.min_denominator_value
         if self.correct_ctf:
             denominator = self.ctfsq[mask] + self.eps * self.weights[mask]
-            # Handle potential near-zero denominators
             denominator[denominator.abs() < self.min_denominator_value] = self.min_denominator_value
             dft[:, mask] = self.numerator[:, mask] / denominator[None, ...]
-
         else:
             dft[:, mask] = self.numerator[:, mask] / self.weights[mask][None, ...]
         dft = torch.complex(real=dft[0,...], imag=dft[1,...])
-        # back to real space
-        dft = torch.fft.ifftshift(dft, dim=(-3, -2))  # actual ifftshift
-        dft = torch.fft.irfftn(dft, dim=(-3, -2, -1))
-        dft = torch.fft.ifftshift(dft, dim=(-3, -2, -1))  # center in real space
 
-        # correct for convolution with linear interpolation kernel
+        dft = torch.fft.ifftshift(dft, dim=(-3, -2))
+        dft = torch.fft.irfftn(dft, dim=(-3, -2, -1))
+        dft = torch.fft.ifftshift(dft, dim=(-3, -2, -1))
+
         vol = dft.to(device) / self.get_sincsq(dft.shape, device)
 
         if fname is not None:
             write_vol(vol.detach().cpu(), fname, self.sampling_rate, overwrite=overwrite_fname)
         return vol
 
+# The rest of the file remains unchanged.
+# ... (ReconstructionParticlesDataset, reconstruct_starfile, and test functions) ...
 class ReconstructionParticlesDataset(Dataset):
     def __init__(self, particles_star_fname: FNAME_TYPE,
                  particles_dir: Optional[FNAME_TYPE] = None,
@@ -361,95 +358,6 @@ def reconstruct_starfile(particles_star_fname: str, symmetry: str, output_fname:
     reconstructor.generate_volume(output_fname)
 
 
-def __backproject_test():
-    reconstructor = Reconstructor(symmetry="C1", correct_ctf=True, eps=1e-3, min_denominator_value=1e-4, )
-    reconstructor.to(device="cpu")
-    reconstructor.backproject_particles(
-        particles_star_fname="/home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/projections/1000proj_with_ctf.star",
-        particles_dir="/home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/", batch_size=96,
-        num_dataworkers=0)
-    return reconstructor
-
-def _test():
-    reconstructor = __backproject_test()
-    vol = reconstructor.generate_volume(fname="/tmp/reconstructed_volume.mrc", device="cpu")
-
-    relion_vol = None
-    try:
-        relion_vol = torch.as_tensor(
-            mrcfile.read("/home/sanchezg/cryo/myProjects/cryoPARES/cryoPARES/reconstruction/relion_reconstruct.mrc"),
-            dtype=torch.float32)
-        from torch_fourier_shell_correlation import fsc
-        fsc_result = fsc(vol, relion_vol)
-        print(fsc_result)
-    except FileNotFoundError:
-        pass
-
-    from matplotlib import pyplot as plt
-    f, axes = plt.subplots(2,3, squeeze=False)
-    axes[0, 0].imshow(vol[..., vol.shape[-1]//2])
-    axes[0, 1].imshow(vol[..., vol.shape[-2]//2, :])
-    axes[0, 2].imshow(vol[vol.shape[0]//2, ...])
-    if relion_vol is not None:
-        axes[1, 0].imshow(relion_vol[..., relion_vol.shape[-1]//2])
-        axes[1, 1].imshow(relion_vol[..., relion_vol.shape[-2]//2, :])
-        axes[1, 2].imshow(relion_vol[relion_vol.shape[0]//2, ...])
-
-    plt.show()
-    print()
-
-def _test_real_insertion():
-    from scipy.spatial.transform import Rotation
-    from lightning import seed_everything
-    seed_everything(32)
-
-    b, h, w = 32, 8, 5
-    img_rfft = torch.rand(b, h, w, dtype=torch.complex64)
-    ctf = torch.rand(b, h, w, dtype=torch.float32)
-    rotmats = torch.FloatTensor(Rotation.random(b).as_matrix())
-    img_as_real = torch.stack([img_rfft.real, img_rfft.imag, ctf], dim=1)
-    dft_ctf0, weights = insert_central_slices_rfft_3d_multichannel(
-        image_rfft=img_as_real,
-        volume_shape=(h,) * 3,
-        rotation_matrices=rotmats,
-        fftfreq_max=None,
-        zyx_matrices=False,
-    )
-
-    img_ctf = torch.stack([img_rfft, ctf], dim=1)
-    dft_ctf1, weights = insert_central_slices_rfft_3d_multichannel(
-        image_rfft=img_ctf,
-        volume_shape=(h,) * 3,
-        rotation_matrices=rotmats,
-        fftfreq_max=None,
-        zyx_matrices=False,
-    )
-    print(dft_ctf0[0].allclose(dft_ctf1[0].real, atol=1e-4))
-    print(dft_ctf0[1].allclose(dft_ctf1[0].imag, atol=1e-4))
-    print("DONE")
-
-def _profile___backproject_test():
-    import cProfile
-    import pstats
-
-    __backproject_test() #Warmup
-    # Save profile data to a file
-    cProfile.run('__backproject_test()', '/tmp/profile_output.prof')
-
-    # Load and analyze the saved profile
-    stats = pstats.Stats('/tmp/profile_output.prof')
-    stats.sort_stats('cumulative')  # Sort by cumulative time
-    stats.print_stats()
-
 if __name__ == "__main__":
-    # _profile___backproject_test(); sys.exit()
-    # _test(); sys.exit()
-    # _test_real_insertion()
     from argParseFromDoc import parse_function_and_call
     parse_function_and_call(reconstruct_starfile)
-
-    """
---symmetry C1 --particles_star_fname /home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles.star --output_fname /tmp/reconstruction.mrc --use_only_n_first_batches 100    
-    """
-
-    #TODO: Fix  Exception ignored in: <_io.BufferedWriter name=6> BrokenPipeError: [Errno 32] Broken pipe

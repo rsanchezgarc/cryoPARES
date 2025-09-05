@@ -4,7 +4,7 @@ import torch
 import starfile
 import warnings
 import matplotlib.pyplot as plt
-from cesped.constants import RELION_EULER_CONVENTION
+from cryoPARES.constants import RELION_EULER_CONVENTION
 
 from cryoPARES.geometry.convert_angles import euler_angles_to_matrix
 from cryoPARES.geometry.symmetry import getSymmetryGroup

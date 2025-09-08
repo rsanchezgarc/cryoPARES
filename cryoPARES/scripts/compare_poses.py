@@ -1,63 +1,166 @@
-import argparse
-import numpy as np
-import torch
 import starfile
-import warnings
-import matplotlib.pyplot as plt
+import numpy as np
 from cryoPARES.constants import RELION_EULER_CONVENTION
-
-from cryoPARES.geometry.convert_angles import euler_angles_to_matrix
-from cryoPARES.geometry.symmetry import getSymmetryGroup
 from scipy.spatial.transform import Rotation
 from scipy.optimize import minimize
+import argparse
+import os
+import warnings
+import matplotlib.pyplot as plt
 
 
-def get_angular_distance(r_pred, r_true, symmetry_ops):
-    r_true_sym = torch.matmul(symmetry_ops, r_true)
+def load_starfile(filename, particles_key="particles"):
+    """Load a RELION starfile and return the particles dataframe."""
+    try:
+        data = starfile.read(filename)
+        if particles_key is None:
+            # Get the particles table (usually the last table in the file)
+            particles_key = list(data.keys())[-1]
+        return data[particles_key]
+    except Exception as e:
+        raise Exception(f"Error reading starfile {filename}: {str(e)}")
 
-    # Broadcasting the prediction matrix for comparison with all symmetry variants
-    r_pred_broadcast = r_pred.unsqueeze(0).expand_as(r_true_sym)
 
-    # Calculate the trace for all comparisons at once
-    # The formula for angular distance is arccos((trace(R) - 1) / 2)
-    # where R = r_pred @ r_true_sym.T
-    # trace(A @ B.T) is the same as sum(A * B) element-wise
-    trace = torch.sum(r_pred_broadcast * r_true_sym, dim=(1, 2))
+def extract_particle_id(image_name):
+    """Extract particle number from RELION image name (e.g., '0001@/path/stack.mrcs')."""
+    num, stackname = image_name.split('@')
+    return str(int(num)) + "_" + os.path.basename(stackname)
 
-    # Clip the trace to avoid numerical errors with arccos
-    trace_clipped = torch.clamp(trace, -1.0, 3.0)
 
-    distances = torch.acos((trace_clipped - 1) / 2)
-    return torch.min(distances).item()
+def match_particles(df1, df2, allow_partial=True):
+    """
+    Match particles between two dataframes and sort them accordingly.
+    Returns sorted dataframes if matching is possible, otherwise raises an exception.
+    If allow_partial=True, allows partial matching and returns only matching particles.
+    """
+    # Extract particle IDs
+    df1['particle_id'] = df1['rlnImageName'].apply(extract_particle_id)
+    df2['particle_id'] = df2['rlnImageName'].apply(extract_particle_id)
+
+    # Check if particle sets are identical
+    particles1 = set(df1['particle_id'])
+    particles2 = set(df2['particle_id'])
+
+    if allow_partial:
+        # Find common particles
+        common_particles = particles1.intersection(particles2)
+        if len(common_particles) == 0:
+            raise ValueError("No matching particles found between the two starfiles.")
+
+        # Filter dataframes to only include common particles
+        df1_filtered = df1[df1['particle_id'].isin(common_particles)]
+        df2_filtered = df2[df2['particle_id'].isin(common_particles)]
+
+        # Sort both dataframes by particle ID
+        df1_sorted = df1_filtered.sort_values('particle_id').reset_index(drop=True)
+        df2_sorted = df2_filtered.sort_values('particle_id').reset_index(drop=True)
+
+        # Warn about partial matching
+        n_merged = len(common_particles)
+        n_df1 = len(particles1)
+        n_df2 = len(particles2)
+        if n_merged < n_df1 or n_merged < n_df2:
+            warnings.warn(f"Warning: The number of matching particles {n_merged} is less than the"
+                          f" total number of particles in the input files ({n_df1};{n_df2}). "
+                          f"Statistics will be computed on the matching subset.")
+
+    else:
+        # Original strict matching logic
+        if len(particles1) != len(particles2):
+            raise ValueError(
+                f"Starfiles contain different particles.\n"
+                f"Particles only in first file: {len(particles1 - particles2)}\n"
+                f"Particles only in second file: {len(particles2 - particles1)}"
+            )
+        sorted_particles1 = sorted(particles1)
+        sorted_particles2 = sorted(particles2)
+
+        if sorted_particles1 != sorted_particles2:
+            for i in range(len(sorted_particles1)):
+                raise ValueError(
+                    f"Starfiles contain different particles.\n"
+                    f"Particles first vs second:\n{sorted_particles1[i]}\n{sorted_particles2[i]}\n"
+                )
+
+        # Sort both dataframes by particle ID
+        df1_sorted = df1.sort_values('particle_id').reset_index(drop=True)
+        df2_sorted = df2.sort_values('particle_id').reset_index(drop=True)
+
+    # Final verification
+    if not (df1_sorted['particle_id'] == df2_sorted['particle_id']).all():
+        raise ValueError("Failed to match particles even after sorting")
+
+    return df1_sorted, df2_sorted
+
+
+def euler_to_matrix(angles):
+    """Convert RELION Euler angles (rot, tilt, psi) to rotation matrix."""
+    return Rotation.from_euler(RELION_EULER_CONVENTION, angles, degrees=True).as_matrix()
+
+
+def matrix_to_euler(matrix):
+    """Convert rotation matrix to RELION Euler angles (rot, tilt, psi)."""
+    return Rotation.from_matrix(matrix).as_euler(RELION_EULER_CONVENTION, degrees=True)
+
+
+def get_symmetry_matrices(sym_group):
+    """Get symmetry matrices using scipy's rotation groups."""
+    if sym_group.upper() == 'C1':
+        return [np.eye(3)]
+
+    # Parse symmetry group
+    if sym_group[0].upper() in ['C', 'D']:
+        group = f"{sym_group[0].upper()}{sym_group[1:]}"
+    else:
+        group = sym_group.upper()
+
+    try:
+        rot_group = Rotation.create_group(group)
+        return rot_group.as_matrix()
+    except ValueError as e:
+        raise ValueError(f"Invalid symmetry group: {sym_group}. Error: {str(e)}")
+
+
+def calculate_angular_difference(R1, R2, sym_matrices):
+    """Calculate the minimum angular difference between two rotation matrices considering symmetry."""
+    R_diffs = np.einsum('ijk,kl->ijl', sym_matrices, np.dot(R2, R1.T))
+    traces = np.einsum('ijj->i', R_diffs)
+    angles = np.arccos(np.clip((traces - 1) / 2, -1.0, 1.0))
+    return np.degrees(np.min(angles))
 
 
 def apply_transformation(angles, transform_matrix):
     """Apply a transformation matrix to a set of Euler angles."""
-    R = euler_angles_to_matrix(angles, convention=RELION_EULER_CONVENTION)
-    R_transformed = torch.matmul(torch.from_numpy(transform_matrix).float(), R)
-    # Convert back to angles using scipy
-    R_scipy = Rotation.from_matrix(R_transformed.numpy())
-    return torch.from_numpy(R_scipy.as_euler(RELION_EULER_CONVENTION)).float()
+    R = euler_to_matrix(angles)
+    R_transformed = np.dot(transform_matrix, R)
+    return matrix_to_euler(R_transformed)
 
 
-def optimize_transformation(angles_pred_list, angles_true_list, symmetry_ops):
+def optimize_transformation(angles1, angles2, sym_matrices):
     """Find the optimal transformation matrix that aligns two sets of angles."""
 
     def objective(params):
-        R_transform = torch.from_numpy(Rotation.from_euler('xyz', params, degrees=True).as_matrix()).float()
+        # Convert optimization parameters to rotation matrix
+        R_transform = Rotation.from_euler('xyz', params, degrees=True).as_matrix()
 
+        # Apply transformation to all angles in set 2
         total_error = 0
-        for angles_pred, angles_true in zip(angles_pred_list, angles_true_list):
-            r_pred = euler_angles_to_matrix(angles_pred, convention=RELION_EULER_CONVENTION)
-            r_true = euler_angles_to_matrix(angles_true, convention=RELION_EULER_CONVENTION)
-            r_true_transformed = torch.matmul(R_transform, r_true)
-            error = get_angular_distance(r_pred, r_true_transformed, symmetry_ops)
+        for i in range(len(angles1)):
+            R1 = euler_to_matrix(angles1[i])
+            R2 = euler_to_matrix(angles2[i])
+            R2_transformed = np.dot(R_transform, R2)
+            error = calculate_angular_difference(R1, R2_transformed, sym_matrices)
             total_error += error
 
-        return total_error / len(angles_pred_list)
+        return total_error / len(angles1)
 
+    # Initial guess: identity transformation
     initial_guess = [0, 0, 0]
+
+    # Optimize
     result = minimize(objective, initial_guess, method='Nelder-Mead')
+
+    # Convert optimal parameters to rotation matrix
     optimal_transform = Rotation.from_euler('xyz', result.x, degrees=True).as_matrix()
 
     return optimal_transform, result.fun
@@ -154,11 +257,104 @@ def plot_combined_errors(angular_errors, shift_errors, output_prefix=None):
     plt.show()
 
 
+def analyze_angular_differences(starfile1, starfile2, symmetry, align_frames=False,
+                                plot_angular=False, plot_shifts=False, plot_combined=False,
+                                plot_all=False, save_plots=None):
+    """Analyze angular differences between two starfiles considering symmetry."""
+    # Load starfiles
+    df1 = load_starfile(starfile1)
+    df2 = load_starfile(starfile2)
+
+    # Match and sort particles (allowing partial matching)
+    df1, df2 = match_particles(df1, df2, allow_partial=True)
+
+    # Get symmetry matrices
+    sym_matrices = get_symmetry_matrices(symmetry)
+
+    # Extract Euler angles
+    angles1 = df1[['rlnAngleRot', 'rlnAngleTilt', 'rlnAnglePsi']].values
+    angles2 = df2[['rlnAngleRot', 'rlnAngleTilt', 'rlnAnglePsi']].values
+
+    # Extract shifts if available
+    shifts_available = all(col in df1.columns and col in df2.columns
+                           for col in ['rlnOriginXAngst', 'rlnOriginYAngst'])
+
+    shift_x_errors = []
+    shift_y_errors = []
+    shift_errors = []
+
+    if shifts_available:
+        shifts1 = df1[['rlnOriginXAngst', 'rlnOriginYAngst']].values
+        shifts2 = df2[['rlnOriginXAngst', 'rlnOriginYAngst']].values
+
+        # Calculate shift errors
+        shift_diffs = shifts1 - shifts2
+        shift_x_errors = shift_diffs[:, 0]
+        shift_y_errors = shift_diffs[:, 1]
+        shift_errors = np.linalg.norm(shift_diffs, axis=1)
+
+    # If requested, try to align reference frames
+    transform_matrix = np.eye(3)
+    if align_frames:
+        print("Optimizing reference frame alignment...")
+        transform_matrix, min_error = optimize_transformation(angles1, angles2, sym_matrices)
+        print(f"Optimal alignment found with mean error: {min_error:.2f}°")
+
+        # Apply transformation to second set of angles
+        angles2 = np.array([apply_transformation(ang, transform_matrix) for ang in angles2])
+
+    # Calculate angular differences
+    angular_diffs = []
+    for i in range(len(angles1)):
+        R1 = euler_to_matrix(angles1[i])
+        R2 = euler_to_matrix(angles2[i])
+        diff = calculate_angular_difference(R1, R2, sym_matrices)
+        angular_diffs.append(diff)
+
+    angular_diffs = np.array(angular_diffs)
+
+    # Calculate statistics
+    stats = {
+        'mean': np.mean(angular_diffs),
+        'std': np.std(angular_diffs),
+        'median': np.median(angular_diffs),
+        'iqr': np.percentile(angular_diffs, 75) - np.percentile(angular_diffs, 25),
+        'percent_below_5': np.mean(angular_diffs < 5) * 100,
+        'percent_below_10': np.mean(angular_diffs < 10) * 100,
+        'transform_matrix': transform_matrix if align_frames else None,
+        'n_particles': len(angular_diffs),
+        'shifts_available': shifts_available
+    }
+
+    if shifts_available:
+        stats.update({
+            'shift_mean': np.mean(shift_errors),
+            'shift_std': np.std(shift_errors),
+            'shift_median': np.median(shift_errors),
+            'shift_iqr': np.percentile(shift_errors, 75) - np.percentile(shift_errors, 25),
+        })
+
+    # Generate plots based on user request
+    if plot_all or plot_angular:
+        plot_angular_errors(angular_diffs, save_plots)
+
+    if shifts_available and (plot_all or plot_shifts):
+        plot_shift_errors(shift_errors, shift_x_errors, shift_y_errors, save_plots)
+
+    if shifts_available and (plot_all or plot_combined):
+        plot_combined_errors(angular_diffs, shift_errors, save_plots)
+
+    return stats
+
+
 def main():
-    parser = argparse.ArgumentParser(description='Compare poses of a results starfile with a ground truth starfile.')
-    parser.add_argument('-i', '--input', required=True, help='Path to the results starfile.')
-    parser.add_argument('--gt', required=True, help='Path to the ground truth starfile.')
-    parser.add_argument('--symmetry', default='C1', help='Symmetry group of the particle.')
+    parser = argparse.ArgumentParser(description='Compare angular assignments between two RELION starfiles')
+    parser.add_argument('starfile1', help='First starfile')
+    parser.add_argument('starfile2', help='Second starfile')
+    parser.add_argument('--sym', required=True,
+                        help='Symmetry group (C1, C2, C3, ..., D2, D3, ..., T, O, I)')
+    parser.add_argument('--align-frames', action='store_true',
+                        help='Try to find optimal alignment between reference frames')
 
     # Visualization options
     parser.add_argument('--plot-angular', action='store_true',
@@ -168,111 +364,42 @@ def main():
     parser.add_argument('--plot-all', action='store_true', help='Show all scatter plots.')
     parser.add_argument('--save-plots', type=str,
                         help='Save plots with this prefix (e.g., "experiment1" -> "experiment1_angular_errors.png")')
-    parser.add_argument('--skip-frame-alignment', action='store_true',
-                        help='Skip trying to find optimal alignment between reference frames')
+
     args = parser.parse_args()
 
-    # Read starfiles using the starfile library
-    results_df = starfile.read(args.input)["particles"]
-    gt_df = starfile.read(args.gt)["particles"]
+    try:
+        stats = analyze_angular_differences(
+            args.starfile1, args.starfile2, args.sym.upper(), args.align_frames,
+            args.plot_angular, args.plot_shifts, args.plot_combined, args.plot_all, args.save_plots
+        )
 
-    # Merge dataframes on image name
-    merged_df = results_df.merge(gt_df, on='rlnImageName', suffixes=['_pred', '_gt'])
-    n_merged = len(merged_df)
-    n_results_df = len(results_df)
-    n_gt_df = len(gt_df)
-    if len(merged_df) < len(results_df) or len(merged_df) < len(gt_df):
-        warnings.warn(f"Warning: The number of matching particles {n_merged} is less than the"
-                      f" total number of particles in the input files ({n_results_df};{n_gt_df}). "
-                      f"Statistics will be computed on the matching subset.")
+        print(f"Found {stats['n_particles']} matching particles.")
+        print(f"\nAnalyzing angular differences with {args.sym} symmetry:")
+        print(f"Mean: {stats['mean']:.2f}°")
+        print(f"Standard Deviation: {stats['std']:.2f}°")
+        print(f"Median: {stats['median']:.2f}°")
+        print(f"IQR: {stats['iqr']:.2f}°")
+        print(f"\nPercentage of particles with angular error:")
+        print(f"< 5°: {stats['percent_below_5']:.1f}%")
+        print(f"< 10°: {stats['percent_below_10']:.1f}%")
 
-    if len(merged_df) == 0:
-        print("Error: No matching particles found between the two starfiles.")
-        return
+        if stats['shifts_available']:
+            print(f"\nShift errors (Å):")
+            print(f"Mean: {stats['shift_mean']:.2f}")
+            print(f"Standard Deviation: {stats['shift_std']:.2f}")
+            print(f"Median: {stats['shift_median']:.2f}")
+            print(f"IQR: {stats['shift_iqr']:.2f}")
+        else:
+            print("\nShift information not available in both starfiles.")
 
-    # Get symmetry operations
-    symmetry_ops = getSymmetryGroup(args.symmetry, as_matrix=True)
+        if args.align_frames and stats['transform_matrix'] is not None:
+            print("\nOptimal transformation matrix:")
+            print(stats['transform_matrix'])
 
-    # First pass: collect all angles and shifts
-    angles_pred_list = []
-    angles_true_list = []
-    shifts_pred_list = []
-    shifts_true_list = []
-
-    for _, row in merged_df.iterrows():
-        angles_pred = torch.deg2rad(
-            torch.tensor([row['rlnAngleRot_pred'], row['rlnAngleTilt_pred'], row['rlnAnglePsi_pred']],
-                         dtype=torch.float32))
-        angles_true = torch.deg2rad(
-            torch.tensor([row['rlnAngleRot_gt'], row['rlnAngleTilt_gt'], row['rlnAnglePsi_gt']], dtype=torch.float32))
-
-        shift_pred = np.array([row['rlnOriginXAngst_pred'], row['rlnOriginYAngst_pred']])
-        shift_true = np.array([row['rlnOriginXAngst_gt'], row['rlnOriginYAngst_gt']])
-
-        angles_pred_list.append(angles_pred)
-        angles_true_list.append(angles_true)
-        shifts_pred_list.append(shift_pred)
-        shifts_true_list.append(shift_true)
-
-    # Apply frame alignment if requested
-    transform_matrix = np.eye(3)
-    if not args.skip_frame_alignment:
-        print("Optimizing reference frame alignment...")
-        transform_matrix, min_error = optimize_transformation(angles_pred_list, angles_true_list, symmetry_ops)
-        print(f"Optimal alignment found with mean error: {min_error:.2f}°\n{transform_matrix.round(2)}\n-----------------")
-
-    # Second pass: calculate errors with aligned frames
-    angular_errors = []
-    shift_errors = []
-    shift_x_errors = []
-    shift_y_errors = []
-
-    for i, (angles_pred, angles_true, shift_pred, shift_true) in enumerate(
-            zip(angles_pred_list, angles_true_list, shifts_pred_list, shifts_true_list)):
-        # Angular error
-        if not args.skip_frame_alignment:
-            # Apply transformation to true angles
-            angles_true = apply_transformation(angles_true, transform_matrix)
-
-        r_pred = euler_angles_to_matrix(angles_pred, convention=RELION_EULER_CONVENTION)
-        r_true = euler_angles_to_matrix(angles_true, convention=RELION_EULER_CONVENTION)
-
-        angular_errors.append(np.rad2deg(get_angular_distance(r_pred, r_true, symmetry_ops)))
-
-        # Shift error
-        shift_diff = shift_pred - shift_true
-        shift_x_errors.append(shift_diff[0])
-        shift_y_errors.append(shift_diff[1])
-        shift_errors.append(np.linalg.norm(shift_diff))
-
-    angular_errors = np.array(angular_errors)
-    shift_errors = np.array(shift_errors)
-    shift_x_errors = np.array(shift_x_errors)
-    shift_y_errors = np.array(shift_y_errors)
-
-    print(f"Found {len(merged_df)} matching particles.")
-    print("\nAngular errors (degrees):")
-    print(f"  Mean: {np.mean(angular_errors):.2f}")
-    print(f"  Median: {np.median(angular_errors):.2f}")
-    print(f"  Std: {np.std(angular_errors):.2f}")
-    print(f"  IQR: {np.quantile(angular_errors, 0.75) - np.quantile(angular_errors, 0.25):.2f}")
-
-    print("\nShift errors (A):")
-    print(f"  Mean: {np.mean(shift_errors):.2f}")
-    print(f"  Median: {np.median(shift_errors):.2f}")
-    print(f"  Std: {np.std(shift_errors):.2f}")
-    print(f"  IQR: {np.quantile(shift_errors, 0.75) - np.quantile(shift_errors, 0.25):.2f}")
-
-    # Generate plots based on user request
-    if args.plot_all or args.plot_angular:
-        plot_angular_errors(angular_errors, args.save_plots)
-
-    if args.plot_all or args.plot_shifts:
-        plot_shift_errors(shift_errors, shift_x_errors, shift_y_errors, args.save_plots)
-
-    if args.plot_all or args.plot_combined:
-        plot_combined_errors(angular_errors, shift_errors, args.save_plots)
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        exit(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

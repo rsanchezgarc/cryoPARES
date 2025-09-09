@@ -1,706 +1,730 @@
+import gc
+import os
+import tempfile
+import threading
 import math
-import os.path
-import sys
-import time
-import warnings
-from functools import lru_cache, cached_property
-from typing import Tuple, Optional, Union, Sequence
+from functools import cached_property, lru_cache
+from typing import Tuple, Iterable, Optional, Literal
 
 import numpy as np
-import pandas as pd
 import starfile
 import torch
-from lightning import seed_everything
-from scipy.spatial.transform import Rotation
+from cryoPARES.constants import RELION_EULER_CONVENTION
 from torch import nn
-from torch.nn import functional as F
+from joblib import Parallel, delayed
+from more_itertools import chunked
+from torch_scatter import scatter_max, scatter_sum
 
-from cryoPARES.configManager.configParser import ConfigArgumentParser, ConfigOverrideSystem
-from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
-from cryoPARES.projmatching.extract_central_slices_as_real import extract_central_slices_rfft_3d_multichannel
-from torch_grid_utils import fftfreq_grid
-from torch_grid_utils.shapes_2d import circle #TODO we can use other things to limit frequencies
-
-from cryoPARES.geometry.convert_angles import euler_angles_to_matrix, matrix_to_euler_angles
-from cryoPARES.geometry.grids import so3_near_identity_grid_cartesianprod
-from cryoPARES.projmatching.fftOps import _real_to_fourier_2d, _fourier_proj_to_real_2d
-from cryoPARES.utils.paths import MAP_AS_ARRAY_OR_FNAME_TYPE, get_most_recent_file
+from cryoPARES.geometry.convert_angles import euler_angles_to_matrix
 from cryoPARES.utils.reconstructionUtils import get_vol
-from cryoPARES.constants import (
-    RELION_EULER_CONVENTION,
-    BATCH_PARTICLES_NAME,
-    BATCH_POSE_NAME,
-    BATCH_ORI_IMAGE_NAME,
-    BATCH_ORI_CTF_NAME,
-    BATCH_IDS_NAME,
-    BATCH_MD_NAME,
-    RELION_ANGLES_NAMES,
-    PROJECTION_MATCHING_SCORE,
-    RELION_SHIFTS_NAMES,
+from .loggers import getWorkerLogger
+from .myProgressBar import myTqdm as tqdm
+
+from .tensorCache.lookAheadCache import LookAheadTensorCache
+from .dataUtils.dataCaches import create_particles_cache
+from .dataUtils.filterToResolution import low_pass_filter_fname
+
+from .dataUtils.dataTypes import IMAGEFNAME_MRCIMAGE, FNAME
+from starstack import ParticlesStarSet
+from .dataUtils.idxsToBatches import IdxsBatcher
+from .metrics import euler_degs_diff, shifst_angs_diff
+from .numbaUtils import (
+    init_int_to_intList_dict,
+    typed_dict_add_keyList_valList,
 )
+from .so3grid import SO3_discretizer
+from .torchUtils import OnlineStatsRecorder
 
+# Fourier-side ops and dataset
+from .fourierOperations import (
+    correlate_dft_2d,
+    extract_central_slices_rfft,
+    phase_shift_dft_2d,
+    compute_dft,
+)
+from .preprocessParticles import ParticlesFourierDataset
 
-class ProjectionMatcher(nn.Module):
-    @inject_defaults_from_config(default_config=main_config.projmatching)
-    def __init__(self, reference_vol: MAP_AS_ARRAY_OR_FNAME_TYPE,
-                 grid_distance_degs: float = CONFIG_PARAM(),
-                 grid_step_degs: float = CONFIG_PARAM(),
-                 pixel_size: Optional[float] = None, #Only used if reference_vol is a np.array/torch.tensor
-                 filter_resolution_angst: Optional[float] = CONFIG_PARAM(),
-                 max_shift_fraction: Optional[float] = CONFIG_PARAM(),
-                 return_top_k: int = 1,
-                 correct_ctf: bool = CONFIG_PARAM(),
-                 ):
-        """
+REPORT_ALIGNMENT_DISPLACEMENT = True
+def get_rotmat(degAngles, convention:str=RELION_EULER_CONVENTION, device="cpu"):
+    return euler_angles_to_matrix(torch.deg2rad(degAngles), convention=convention).to(device)
 
-        :param reference_vol:
-        :param grid_distance_degs]: ~Cone width
-        :param grid_step_degs:
-        :param pixel_size:
-        :param filter_resolution_angst:
-        :param max_shift_fraction:
-        :param return_top_k:
-        :param correct_ctf:
-        """
+class Aligner(nn.Module):
+    """
+    Single concrete aligner (Fourier pipeline).
+    This class folds together the previous abstract base + Fourier subclass.
+    """
 
+    def __init__(
+        self,
+        reference_vol: IMAGEFNAME_MRCIMAGE,
+        pixel_size: float | None = None,
+        grid_distance_degs: float | Tuple[float, float, float] = 8.0,
+        grid_step_degs: float | Tuple[float, float, float] = 2.0,
+        max_resolution_A: Optional[float] = None,
+        padding_factor: Optional[float] = 0.0,
+        keep_top_k_values: int = 2,
+        n_cpus: int = 1,
+        verbose: bool = True,
+        correct_ctf: bool = True,
+    ):
         super().__init__()
         self.grid_distance_degs = grid_distance_degs
         self.grid_step_degs = grid_step_degs
-        print(f"Projection matching grid: +/-{self.grid_distance_degs/2} (step {self.grid_step_degs}) degs")
-        self.filter_resolution_angst = filter_resolution_angst
-        self.max_shift_fraction = max_shift_fraction
-        self.return_top_k = return_top_k
-        self.correct_ctf = correct_ctf
-        if return_top_k > 1:
-            warnings.warn("return_top_k has not being tested for projMatching")
-        self.vol_shape = None
-        self.ori_image_shape = None
-        self.vol_voxel_size = None
-
+        self.max_resolution_A = max_resolution_A
+        self.padding_factor = padding_factor
+        self.keep_top_k_values = keep_top_k_values
+        self.max_shift_fraction = main_config.projmatching.max_shift_fraction
 
         self._store_reference_vol(reference_vol, pixel_size)
-        self._store_so3_grid_rotmats()
+        self.so3_discretizer = SO3_discretizer(
+            SO3_discretizer.pick_hp_order(self.grid_step_degs), verbose=verbose
+        )
+        self.n_cpus = n_cpus if n_cpus > 0 else 1
+        self.verbose = verbose
+        self.correct_ctf = correct_ctf
+        self.mainLogger = getWorkerLogger(self.verbose)
 
-        if not main_config.projmatching.disable_compile_analyze_cc:
-            self._analyze_cross_correlation = torch.compile(_analyze_cross_correlation, fullgraph=True,
-                                                            mode=main_config.projmatching.compile_analyze_cc_mode,
-                                                            dynamic=True)
-            self._extract_ccor_max = torch.compile(_extract_ccor_max, fullgraph=True,
-                                                            mode=main_config.projmatching.compile_analyze_cc_mode,
-                                                            dynamic=True)
-        else:
-            self._analyze_cross_correlation = _analyze_cross_correlation
-            self._extract_ccor_max = _extract_ccor_max
-
-        if main_config.projmatching.disable_compile_correlate_dft_2d:
-            self.correlate_dft_2d = correlate_dft_2d
-        else:
-            self.correlate_dft_2d = torch.compile(fullgraph=True,
-                                              mode=main_config.projmatching.compile_correlate_dft_2d_mode,
-                                              dynamic=True)
-
-        self.background_stream = torch.cuda.Stream() #TODO: This is not
-
-    def _store_reference_vol(self, reference_vol: MAP_AS_ARRAY_OR_FNAME_TYPE,
-                             pixel_size: Optional[float] = None):
-        """
-
-        :param reference_vol: A volume fname or torch tensor or numpy array representing a cryoEM volume
-        :param pixel_size: The sampling rate in Å/px
-
-        stores the reference_vol as a tensor and sets the following attributes: self.vol_shape,
-        and self.ori_image_shape, that contain information about the original volume; and  self.vol_shape  and
-        self.image_shape that contain information about the volume after padding or other transformation
-
-        """
-
-        reference_vol, pixel_size = get_vol(reference_vol, pixel_size)
-        assert pixel_size
-        # reference_vol = reference_vol - reference_vol.mean()
-
-        self.vol_shape = tuple(reference_vol.shape)
-
-        assert len(self.vol_shape) == 3
-        assert len(set(self.vol_shape)) == 1, "Only cubic volumes are allowed"
-        assert set(self.vol_shape).pop() % 2 == 0, "Only even boxsizes are allowed"
-
-        self.ori_image_shape = tuple(self.vol_shape[-2:])
-        self.half_particle_size = 0.5 * self.ori_image_shape[-2]
-        self.vol_voxel_size = pixel_size
-        reference_vol = torch.as_tensor(reference_vol.numpy(), device=reference_vol.device, dtype=reference_vol.dtype)
-
-        reference_vol, vol_shape, pad_length = compute_dft_3d(reference_vol,
-                                                              pad=False)  # reference_vol is computed with rfft=True, fftshift=True,
-        self.pad_length = pad_length
-
-
-        reference_vol = torch.view_as_real(reference_vol).permute([-1, 0, 1, 2]).contiguous()
-
-        self.register_buffer("reference_vol", reference_vol)
-
-        # This two properties will need to be updated if the volume is resized/padded
-        self.vol_shape = vol_shape
-        self.image_shape = vol_shape[-2:]
-
-        self.fftfreq_max = None
-        if self.filter_resolution_angst:
-            self.fftfreq_max = self.vol_voxel_size/self.filter_resolution_angst
-
-    def _store_so3_grid_rotmats(self):
-        n_angles = math.ceil(self.grid_distance_degs / (self.grid_step_degs))
-        n_angles = n_angles if n_angles % 2 == 1 else n_angles + 1 #We always want an odd number
-        so3_local_grid = so3_near_identity_grid_cartesianprod(self.grid_distance_degs/2, n_angles, transposed=False, degrees=True)
-        grid_rotmats = euler_angles_to_matrix( torch.deg2rad(so3_local_grid), convention=RELION_EULER_CONVENTION)
-        self.register_buffer("grid_rotmats", grid_rotmats)
-
+    # ----------------------- Basic props/helpers -----------------------
 
     @property
     def device(self):
         return self.reference_vol.device
 
-    def _fourier_proj_to_real(self, projections):
-        return _fourier_proj_to_real_2d(projections, self.pad_length)
+    def _get_so3_delta(self, device: torch.device):
+        """
+        Build a cached SO(3) delta grid (degrees) around (0,0,0) using
+        self.grid_distance_degs and self.grid_step_degs.
+        """
+        if not hasattr(self, "_so3_delta"):
+            if not isinstance(self.grid_distance_degs, Iterable):
+                grid_distance_degs = (
+                    self.grid_distance_degs,
+                    self.grid_distance_degs,
+                    self.grid_distance_degs,
+                )
+            else:
+                grid_distance_degs = self.grid_distance_degs
 
-    def _real_to_fourier(self, imgs):#TODO. I should be able to get the fimages from the rfft_ctf.correct_ctf. I would need to apply a phase shift to reproduce the real space fftshift
-        return _real_to_fourier_2d(imgs, as_real_img=True)
+            if not isinstance(self.grid_step_degs, Iterable):
+                grid_step_degs = (
+                    self.grid_step_degs,
+                    self.grid_step_degs,
+                    self.grid_step_degs,
+                )
+            else:
+                grid_step_degs = self.grid_step_degs
+
+            get_grid = lambda dist, resol: torch.linspace(
+                -dist, dist, int(1 + 2 * (dist / resol)), device=device
+            )
+            a = get_grid(grid_distance_degs[0], grid_step_degs[0])
+            b = get_grid(grid_distance_degs[1], grid_step_degs[1])
+            c = get_grid(grid_distance_degs[2], grid_step_degs[2])
+            self._so3_delta = torch.cartesian_prod(a, b, c).T
+        return self._so3_delta
+
+    def get_so3_grid(self, eulers_degs: torch.Tensor) -> torch.Tensor:
+        """
+        Expand a center Euler (Bx3 degs) to a grid (BxKx3) over SO(3).
+        """
+        delta = self._get_so3_delta(eulers_degs.device)
+        return (eulers_degs[..., None] + delta[None, ...]).permute(0, 2, 1)
+
+    # ----------------------- Fourier-specific core -----------------------
+
+    def _store_reference_vol(
+        self, reference_vol: IMAGEFNAME_MRCIMAGE, pixel_size: float | None = None
+    ):
+        """
+        Load volume, move to Fourier domain (rfft & shift), register buffers and
+        set up correlation choice.
+        """
+        reference_vol, pixel_size = get_vol(reference_vol, pixel_size=pixel_size)
+        self.ori_vol_shape = reference_vol.shape
+        self.ori_image_shape = self.ori_vol_shape[-2:]
+        self.vol_voxel_size = pixel_size
+        reference_vol = torch.as_tensor(
+            reference_vol.numpy(),
+            device=reference_vol.device,
+            dtype=reference_vol.dtype,
+        )
+
+        pad_length = int(self.padding_factor * reference_vol.shape[-1] // 2)
+        reference_vol, vol_shape, pad_length = compute_dft(
+            reference_vol, pad_length=pad_length
+        )
+        self.pad_length = pad_length
+
+        self.register_buffer("reference_vol", reference_vol)
+
+        self.vol_shape = vol_shape
+        self.image_shape = vol_shape[-2:]
+
+
+        self._correlateF = self._correlateCrossCorrelation
+
+
+    def projectF(self, rotMats: torch.Tensor) -> torch.Tensor:
+        return extract_central_slices_rfft(
+            self.reference_vol,
+            image_shape=self.vol_shape,
+            rotation_matrices=rotMats,
+            rotation_matrix_zyx=False,
+        )
+
+    def _shiftF(self, projs: torch.Tensor, shift_fraction: torch.Tensor) -> torch.Tensor:
+        return phase_shift_dft_2d(
+            projs, image_shape=self.image_shape, shifts=shift_fraction, rfft=True, fftshifted=True
+        )
+
+    def correlateF(self, parts: torch.Tensor, projs: torch.Tensor):
+        return self._correlateF(parts, projs)
 
     def _apply_ctfF(self, projs, ctf):
-        projs.mul_(ctf)
-        return projs
+        return projs * ctf
 
-    def _projectF(self, rotmats):
-        projs = extract_central_slices_rfft_3d_multichannel(self.reference_vol, self.vol_shape,
-                                                            rotation_matrices=rotmats, fftfreq_max= self.fftfreq_max,
-                                                            zyx_matrices=False)
+    @cached_property
+    def max_resoluton_freq_pixels(self):
+        pixel_size = self.vol_voxel_size  # A/pixel
+        n_pixels = self.vol_shape[-1]
+        if self.max_resolution_A is not None:
+            assert self.max_resolution_A >= 2 * pixel_size
+            radius = n_pixels * pixel_size / self.max_resolution_A
+            return radius
+        else:
+            return None
 
-        # self.background_stream.wait_stream(torch.cuda.current_stream())
-        # with torch.cuda.stream(self.background_stream):
-        #     projs = projs.permute([0, 1, 2, 4, 5, 3]).contiguous()
-        # projs.record_stream(self.background_stream)
-        projs = projs.permute([0, 1, 2, 4, 5, 3]).contiguous()
-        return projs
+    def _correlateCrossCorrelation(self, parts: torch.Tensor, projs: torch.Tensor):
+        corrs = correlate_dft_2d(
+            parts, projs, max_freq_pixels=self.max_resoluton_freq_pixels
+        )
+        return self._extract_ccor_max(corrs, max_shift_fraction=self.max_shift_fraction)
 
-    def _correlateCrossCorrelation(self, parts: torch.Tensor, projs: torch.Tensor) -> Tuple[torch.Tensor,torch.Tensor]:
-
-        # #We assume the particles have been already normalized
-        # parts = self._normalize_fourier_img(parts)
-        # projs = self._normalize_fourier_img(projs)
-
-        corrs = self.correlate_dft_2d(parts, projs)
-
-        # from matplotlib import pyplot as plt
-        # f, axes = plt.subplots(3,1)
-        # axes[0].imshow(self._fourier_proj_to_real(parts[0, 0, 0]).cpu(), cmap="gray")
-        # axes[1].imshow(self._fourier_proj_to_real(projs[0, 0, 5]).cpu(), cmap="gray")
-        # # # axes[2].imshow(self._fourier_proj_to_real(projs[0, 0, 5]).cpu().flip(-2).flip(-1), cmap="gray")
-        # axes[2].imshow(self._fourier_proj_to_real(projs[0, 0, 5].cpu()) - self._fourier_proj_to_real(parts[0, 0, 0].cpu()), cmap="gray")
-        # plt.show()
-        # from skimage.feature import match_template
-        # match_template(self._fourier_proj_to_real(projs[0, 0, 5].cpu()).numpy(), self._fourier_proj_to_real(parts[0, 0, 0].cpu()).numpy())
-
-        # axes[0].imshow(corr_dft2d[0].abs().log().cpu(), cmap="gray")
-        # axes[2].imshow(corrs[0, 0, 5], cmap="gray"); plt.show()
-
-        perImgCorr, pixelShiftsXY = self._extract_ccor_max(corrs, self.max_shift_fraction)
-
-        # from matplotlib import pyplot as plt
-        # f, axes = plt.subplots(1,3)
-        # _shifted_proj_real = _fourier_proj_to_real(shifted_proj[0]).cpu()
-        # _proj_real = _fourier_proj_to_real(projs[0]).cpu()
-        # _part_real = _fourier_proj_to_real(parts[0]).cpu()
-        # from scipy.stats import pearsonr
-        # pcc = pearsonr(_shifted_proj_real.flatten(), _part_real.flatten())
-        # print(pcc)
-        # axes[0].imshow(_shifted_proj_real, cmap="gray")
-        # axes[1].imshow(_proj_real, cmap="gray")
-        # axes[2].imshow(_part_real, cmap="gray")
-        # plt.show()
-        # breakpoint()
-
+    def _correlateFRC(self, parts: torch.Tensor, projs: torch.Tensor):
+        shift_fractions = torch.tensor([-0.1, 0.0, 0.1], device=projs.device)
+        shift_fractions = torch.cartesian_prod(shift_fractions, shift_fractions)
+        shifted_projs = self._shiftF(projs, shift_fractions)
+        parts_repeat = parts.unsqueeze(1).expand(-1, shifted_projs.shape[1], -1, -1)
+        corrs = self.correlator(parts_repeat, shifted_projs).sum(-1)
+        shifts_idxs = corrs.argmax(-1)
+        fracitonShiftsXY = shift_fractions[shifts_idxs]
+        pixelShiftsXY = (fracitonShiftsXY * parts.shape[-2]).round().long()
+        perImgCorr = corrs.amax(-1)
         return perImgCorr, pixelShiftsXY
 
-    def align_particles(self, fimgs, ctf, rotmats):
+    # ----------------------- Shared helpers originally in base -----------------------
+
+    def _compute_projections(self, so3_degs_grid: torch.Tensor):
+        so3_degs_grid = so3_degs_grid.to(self.reference_vol.device, non_blocking=True)
+        rotMats = get_rotmat(so3_degs_grid, device=so3_degs_grid.device)
+        projs = self.projectF(rotMats)
+        return projs, so3_degs_grid
+
+    def preprocess_particles(
+        self,
+        particles: FNAME | ParticlesStarSet,
+        data_rootdir,
+        particle_radius_angs,
+        batch_size,
+        device,
+    ):
+        # Load particle metadata
+        if not isinstance(particles, ParticlesStarSet):
+            particlesSet = ParticlesStarSet(particles, data_rootdir)
+        else:
+            particlesSet = particles
+
+        sampling_rate = particlesSet.sampling_rate
+        assert np.isclose(
+            sampling_rate, self.vol_voxel_size, atol=1e-2
+        ), (
+            "Error, particles and volume have different pixel_size "
+            f"{sampling_rate} {self.vol_voxel_size}"
+        )
+        try:
+            particle_shape = particlesSet.particle_shape
+        except FileNotFoundError:
+            self.mainLogger.error(
+                ">> particles mrcs file not found. Did you forget including --particles_dir"
+            )
+            raise
+
+        assert np.isclose(particle_shape, self.ori_image_shape).all(), (
+            "Error, particles and volume have different number of pixels"
+        )
+
+        # NOTE: Directly use the Fourier dataset here; no class attribute indirection.
+        particlesDataset = ParticlesFourierDataset(
+            particlesSet,
+            mmap_dirname=None,
+            particle_radius_angs=particle_radius_angs,
+            pad_length=self.pad_length,
+            device=device,
+            batch_size=3 * batch_size,
+            n_jobs=self.n_cpus,
+            verbose=self.verbose,
+        )
+
+        dataDict = particlesDataset.dataDict
+        pose_to_particleIdx = init_int_to_intList_dict()
+
+        threadLock = threading.Lock()
+
+        def preprocess_angles_batch(idxs):
+            batch_size = len(idxs)
+            eulerDegs = dataDict[idxs]["eulerDegs"].view(-1, 3).cpu()
+            eulerDegs_grid = self.get_so3_grid(eulerDegs)
+            poseIdxs = self.so3_discretizer.eulerDegs_to_idx(eulerDegs_grid).view(
+                batch_size, -1
+            )
+            poseIdxs = [poseIdxs[i, ...].unique(sorted=True) for i in range(poseIdxs.shape[0])]
+            _parts_idxs = [
+                np.ones(pIdxs.shape[-1], dtype=np.int64) * idxs[i]
+                for i, pIdxs in enumerate(poseIdxs)
+            ]
+            poseIdxs = np.concatenate(poseIdxs)
+            with threadLock:
+                typed_dict_add_keyList_valList(
+                    pose_to_particleIdx, poseIdxs, np.concatenate(_parts_idxs)
+                )
+            return poseIdxs.shape[0]
+
+        # Parallel angle pre-discretization/grouping
+        part_orientation_batch = min(
+            1 + (8 * batch_size // self.n_cpus), particlesDataset.n_partics
+        )
+        n_jobs = self.n_cpus
+        angles_idxs = Parallel(n_jobs=n_jobs, backend="threading", return_as="generator")(
+            delayed(preprocess_angles_batch)(batchIdxs)
+            for batchIdxs in chunked(
+                range(particlesDataset.n_partics), n=part_orientation_batch
+            )
+        )
+        n_items = 0
+        for n_i in tqdm(
+            angles_idxs,
+            total=particlesDataset.n_partics // part_orientation_batch
+            + bool(particlesDataset.n_partics % part_orientation_batch),
+            desc="Discretizing and grouping orientations",
+            disable=not self.verbose,
+        ):
+            n_items += n_i
+
+        return particlesDataset, pose_to_particleIdx, n_items
+
+    @torch.inference_mode()
+    def align_star(
+        self,
+        particles: FNAME | ParticlesStarSet,
+        starFnameOut: FNAME,
+        data_rootdir: str | None = None,
+        particle_radius_angs=None,
+        batch_size=256,
+        device="cuda",
+        particles_gpu_cache_size=1024,
+        fft_in_device=False,
+    ) -> ParticlesStarSet:
         """
-
-        :param fimgs: Tensor of shape BxLx(L_rfft)x(2_real_img)
-        :param ctf:   Tensor of shape BxLx(L_rfft)
-        :param rotmats: Tensor of shape BxTx3x3
-        :return:
+        Align particles (input STAR file or ParticlesStarSet) to the reference.
+        Writes a STAR with predicted poses/shifts if starFnameOut provided.
         """
+        if starFnameOut is not None:
+            assert not os.path.isfile(
+                starFnameOut
+            ), f"Error, the starFnameOut {starFnameOut} already exists"
 
-        # expanded_rotmats = torch.einsum("gij, btjk -> btgik", self.grid_rotmats, rotmats)
-        expanded_rotmats = torch.matmul(rotmats.unsqueeze(2), self.grid_rotmats.unsqueeze(0).unsqueeze(0))
-        del rotmats
-        projs = self._projectF(expanded_rotmats)
+        particlesDataSet, pose_to_particleIdx, n_items = self.preprocess_particles(
+            particles,
+            data_rootdir,
+            particle_radius_angs,
+            batch_size,
+            device if fft_in_device else "cpu",
+        )
+        pixel_size = particlesDataSet.sampling_rate
+        half_particle_size = self.image_shape[-1] / 2
+        n_particles = len(particlesDataSet)
 
-        # from matplotlib import pyplot as plt
-        # f, axes = plt.subplots(2, 2)
-        # cpu_projs = projs.to("cpu", copy=True)
-        # mat_idxs = [5, 6]
-        # axes[0, 0].imshow(self._fourier_proj_to_real(cpu_projs)[0, 0, mat_idxs[0], ...])
-        # axes[0, 1].imshow(self._fourier_proj_to_real(cpu_projs)[0, 0, mat_idxs[1], ...])
-        # axes[1, 0].imshow(self._fourier_proj_to_real(cpu_projs)[1, 0, mat_idxs[0], ...])
-        # axes[1, 1].imshow(self._fourier_proj_to_real(cpu_projs)[1, 0, mat_idxs[1], ...])
-        # plt.show()
+        results_corr_matrix = torch.zeros(n_particles, self.keep_top_k_values)
+        # Storing poseIdx, shiftXpx, shiftYpx (int) for top-k
+        results_info_matrix = torch.zeros(
+            n_particles, self.keep_top_k_values, 3, dtype=torch.int64
+        )
+        softmax_denominator = torch.zeros(n_particles, dtype=torch.float64)
 
-        # self.background_stream.synchronize()
-        # torch.cuda.current_stream().wait_stream(self.background_stream)
+        particlesDataSet.device = "cpu"
+        data_cache = create_particles_cache(
+            particlesDataSet,
+            particles_gpu_cache_size,
+            10 * particles_gpu_cache_size,
+            l1_device=device,
+        )
 
-        if self.correct_ctf:
-            projs *= ctf[:, None, None, ..., None] #TODO. Multiply ctf.conj() in the particles and not in the projs
-        del ctf
-        perImgCorr, pixelShiftsXY = self._correlateCrossCorrelation(fimgs[:, None, None, ...], projs)
+        self.to(device)
+        self.mainLogger.info(f"Total number of particles: {particlesDataSet.n_partics}")
+        self.mainLogger.info(
+            f"Total number of poses to explore: {len(pose_to_particleIdx.keys())}/{self.so3_discretizer.grid_size}"
+        )
+        idxBatcher = IdxsBatcher(
+            self.so3_discretizer,
+            pose_to_particleIdx,
+            self.n_cpus,
+            sorting_method="none",
+            verbose=self.verbose,
+        )
 
-        maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight = self._analyze_cross_correlation(perImgCorr,
-                                                                           pixelShiftsXY,
-                                                                           grid_rotmats=expanded_rotmats,
-                                                                           return_top_k=self.return_top_k,
-                                                                           half_particle_size=self.half_particle_size,
-                                                                           vol_voxel_size=self.vol_voxel_size)
-        #TODO: PreRotMats comes from multyping the (grid_rotmat @ rotmat)
-        return maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight
+        total_num_orientation_batches = n_items // batch_size + bool(n_items % batch_size)
+        self.mainLogger.info(f"Total number of batches: {total_num_orientation_batches}")
 
-    def forward(self, imgs, ctfs, rotmats):
-        # with torch.cuda.stream(self.background_stream):
-        #     fimages = self._real_to_fourier(imgs)
-        fimages = self._real_to_fourier(imgs)
-        maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight = self.align_particles(fimages, ctfs, rotmats)
-        return maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight
+        minimal_projs = self._compute_projections(torch.randn(1, 3))[0]
+        renumbered_to_ori_poseIdxs = idxBatcher.renumbered_to_ori_poseIdxs
 
+        class TensorCacheProjs(LookAheadTensorCache):
+            def compute_idxs(other, idxs):
+                degs = self.so3_discretizer.idx_to_eulerDegs(
+                    renumbered_to_ori_poseIdxs[idxs]
+                )
+                return self._compute_projections(degs)[0]
 
-def _analyze_cross_correlation(perImgCorr:torch.Tensor, pixelShiftsXY:torch.Tensor, grid_rotmats:torch.Tensor,
-                               return_top_k:int, half_particle_size:float,
-                               vol_voxel_size:float) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        projs_cache = TensorCacheProjs(
+            cache_size=batch_size,
+            max_index=idxBatcher.maxindex,
+            tensor_shape=minimal_projs.shape[1:],
+            dtype=minimal_projs.dtype,
+            data_device=device,
+        )
+        self.mainLogger.info("Projections cache initialized. Starting!!")
 
-    b, topk, nrots = perImgCorr.shape
-    batch_arange= torch.arange(b, device=perImgCorr.device).unsqueeze(1)
+        statsRecorder = OnlineStatsRecorder(particlesDataSet.n_partics, dtype=torch.float64)
+        delta_so3_size = self._get_so3_delta(device).shape[-1]
 
-    reshaped_perImgCorr = perImgCorr.reshape(b, -1)
-    maxCorrs, maxIdxs = reshaped_perImgCorr.topk(return_top_k, largest=True, sorted=True)
-    bestPixelShiftsXY = pixelShiftsXY.reshape(b, -1, 2)[batch_arange, maxIdxs]
-    mean_corr = torch.mean(reshaped_perImgCorr, dim=-1, keepdim=True)
-    std_corr = torch.std(reshaped_perImgCorr, dim=-1, keepdim=True)
-    comparedWeight = torch.distributions.Normal(mean_corr, std_corr+1e-6).cdf(maxCorrs)  # 1-P(I_i > All_images)
-    predShiftsAngsXY = -(bestPixelShiftsXY - half_particle_size) * vol_voxel_size
+        for (flatten_poses_idxs, flatten_img_idxs) in tqdm(
+            idxBatcher.yield_batchIdxs(batch_size),
+            total=total_num_orientation_batches,
+            desc="Aligning orientations",
+            disable=not self.verbose,
+        ):
+            parts, ctfs = data_cache[flatten_img_idxs]
+            projs = projs_cache[flatten_poses_idxs]
 
-    topk_input_indices = maxIdxs // nrots
-    predRotMatsIdxs = maxIdxs % nrots
-    predRotMats = grid_rotmats[batch_arange, topk_input_indices, predRotMatsIdxs]
-    return maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight
+            unique_flatten_img_idxs, local_img_idxs = flatten_img_idxs.unique(
+                sorted=False, return_inverse=True
+            )
+            local_img_idxs = local_img_idxs.to(device, non_blocking=True)
 
-@lru_cache(1)
-def _get_begin_end_from_max_shift(image_shape, max_shift):
-    h, w = image_shape
-    one_minus_max_shift = 1 - max_shift
-    delta_h = math.ceil((h * one_minus_max_shift) / 2)
-    h0 = delta_h
-    h1 = h - delta_h
+            if self.correct_ctf:
+                projs = self._apply_ctfF(projs, ctfs)
 
-    delta_w = math.ceil((w * one_minus_max_shift) / 2)
-    w0 = delta_w
-    w1 = w - delta_w
+            perImgCorr, pixelShiftsXY = self.correlateF(parts, projs)
 
-    return h0, h1, w0, w1
+            statsRecorder.update(perImgCorr.cpu(), flatten_img_idxs)
 
-def _extract_ccor_max(corrs, max_shift_fraction):
-    pixelShiftsXY = torch.empty(corrs.shape[:-2] + (2,), device=corrs.device, dtype=torch.int64)
+            (
+                results_corr_matrix,
+                results_info_matrix,
+                softmax_denominator,
+            ) = self.update_results_status(
+                perImgCorr,
+                pixelShiftsXY,
+                results_corr_matrix,
+                results_info_matrix,
+                softmax_denominator,
+                unique_flatten_img_idxs,
+                local_img_idxs,
+                renumbered_to_ori_poseIdxs,
+                flatten_poses_idxs,
+            )
 
-    if max_shift_fraction is not None:
-        h0, h1, w0, w1 = _get_begin_end_from_max_shift(corrs.shape[-2:], max_shift_fraction)
+        results_corr_matrix, idxs = results_corr_matrix.sort(dim=1)
+        rows = torch.arange(results_info_matrix.size(0)).unsqueeze(1).expand(
+            -1, results_info_matrix.size(1)
+        )
+        results_info_matrix = results_info_matrix[rows, idxs]
+
+        predEulerDegs = self.so3_discretizer.idx_to_eulerDegs(
+            results_info_matrix[..., 0].view(-1)
+        ).view(*results_info_matrix.shape[:2], 3)
+
+        predShiftsAngs = -(results_info_matrix[..., 1:].float() - half_particle_size) * pixel_size
+
+        if delta_so3_size > 3:
+            _mean, _std = statsRecorder.get_mean(), statsRecorder.get_standard_deviation()
+            prob_x_y = torch.distributions.normal.Normal(
+                _mean.unsqueeze(-1), _std.unsqueeze(-1)
+            ).cdf(results_corr_matrix)
+        elif delta_so3_size == 1:
+            prob_x_y = torch.ones_like(results_corr_matrix)
+        else:
+            raise NotImplementedError("I don't know how to compute p(x|y) with very little examples")
+
+        n_topK = predEulerDegs.shape[1]
+        finalParticlesStar = None
+        for complement_topK in range(n_topK):
+            topK = n_topK - 1 - complement_topK
+            particlesStar = particlesDataSet.get_particles_starstack(drop_rlnImageId=True)
+
+            parts_range = range(results_info_matrix.shape[0])
+
+            if predEulerDegs.shape[1] > 1:
+                colname2change = {"copyNumber": topK}
+                particlesStar.updateMd(None, None, colname2change)
+
+            confidence = particlesDataSet.dataDict["confidences"].sum(-1)
+            particlesStar.updateMd(idxs=parts_range, colname2change={"previousConfidenceScore": confidence.numpy()})
+
+            confidence *= prob_x_y[:, topK]
+            particlesStar.setPose(
+                parts_range,
+                eulerDegs=predEulerDegs[:, topK, ...].numpy(),
+                shiftsAngst=predShiftsAngs[:, topK, ...].numpy(),
+                confidence=confidence.numpy(),
+            )
+
+            particlesStar.updateMd(
+                idxs=parts_range, colname2change={"bruteForceScore": results_corr_matrix[:, topK].numpy()}
+            )
+            particlesStar.updateMd(
+                idxs=parts_range, colname2change={"bruteForceScoreNormalized": prob_x_y[:, topK].numpy()}
+            )
+            if complement_topK > 0:
+                finalParticlesStar += particlesStar
+            else:
+                finalParticlesStar = particlesStar
+
+        if starFnameOut is not None:
+            finalParticlesStar.save(starFname=starFnameOut)
+            self.mainLogger.info(f"particles were saved at {starFnameOut}")
+
+        if REPORT_ALIGNMENT_DISPLACEMENT:
+            ori_eulers = particlesDataSet.dataDict.get("eulerDegs")[
+                range(predEulerDegs.shape[0]), ...
+            ]
+            ori_shifts = particlesDataSet.dataDict.get("shiftsAngs")[
+                range(predEulerDegs.shape[0]), ...
+            ]
+            best_value = float("inf")
+            for i in range(ori_eulers.shape[1]):
+                for j in range(predEulerDegs.shape[1]):
+                    degs_angular_displacement = euler_degs_diff(
+                        predEulerDegs[:, j, :], ori_eulers[:, i, :]
+                    )
+                    angst_translation_displacement = shifst_angs_diff(
+                        predShiftsAngs[:, j, :], ori_shifts[:, i, :]
+                    )
+                    degs_mean = degs_angular_displacement.mean()
+                    if best_value > degs_mean:
+                        best_value = degs_mean
+                        degs_mean, degs_std = (
+                            degs_angular_displacement.mean(),
+                            degs_angular_displacement.std(),
+                        )
+                        degs_median = np.median(degs_angular_displacement)
+                        degs_iqr = np.quantile(degs_angular_displacement, 0.75) - np.quantile(
+                            degs_angular_displacement, 0.25
+                        )
+
+            agst_mean, agst_std = angst_translation_displacement.mean(), angst_translation_displacement.std()
+            agst_median = np.median(angst_translation_displacement)
+            agst_iqr = (np.quantile(angst_translation_displacement, 0.75) -
+                        np.quantile(angst_translation_displacement, 0.25))
+            self.mainLogger.info(
+                "Alignment displacements mean (std)\tmedian (iqr)\n"
+                f"Angle: {degs_mean:2.3f} +/- {degs_std:2.3f}\t{degs_median:2.3f} +/- {degs_iqr:2.3f}\n"
+                f"Shift: {agst_mean:2.3f} +/- {agst_std:2.3f}\t{agst_median:2.3f} +/- {agst_iqr:2.3f} "
+            )
+
+        del particlesDataSet, projs_cache, data_cache, pose_to_particleIdx
+        gc.collect()
+        torch.cuda.empty_cache()
+        return finalParticlesStar
+
+    def update_results_status(self, perImgCorr, pixelShiftsXY, results_corr_matrix, results_info_matrix,
+                              softmax_denominator,
+                              unique_flatten_img_idxs, local_img_idxs, renumbered_to_ori_poseIdxs, flatten_poses_idxs):
+        #TODO: This is not super efficient, but it is not the bottleneck
+
+        _denominator = scatter_sum(perImgCorr.double().exp(), local_img_idxs)
+        softmax_denominator[unique_flatten_img_idxs] += _denominator.cpu()  # This goes to +inf. We need normalized values.
+
+        prevCorr = results_corr_matrix[unique_flatten_img_idxs]
+        prevInfo = results_info_matrix[unique_flatten_img_idxs, ...]
+        for k in range(self.keep_top_k_values):
+            bestLocalCorrs, bestLocalImgIdxs = scatter_max(perImgCorr, local_img_idxs)
+            bestLocalpixelShiftsXY = pixelShiftsXY[bestLocalImgIdxs]
+            bestLocalCorrs = bestLocalCorrs.cpu()
+            bestLocalImgIdxs = bestLocalImgIdxs.cpu()
+            bestLocalpixelShiftsXY = bestLocalpixelShiftsXY.cpu()
+
+            bestLocalPoseIdx = renumbered_to_ori_poseIdxs[
+                flatten_poses_idxs[bestLocalImgIdxs]]
+
+            corrDiff = (bestLocalCorrs.unsqueeze(-1) - prevCorr)
+            replacebleMask = corrDiff > 0
+            corrDiffMask = torch.count_nonzero(replacebleMask,
+                                               -1).bool()  # Why bool? Beacause we will be indexing the dim=0 in prevCorr, with shape[1], and we only want to update the results if there is any positive case
+            replaceIdxs = (corrDiff + (~replacebleMask) * -1e7).argmax(-1)  # 1e7 is ~ inf, since we cannot use inf, that generates nan
+            replaceIdxs = replaceIdxs[corrDiffMask]  # This is to rule out rows that do not need to be updated
+            prevCorr[corrDiffMask, replaceIdxs] = bestLocalCorrs[corrDiffMask]
+
+            newInfo = torch.cat([bestLocalPoseIdx.unsqueeze(-1), bestLocalpixelShiftsXY], -1)
+            prevInfo[corrDiffMask, replaceIdxs, :] = newInfo[corrDiffMask, :]
+            perImgCorr[bestLocalImgIdxs] *= 0
+
+        results_corr_matrix[unique_flatten_img_idxs] = prevCorr
+        results_info_matrix[unique_flatten_img_idxs, ...] = prevInfo
+        return results_corr_matrix, results_info_matrix, softmax_denominator
+
+    def _extract_ccor_max_unconstrained(self, corrs):
+        pixelShiftsXY = torch.empty(corrs.shape[0], 2, device=corrs.device, dtype=torch.int64)
+        maxCorrsJ, maxIndxJ = corrs.max(-1)
+        perImgCorr, maxIndxI = maxCorrsJ.max(-1)
+        pixelShiftsXY[:, 1] = maxIndxI
+        pixelShiftsXY[:, 0] = torch.gather(maxIndxJ, 1, maxIndxI.unsqueeze(1)).squeeze(1)
+        return perImgCorr, pixelShiftsXY
+
+    @classmethod
+    @lru_cache(1)
+    def _get_begin_end_from_max_shift(cls, image_shape, max_shift_fraction):
+        h, w = image_shape
+        one_minux_max_shift = 1 - max_shift_fraction
+        delta_h = math.ceil((h * one_minux_max_shift) / 2)
+        h0 = delta_h
+        h1 = h - delta_h
+
+        delta_w = math.ceil((w * one_minux_max_shift) / 2)
+        w0 = delta_w
+        w1 = w - delta_w
+
+        return h0, h1, w0, w1
+
+    def _extract_ccor_max(self, corrs, max_shift_fraction):
+        pixelShiftsXY = torch.empty(corrs.shape[0], 2, device=corrs.device, dtype=torch.int64)
+        h0, h1, w0, w1 = self._get_begin_end_from_max_shift(corrs.shape[-2:], max_shift_fraction)
         corrs = corrs[..., h0:h1, w0:w1]
-    else:
-        h0, w0 = 0, 0
-    maxCorrsJ, maxIndxJ = corrs.max(-1)
-    perImgCorr, maxIndxI = maxCorrsJ.max(-1)
-    pixelShiftsXY[..., 1] = h0 + maxIndxI
-    pixelShiftsXY[..., 0] = w0 + torch.gather(maxIndxJ, -1, maxIndxI.unsqueeze(-1)).squeeze(-1)
-
-    return perImgCorr, pixelShiftsXY
+        maxCorrsJ, maxIndxJ = corrs.max(-1)
+        perImgCorr, maxIndxI = maxCorrsJ.max(-1)
+        pixelShiftsXY[:, 1] = h0 + maxIndxI
+        pixelShiftsXY[:, 0] = w0 + torch.gather(maxIndxJ, 1, maxIndxI.unsqueeze(1)).squeeze(1)
+        return perImgCorr, pixelShiftsXY
 
 
-def correlate_dft_2d(
-    parts: torch.Tensor,
-    projs: torch.Tensor,
-) -> torch.Tensor:
-    """Correlate fftshifted rfft discrete Fourier transforms of images"""
-
-    #TODO: try to limit the comparison to the mask that Alister uses
-    """
-        normed_grid = (einops.reduce(freq_grid**2, "h w zyx -> h w", reduction="sum") ** 0.5)
-        freq_grid_mask = normed_grid <= fftfreq_max
-        valid_coords = freq_grid[freq_grid_mask, ...]  # (b, zyx)
-    """
-
-    if not parts.is_complex():
-        parts = torch.view_as_complex(parts)
-    if not projs.is_complex():
-        projs = torch.view_as_complex(projs)
-    result = parts * torch.conj(projs)
-
-    result = torch.fft.ifftshift(result, dim=(-2,),)
-    result = torch.fft.irfftn(result, dim=(-2, -1))
-    result = torch.fft.ifftshift(result, dim=(-2, -1)).real
-
-    # from matplotlib import pyplot as plt
-    # plt.imshow(result)
-    # plt.show()
-    return result
-
-
-def compute_dft_3d(
-    volume: torch.Tensor,
-    pad: bool = True,
-    pad_length: int | None = None
-) -> Tuple[torch.Tensor, Tuple[int,int,int], int | None]:
-    """Computes the DFT of a volume. Intended to be used as a preprocessing before using extract_central_slices_rfft.
-
-    Parameters
-    ----------
-    volume: torch.Tensor
-        `(d, d, d)` volume.
-    pad: bool
-        Whether to pad the volume with zeros to increase sampling in the DFT.
-    pad_length: int | None
-        The length used for padding each side of each dimension. If pad_length=None, and pad=True then volume.shape[-1] // 2 is used instead
-
-    Returns
-    -------
-    projections: Tuple[torch.Tensor, torch.Tensor, int]
-        `(..., d, d, d)` dft of the volume. fftshifted rfft
-        Tuple[int,int,int] the shape of the volume after padding
-        int with the padding length
-    """
-    # padding
-    if pad is True:
-        if pad_length is None:
-            pad_length = volume.shape[-1] // 2
-        volume = F.pad(volume, pad=[pad_length] * 6, mode='constant', value=0)
-
-    vol_shape = tuple(volume.shape)
-    # premultiply by sinc2
-    grid = fftfreq_grid(
-        image_shape=vol_shape,
-        rfft=False,
-        fftshift=True,
-        norm=True,
-        device=volume.device
-    )
-    volume = volume * torch.sinc(grid) ** 2
-
-    # calculate DFT
-    dft = torch.fft.fftshift(volume, dim=(-3, -2, -1))  # volume center to array origin
-    dft = torch.fft.rfftn(dft, dim=(-3, -2, -1))
-    dft = torch.fft.fftshift(dft, dim=(-3, -2,))  # actual fftshift of rfft
-
-    return dft, vol_shape, pad_length
-
-
-def _test0():
-    seed_everything(111)
-    device = "cuda"
-    batch_size = 16
-    input_topk_mats = 2
-
-    pj = ProjectionMatcher(reference_vol="/home/sanchezg/tmp/cak_11799_usedTraining_ligErased.mrc",
-                           grid_distance_degs=12,
-                           grid_step_degs=2,
-                           pixel_size=None,
-                           filter_resolution_angst=5,
-                           max_shift_fraction=0.2,
-                           return_top_k=1)
-    pj.to(device)
-    fakefimage = torch.rand(batch_size, *pj.reference_vol.shape[-2:], dtype=torch.complex64, device=device)
-    fakeCtf = torch.rand(batch_size, *pj.reference_vol.shape[-2:], dtype=torch.float32, device=device)
-    from scipy.spatial.transform import Rotation
-    rotmats = torch.as_tensor(Rotation.random(batch_size, random_state=1).as_matrix(), dtype=torch.float32, device=device
-                              ).unsqueeze(1).repeat(1, input_topk_mats, 1, 1)
-    print("align", flush=True)
-    t=time.time()
-    pj.align_particles(fakefimage, fakeCtf, rotmats)
-    print("DONE", time.time()-t)
-
-def _test1():
-    seed_everything(111)
-
-    device = "cuda"
-    batch_size = 16
-
-    torch.set_float32_matmul_precision('high')
-    pj = ProjectionMatcher(reference_vol=os.path.expanduser("~/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles_reconstruct.mrc"),
-                           grid_distance_degs=10, #12
-                           grid_step_degs=5,      #2
-                           pixel_size=None,
-                           filter_resolution_angst=6,
-                           max_shift_fraction=None,
-                           return_top_k=1,
-                           correct_ctf=False)
-
-    from cryoPARES.datamanager.datamanager import DataManager
-    from tqdm import tqdm
-
-    from cryoPARES.configs.mainConfig import main_config
-    # main_config.datamanager.particlesdataset.desired_image_size_px=360
-    # main_config.datamanager.particlesdataset.desired_sampling_rate_angs=1.27
-
-    datamanager = DataManager(
-          # star_fnames=[os.path.expanduser("~/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles.star")],
-          star_fnames=[os.path.expanduser("~/cryo/data/preAlignedParticles/EMPIAR-10166/data/projections/proj_noCTF_no_shifts.star")],
-          symmetry="C1",
-          batch_size=batch_size,
-          particles_dir=[os.path.expanduser("~/cryo/data/preAlignedParticles/EMPIAR-10166/data/")],
-          halfset=None,
-          save_train_val_partition_dir=None,
-          is_global_zero=True,
-          return_ori_imagen=True,
-          num_augmented_copies_per_batch=1,
-          num_data_workers=2)
-    pj.to(device)
-    with torch.inference_mode():
-        pd_list = []
-        dl = datamanager._create_dataloader()
-        for bix, batch in enumerate(dl): #WARMUP
-            # print(batch[BATCH_IDS_NAME])
-            imgs = batch[BATCH_ORI_IMAGE_NAME].to(device, non_blocking=True)
-            ctfs = batch[BATCH_ORI_CTF_NAME].to(device, non_blocking=True)
-            rotmats = batch[BATCH_POSE_NAME][0].unsqueeze(1).to(device, non_blocking=True)
-            md = batch[BATCH_MD_NAME]
-            # torch.compiler.cudagraph_mark_step_begin()  #<- This is needed for compilation.  #!!!!!!!!!!!!!!!!!!
-            fimages = pj._real_to_fourier(imgs) #TODO. I should be able to get the fimages from the rfft_ctf.correct_ctf. I would need to apply a phase shift to reproduce the real space fftshift
-            maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight = pj.align_particles(fimages, ctfs, rotmats)
-            break
-        for bix, batch in enumerate(tqdm(dl)):
-            # print(batch[BATCH_IDS_NAME])
-            imgs = batch[BATCH_ORI_IMAGE_NAME].to(device, non_blocking=True)
-            ctfs = batch[BATCH_ORI_CTF_NAME].to(device, non_blocking=True)
-            rotmats = batch[BATCH_POSE_NAME][0].unsqueeze(1).to(device, non_blocking=True)
-            md = batch[BATCH_MD_NAME]
-            with torch.cuda.stream(pj.background_stream):
-                fimages = pj._real_to_fourier(imgs) #TODO. I should be able to get the fimages from the rfft_ctf.correct_ctf. I would need to apply a phase shift to reproduce the real space fftshift
-            maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight = pj.align_particles(fimages, ctfs, rotmats)
-            print("GT Rots\n", torch.rad2deg(matrix_to_euler_angles(rotmats, RELION_EULER_CONVENTION)).squeeze(1)) #TODO: I don't trust matrix_to_euler
-            print("Pred Rots\n",torch.rad2deg(matrix_to_euler_angles(predRotMats, RELION_EULER_CONVENTION)).squeeze(1))
-
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print("GT shifts\n", batch[BATCH_POSE_NAME][1])
-            print("pred shifts\n", predShiftsAngsXY.squeeze(1))
-            print("---------------------------------------------------")
-            print()
-
-            for topk in range(predRotMats.shape[1]):
-                suffix = "" if topk == 0 else f"_top{topk}"
-                eulers = Rotation.from_matrix(predRotMats.cpu().numpy()[:,topk,...]).as_euler(RELION_EULER_CONVENTION, degrees=True)
-                for i, angName in enumerate(RELION_ANGLES_NAMES):
-                    md[angName+suffix] = eulers[:,i]
-                for i, shiftName in enumerate(RELION_SHIFTS_NAMES):
-                    md[shiftName+suffix] = predShiftsAngsXY[:,topk,i].cpu().numpy()
-                md[PROJECTION_MATCHING_SCORE] = comparedWeight[:,topk,...].cpu().numpy()
-            pd_list.append(pd.DataFrame(md))
-            del predRotMats, eulers, predShiftsAngsXY, comparedWeight
-        optics = getattr(dl.dataset, "particles", dl.dataset.datasets[0].particles).optics_md
-        parts = pd.concat(pd_list)
-        starfile.write(dict(optics=optics, particles=parts), filename="/tmp/particles.star")
-
-def _test3():
-    seed_everything(111)
-    device = "cpu"
-    pj = ProjectionMatcher(reference_vol=os.path.expanduser(
-        "~/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles_reconstruct.mrc"),
-                           grid_distance_degs=10,  # 12
-                           grid_step_degs=5,  # 2
-                           pixel_size=None,
-                           filter_resolution_angst=6,
-                           max_shift_fraction=None,
-                           return_top_k=1,
-                           correct_ctf=False)
-    pj = pj.to(device)
-    from cryoPARES.datamanager.datamanager import DataManager
-    datamanager = DataManager(
-          # star_fnames=[os.path.expanduser("~/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles.star")],
-          star_fnames=[os.path.expanduser("~/cryo/data/preAlignedParticles/EMPIAR-10166/data/projections/proj_noCTF_no_shifts.star")],
-          symmetry="C1",
-          batch_size=32,
-          particles_dir=[os.path.expanduser("~/cryo/data/preAlignedParticles/EMPIAR-10166/data/")],
-          halfset=None,
-          save_train_val_partition_dir=None,
-          is_global_zero=True,
-          return_ori_imagen=True,
-          num_augmented_copies_per_batch=1,
-          num_data_workers=2)
-    dl = datamanager._create_dataloader()
-    for bix, batch in enumerate(dl):
-        imgs = batch[BATCH_ORI_IMAGE_NAME].to(device, non_blocking=True)
-        ctfs = batch[BATCH_ORI_CTF_NAME].to(device, non_blocking=True)
-        rotmats = batch[BATCH_POSE_NAME][0].unsqueeze(1).to(device, non_blocking=True)
-        break
-    imgs = imgs[:1, 0].expand(8, -1,-1)
-    ctfs = ctfs[:1].expand(8, -1, -1)
-    rotmats = rotmats[:1].expand(8, -1, -1, -1)
-
-    batch8 = pj.align_particles(pj._real_to_fourier(imgs), ctfs, rotmats)[1]
-    batch1 = pj.align_particles(pj._real_to_fourier(imgs[:1]), ctfs[:1], rotmats[:1])[1]
-    print(torch.max(torch.abs(batch8[::4] - batch1)))
-
-    # fabricate ONE random particle + CTF and its pose
-    H, W = pj.reference_vol.shape[-2:]
-    img = torch.randn(1, H, H, device=device)
-    ctf = torch.rand(1, H, W, device=device)
-    rotm = torch.eye(3, device=device).expand(1, 1, 3, 3)  # identity pose
-
-    f1 = pj._real_to_fourier(img)  # batch = 1
-    f8 = pj._real_to_fourier(img.expand(8, -1, -1))  # batch = 8
-
-    m1 = pj.align_particles(f1, ctf, rotm)[1][:,0]  # predicted rot for B=1
-    m8 = pj.align_particles(f8, ctf.expand_as(f8[...,0]),
-                            rotm.expand(8, -1, -1, -1))[1][:, 0]  # pick first top‑k
-
-    print(m1)
-    print(m8)
-
-    from cryoPARES.geometry.metrics_angles import rotation_error_rads
-    print("Δ‑angle (deg) between B=1 and B=8:",
-          torch.rad2deg(torch.max(rotation_error_rads(m1, m8))))
-    print("It should be close to 0")
-
-    print("Done")
-
-@inject_defaults_from_config(default_config=main_config.projmatching)
-def aling_starfile(
-        star_fname: str,
-        out_fname: str,
-        reference_vol: str,
-        particles_dir: Optional[str]=None,
-        grid_distance_degs: float = CONFIG_PARAM(),
-        grid_step_degs: float = CONFIG_PARAM(),
-        filter_resolution_angst: Optional[float] = CONFIG_PARAM(),
-        max_shift_fraction: Optional[float] = CONFIG_PARAM(),
-        return_top_k: int = 1,
-        correct_ctf: bool = CONFIG_PARAM(),
-        batch_size:int=32, use_cuda:bool=True, num_data_workers:int=2,
-        show_debug_stats: bool = False,
-        n_first_particles: Optional[int] = None):
+def align_star(
+    reference_vol: str,
+    star_fname: str,
+    out_fname: str,
+    particles_dir: Optional[str],
+    particle_radius_angs: Optional[float] = None,
+    grid_distance_degs: float = 8.0,
+    grid_step_degs: float = 2.0,
+    return_top_k_poses: int = 1,
+    padding_factor: float = 0.0,
+    filter_resolution_angst: Optional[float] = None,
+    n_cpus_per_job: int = 1,
+    batch_size: int = 1024,
+    cache_factor: float = 5.0,
+    use_cuda: bool = True,
+    verbose: bool = True,
+    torch_matmul_precision: Literal["highest", "high", "medium"] = "high",
+    fft_in_cuda: bool = True,
+    gpu_id: Optional[int] = None,
+    n_first_particles: Optional[int] = None,
+    correct_ctf: bool = True,
+):
     """
 
+    :param reference_vol:
     :param star_fname:
     :param out_fname:
-    :param reference_vol:
     :param particles_dir:
+    :param particle_radius_angs:
     :param grid_distance_degs:
     :param grid_step_degs:
+    :param return_top_k_poses:
+    :param padding_factor:
     :param filter_resolution_angst:
-    :param max_shift_fraction:
-    :param return_top_k:
-    :param correct_ctf:
+    :param n_cpus_per_job:
     :param batch_size:
+    :param cache_factor:
     :param use_cuda:
-    :param num_data_workers:
-    :param show_debug_stats:
+    :param verbose:
+    :param torch_matmul_precision:
+    :param fft_in_cuda:
+    :param gpu_id:
     :param n_first_particles:
+    :param correct_ctf:
     :return:
     """
-    from tqdm import tqdm
-    from cryoPARES.datamanager.datamanager import DataManager
-    if show_debug_stats:
-        from cryoPARES.geometry.metrics_angles import rotation_error_with_sym
-
-    pj = ProjectionMatcher(reference_vol=os.path.expanduser(reference_vol),
-                           grid_distance_degs=grid_distance_degs,
-                           grid_step_degs=grid_step_degs,
-                           pixel_size=None,
-                           filter_resolution_angst=filter_resolution_angst,
-                           max_shift_fraction=max_shift_fraction,
-                           return_top_k=return_top_k,
-                           correct_ctf=correct_ctf)
-    if use_cuda:
-        device = "cuda"
-    else:
-        device = "cpu"
-    pj = pj.to(device)
-
-    if n_first_particles is not None:
-        subset_idxs = range(n_first_particles)
-    datamanager = DataManager(
-          star_fnames=star_fname,
-          symmetry="C1", #We don't use symmetry for local projMatching
-          batch_size=batch_size,
-          particles_dir=particles_dir,
-          halfset=None,
-          save_train_val_partition_dir=None,
-          is_global_zero=True,
-          return_ori_imagen=True,
-          num_augmented_copies_per_batch=1,
-          num_data_workers=num_data_workers,
-          subset_idxs=subset_idxs)
-
-    pd_list = []
-    dl = datamanager._create_dataloader()
-
-    if show_debug_stats:
-        all_ang_errors = []
-        all_shift_errors = []
-
-    with torch.inference_mode():
-        for bix, batch in enumerate(tqdm(dl, desc="Aligning particles")):
-            imgs = batch[BATCH_ORI_IMAGE_NAME].to(device, non_blocking=True)
-            ctfs = batch[BATCH_ORI_CTF_NAME].to(device, non_blocking=True)
-            rotmats = batch[BATCH_POSE_NAME][0].unsqueeze(1).to(device, non_blocking=True)
-            md = batch[BATCH_MD_NAME]
-            fimages = pj._real_to_fourier(imgs)
-            maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight = pj.align_particles(fimages, ctfs, rotmats)
-
-            if show_debug_stats:
-                gt_rotmats = rotmats.squeeze(1)
-                pred_rotmats_top1 = predRotMats[:, 0, ...]
-                ang_err = torch.rad2deg(rotation_error_with_sym(pred_rotmats_top1, gt_rotmats, symmetry="C1"))
-                all_ang_errors.append(ang_err.cpu().numpy())
-
-                gt_shifts = batch[BATCH_POSE_NAME][1]
-                pred_shifts_top1 = predShiftsAngsXY[:, 0, ...]
-                shift_error = torch.sqrt(((pred_shifts_top1 - gt_shifts.to(device))**2).sum(-1))
-                all_shift_errors.append(shift_error.cpu().numpy())
-
-            for topk in range(return_top_k):
-                suffix = "" if topk == 0 else f"_top{topk}"
-                eulers = Rotation.from_matrix(predRotMats.cpu().numpy()[:,topk,...]
-                                              ).as_euler(RELION_EULER_CONVENTION, degrees=True)
-                for i, angName in enumerate(RELION_ANGLES_NAMES):
-                    md[angName+suffix] = eulers[:,i]
-                for i, shiftName in enumerate(RELION_SHIFTS_NAMES):
-                    md[shiftName+suffix] = predShiftsAngsXY[:,topk,i].cpu().numpy()
-                md[PROJECTION_MATCHING_SCORE + suffix] = comparedWeight[:,topk].cpu().numpy()
-            pd_list.append(pd.DataFrame(md))
-
-    optics = getattr(dl.dataset, "particles", dl.dataset.datasets[0].particles).optics_md
-    parts = pd.concat(pd_list)
-    starfile.write(dict(optics=optics, particles=parts), filename=out_fname, overwrite=True)
-
-    if show_debug_stats:
-        all_ang_errors = np.concatenate(all_ang_errors)
-        all_shift_errors = np.concatenate(all_shift_errors)
-
-        print("\n--- Error Report (Top-1) ---")
-        median_ang_err = np.median(all_ang_errors)
-        iqr_ang_err = np.subtract(*np.percentile(all_ang_errors, [75, 25]))
-        print(f"Angular Error (degs):\n  Median: {median_ang_err:.4f}\n  IQR:    {iqr_ang_err:.4f}")
-
-        median_shift_err = np.median(all_shift_errors)
-        iqr_shift_err = np.subtract(*np.percentile(all_shift_errors, [75, 25]))
-        print(f"Shift Error (Angstroms):\n  Median: {median_shift_err:.4f}\n  IQR:    {iqr_shift_err:.4f}")
-        print("--------------------------\n")
-
-    print(f"Aligned starfile saved at {out_fname}")
-
-def main():
-    parser = ConfigArgumentParser(prog="projMatching_cryoPARES", description="Run local projection matching for a given starfile.",
-                                  config_obj=main_config)
-    parser.add_args_from_function(aling_starfile)
-    args, config_args = parser.parse_args()
-    aling_starfile(**vars(args))
 
 
+    import torch.multiprocessing as mp
+
+    # Torch setup
+    try:
+        mp.set_start_method("spawn")
+    except RuntimeError:
+        pass
+    torch.set_float32_matmul_precision(torch_matmul_precision)
+    _n_cpus_per_job = 1 if n_cpus_per_job == 0 else n_cpus_per_job
+    torch.set_num_interop_threads(_n_cpus_per_job)
+    torch.set_num_threads(_n_cpus_per_job)
+
+    # Paths
+    reference_vol = os.path.expanduser(reference_vol)
+    star_fname = os.path.expanduser(star_fname)
+    out_fname = os.path.expanduser(out_fname)
+    data_rootdir = os.path.expanduser(particles_dir) if particles_dir else None
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Optional limit subset
+        ori_star_fname = None
+        if n_first_particles is not None:
+            star_data = starfile.read(star_fname)
+            particles_df = star_data["particles"]
+            optics_df = star_data["optics"]
+            particles_df = particles_df[:n_first_particles]
+            star_in_limited = os.path.join(tmpdir, f"input_particles_{os.path.basename(star_fname)}")
+            starfile.write({"optics": optics_df, "particles": particles_df}, star_in_limited)
+            star_fname = star_in_limited
+
+
+        # Optional low-pass filter of the reference volume
+        if filter_resolution_angst is not None:
+            new_reference_vol = os.path.join(tmpdir, f"input_vol_{os.path.basename(reference_vol)}")
+            low_pass_filter_fname(reference_vol, resolution=filter_resolution_angst, out_fname=new_reference_vol)
+            reference_vol = new_reference_vol
+
+        # Build aligner and run
+        aligner = Aligner(
+            reference_vol=reference_vol,
+            grid_distance_degs=grid_distance_degs,
+            grid_step_degs=grid_step_degs,
+            keep_top_k_values=return_top_k_poses,
+            padding_factor=padding_factor,
+            max_resolution_A=filter_resolution_angst,
+            n_cpus=_n_cpus_per_job,
+            verbose=verbose,
+            correct_ctf=correct_ctf,
+        )
+
+        device = "cuda" if use_cuda else "cpu"
+        if gpu_id is not None and use_cuda:
+            device = f"cuda:{gpu_id}"
+
+        aligner.align_star(
+            star_fname,
+            out_fname,
+            data_rootdir=data_rootdir,
+            batch_size=batch_size,
+            particle_radius_angs=particle_radius_angs,
+            particles_gpu_cache_size=int(cache_factor * batch_size),
+            device=device,
+            fft_in_device=fft_in_cuda,
+        )
+
+
+# CLI entry
 if __name__ == "__main__":
-    # _test0()
-    # _test1()
-    # _test3()
-
-    main()
+    import sys, shlex
+    print(' '.join(shlex.quote(arg) for arg in sys.argv[1:]))
+    from argParseFromDoc import parse_function_and_call
+    parse_function_and_call(align_star)

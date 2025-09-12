@@ -101,7 +101,7 @@ def low_pass_filter_fname(vol_fname, resolution, out_fname: str, mode: Literal["
         delta_resolution = resolution - pixel_size / (freq+delta_resolution*per_pixel_freq)
     elif delta_resolution_mode != "Angstroms":
         raise NotImplementedError(f"Error, no valid delta_resolution_mode {delta_resolution_mode}. Only allowed: {get_args(delta_resolution_mode_typeHint)}")
-    vol = low_pass_filter(vol, resolution, sampling_rate=vol.pixel_size, mode=mode, delta_resolution=delta_resolution)
+    vol = low_pass_filter(vol, resolution, sampling_rate=pixel_size, mode=mode, delta_resolution=delta_resolution)
     vol.pixel_size = pixel_size
     write_vol(vol, out_fname, pixel_size=pixel_size)
     return vol, (resolution - delta_resolution)

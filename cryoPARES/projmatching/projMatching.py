@@ -9,6 +9,8 @@ from typing import Tuple, Iterable, Optional, Literal
 import numpy as np
 import starfile
 import torch
+from torch.utils.data import DataLoader
+
 from cryoPARES.constants import RELION_EULER_CONVENTION
 from torch import nn
 from joblib import Parallel, delayed
@@ -162,9 +164,6 @@ class Aligner(nn.Module):
         self.image_shape = vol_shape[-2:]
 
 
-        self._correlateF = self._correlateCrossCorrelation
-
-
     def projectF(self, rotMats: torch.Tensor) -> torch.Tensor:
         return extract_central_slices_rfft(
             self.reference_vol,
@@ -179,7 +178,7 @@ class Aligner(nn.Module):
         )
 
     def correlateF(self, parts: torch.Tensor, projs: torch.Tensor):
-        return self._correlateF(parts, projs)
+        return self._correlateCrossCorrelation(parts, projs)
 
     def _apply_ctfF(self, projs, ctf):
         return projs * ctf
@@ -199,19 +198,11 @@ class Aligner(nn.Module):
         corrs = correlate_dft_2d(
             parts, projs, max_freq_pixels=self.max_resoluton_freq_pixels
         )
-        return self._extract_ccor_max(corrs, max_shift_fraction=self.max_shift_fraction)
+        b, options, l0, l1 = corrs.shape
+        maxcorr, maxcorrIdxs =  self._extract_ccor_max(corrs.reshape(-1, *corrs.shape[-2:]),
+                                      max_shift_fraction=self.max_shift_fraction)
 
-    def _correlateFRC(self, parts: torch.Tensor, projs: torch.Tensor):
-        shift_fractions = torch.tensor([-0.1, 0.0, 0.1], device=projs.device)
-        shift_fractions = torch.cartesian_prod(shift_fractions, shift_fractions)
-        shifted_projs = self._shiftF(projs, shift_fractions)
-        parts_repeat = parts.unsqueeze(1).expand(-1, shifted_projs.shape[1], -1, -1)
-        corrs = self.correlator(parts_repeat, shifted_projs).sum(-1)
-        shifts_idxs = corrs.argmax(-1)
-        fracitonShiftsXY = shift_fractions[shifts_idxs]
-        pixelShiftsXY = (fracitonShiftsXY * parts.shape[-2]).round().long()
-        perImgCorr = corrs.amax(-1)
-        return perImgCorr, pixelShiftsXY
+        return maxcorr.reshape(b, options), maxcorrIdxs.reshape(b, options, 2)
 
     # ----------------------- Shared helpers originally in base -----------------------
 
@@ -346,109 +337,91 @@ class Aligner(nn.Module):
         n_particles = len(particlesDataSet)
 
         results_corr_matrix = torch.zeros(n_particles, self.keep_top_k_values)
-        # Storing poseIdx, shiftXpx, shiftYpx (int) for top-k
-        results_info_matrix = torch.zeros(
-            n_particles, self.keep_top_k_values, 3, dtype=torch.int64
-        )
-        softmax_denominator = torch.zeros(n_particles, dtype=torch.float64)
+        results_shifts_matrix = torch.zeros(n_particles, self.keep_top_k_values, 2, dtype=torch.int64)
+        results_eulerDegs_matrix = torch.zeros(n_particles, self.keep_top_k_values, 3)
+        stats_corr_matrix = torch.zeros(n_particles, 2)
 
         particlesDataSet.device = "cpu"
-        data_cache = create_particles_cache(
-            particlesDataSet,
-            particles_gpu_cache_size,
-            10 * particles_gpu_cache_size,
-            l1_device=device,
-        )
 
         self.to(device)
         self.mainLogger.info(f"Total number of particles: {particlesDataSet.n_partics}")
         self.mainLogger.info(
             f"Total number of poses to explore: {len(pose_to_particleIdx.keys())}/{self.so3_discretizer.grid_size}"
         )
-        idxBatcher = IdxsBatcher(
-            self.so3_discretizer,
-            pose_to_particleIdx,
-            self.n_cpus,
-            sorting_method="none",
-            verbose=self.verbose,
-        )
+        # idxBatcher = IdxsBatcher(
+        #     self.so3_discretizer,
+        #     pose_to_particleIdx,
+        #     self.n_cpus,
+        #     sorting_method="idx_sorting",
+        #     verbose=self.verbose,
+        # )
 
-        total_num_orientation_batches = n_items // batch_size + bool(n_items % batch_size)
-        self.mainLogger.info(f"Total number of batches: {total_num_orientation_batches}")
-
-        minimal_projs = self._compute_projections(torch.randn(1, 3))[0]
-        renumbered_to_ori_poseIdxs = idxBatcher.renumbered_to_ori_poseIdxs
-
-        class TensorCacheProjs(LookAheadTensorCache):
-            def compute_idxs(other, idxs):
-                degs = self.so3_discretizer.idx_to_eulerDegs(
-                    renumbered_to_ori_poseIdxs[idxs]
-                )
-                return self._compute_projections(degs)[0]
-
-        projs_cache = TensorCacheProjs(
-            cache_size=batch_size,
-            max_index=idxBatcher.maxindex,
-            tensor_shape=minimal_projs.shape[1:],
-            dtype=minimal_projs.dtype,
-            data_device=device,
-        )
+        # total_num_orientation_batches = n_items // batch_size + bool(n_items % batch_size)
+        # self.mainLogger.info(f"Total number of batches: {total_num_orientation_batches}")
+        #
+        # minimal_projs = self._compute_projections(torch.randn(1, 3))[0]
+        # renumbered_to_ori_poseIdxs = idxBatcher.renumbered_to_ori_poseIdxs
+        #
+        # class TensorCacheProjs(LookAheadTensorCache):
+        #     def compute_idxs(other, idxs):
+        #         degs = self.so3_discretizer.idx_to_eulerDegs(
+        #             renumbered_to_ori_poseIdxs[idxs]
+        #         )
+        #         return self._compute_projections(degs)[0]
+        #
+        # projs_cache = TensorCacheProjs(
+        #     cache_size=batch_size,
+        #     max_index=idxBatcher.maxindex,
+        #     tensor_shape=minimal_projs.shape[1:],
+        #     dtype=minimal_projs.dtype,
+        #     data_device=device,
+        # )
         self.mainLogger.info("Projections cache initialized. Starting!!")
 
         statsRecorder = OnlineStatsRecorder(particlesDataSet.n_partics, dtype=torch.float64)
-        delta_so3_size = self._get_so3_delta(device).shape[-1]
+        delta_so3 = self._get_so3_delta(device).T.contiguous()
+        delta_so3_size = delta_so3.size(0)
+        dl = DataLoader(particlesDataSet, batch_size=batch_size,
+                        num_workers=self.n_cpus, shuffle=False, pin_memory=True,
+                        multiprocessing_context='fork')
+        non_blocking = True
+        for (partIdx, parts, ctfs, eulerDegs) in tqdm(dl,
+                                                      desc="Aligning particles",disable=not self.verbose):
+            parts = parts.to(device, non_blocking=non_blocking)
+            ctfs = ctfs.to(device, non_blocking=non_blocking)
+            expanded_eulerDegs = delta_so3.unsqueeze(0) + eulerDegs.unsqueeze(1)
+            bsize = expanded_eulerDegs.size(0)
+            n_input_angles = expanded_eulerDegs.size(1)
+            expanded_eulerDegs = expanded_eulerDegs.reshape(bsize, -1, 3) #unrolling all the input angles into one
+            nrots = expanded_eulerDegs.size(1)
+            #TODO: Remove duplicate angles if n_input_angles > 1
 
-        for (flatten_poses_idxs, flatten_img_idxs) in tqdm(
-            idxBatcher.yield_batchIdxs(batch_size),
-            total=total_num_orientation_batches,
-            desc="Aligning orientations",
-            disable=not self.verbose,
-        ):
-            parts, ctfs = data_cache[flatten_img_idxs]
-            projs = projs_cache[flatten_poses_idxs]
-
-            unique_flatten_img_idxs, local_img_idxs = flatten_img_idxs.unique(
-                sorted=False, return_inverse=True
-            )
-            local_img_idxs = local_img_idxs.to(device, non_blocking=True)
+            projs = self._compute_projections(expanded_eulerDegs.reshape(-1, 3))[0]
 
             if self.correct_ctf:
-                projs = self._apply_ctfF(projs, ctfs)
+                projs = self._apply_ctfF(projs.reshape(bsize, -1, *projs.shape[-2:]), ctfs.unsqueeze(1))
 
-            perImgCorr, pixelShiftsXY = self.correlateF(parts, projs)
+            perImgCorr, pixelShiftsXY = self.correlateF(parts.unsqueeze(1), projs)
 
-            statsRecorder.update(perImgCorr.cpu(), flatten_img_idxs)
+            maxCorrs, maxCorrsIdxs = perImgCorr.topk(self.keep_top_k_values, sorted=True, largest=True, dim=-1)
+            maxCorrsIdxs = maxCorrsIdxs.to("cpu", non_blocking=non_blocking)
+            results_corr_matrix[partIdx, :] = maxCorrs.to("cpu", non_blocking=non_blocking)
+            batch_idxs_range = torch.arange(pixelShiftsXY.size(0)).unsqueeze(1)
+            results_shifts_matrix[partIdx, :] = pixelShiftsXY[batch_idxs_range,
+                                                              maxCorrsIdxs].to("cpu", non_blocking=non_blocking)
+            results_eulerDegs_matrix[partIdx, :] = expanded_eulerDegs[batch_idxs_range,
+                                                          maxCorrsIdxs].to("cpu", non_blocking=non_blocking)
+            stats_corr_matrix[partIdx, 0] = perImgCorr.mean(-1).to("cpu", non_blocking=non_blocking)
+            stats_corr_matrix[partIdx, 1] = perImgCorr.std(-1).to("cpu", non_blocking=non_blocking)
 
-            (
-                results_corr_matrix,
-                results_info_matrix,
-                softmax_denominator,
-            ) = self.update_results_status(
-                perImgCorr,
-                pixelShiftsXY,
-                results_corr_matrix,
-                results_info_matrix,
-                softmax_denominator,
-                unique_flatten_img_idxs,
-                local_img_idxs,
-                renumbered_to_ori_poseIdxs,
-                flatten_poses_idxs,
-            )
 
-        results_corr_matrix, idxs = results_corr_matrix.sort(dim=1)
-        rows = torch.arange(results_info_matrix.size(0)).unsqueeze(1).expand(
-            -1, results_info_matrix.size(1)
-        )
-        results_info_matrix = results_info_matrix[rows, idxs]
 
-        predEulerDegs = self.so3_discretizer.idx_to_eulerDegs(
-            results_info_matrix[..., 0].view(-1)
-        ).view(*results_info_matrix.shape[:2], 3)
+        predEulerDegs = results_eulerDegs_matrix
 
-        predShiftsAngs = -(results_info_matrix[..., 1:].float() - half_particle_size) * pixel_size
+        predShiftsAngs = -(results_shifts_matrix.float() - half_particle_size) * pixel_size
 
         if delta_so3_size > 3:
-            _mean, _std = statsRecorder.get_mean(), statsRecorder.get_standard_deviation()
+            _mean, _std = stats_corr_matrix[:, 0], stats_corr_matrix[:, 1]
             prob_x_y = torch.distributions.normal.Normal(
                 _mean.unsqueeze(-1), _std.unsqueeze(-1)
             ).cdf(results_corr_matrix)
@@ -463,7 +436,7 @@ class Aligner(nn.Module):
             topK = n_topK - 1 - complement_topK
             particlesStar = particlesDataSet.get_particles_starstack(drop_rlnImageId=True)
 
-            parts_range = range(results_info_matrix.shape[0])
+            parts_range = np.arange(results_corr_matrix.shape[0])
 
             if predEulerDegs.shape[1] > 1:
                 colname2change = {"copyNumber": topK}
@@ -533,7 +506,7 @@ class Aligner(nn.Module):
                 f"Shift: {agst_mean:2.3f} +/- {agst_std:2.3f}\t{agst_median:2.3f} +/- {agst_iqr:2.3f} "
             )
 
-        del particlesDataSet, projs_cache, data_cache, pose_to_particleIdx
+        del particlesDataSet, pose_to_particleIdx
         gc.collect()
         torch.cuda.empty_cache()
         return finalParticlesStar

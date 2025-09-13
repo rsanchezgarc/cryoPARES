@@ -320,7 +320,7 @@ def _test2():
     so3_discretizer = SO3_discretizer(hp_order=5)
     idxs = so3_discretizer.eulerDegs_to_idx(eulersDeg)
     eulersDeg_disc = so3_discretizer.idx_to_eulerDegs(idxs)
-    from torchCryoAlign.metrics import euler_degs_diff
+    from .metrics import euler_degs_diff
     print(eulersDeg)
     print(eulersDeg_disc)
     print(euler_degs_diff(eulersDeg, eulersDeg_disc))

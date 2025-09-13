@@ -13,30 +13,19 @@ from torch.utils.data import DataLoader
 
 from cryoPARES.constants import RELION_EULER_CONVENTION
 from torch import nn
-from joblib import Parallel, delayed
-from more_itertools import chunked
-from torch_scatter import scatter_max, scatter_sum
-
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.geometry.convert_angles import euler_angles_to_matrix
 from cryoPARES.utils.reconstructionUtils import get_vol
 from .loggers import getWorkerLogger
 from .myProgressBar import myTqdm as tqdm
 
-from .tensorCache.lookAheadCache import LookAheadTensorCache
-from .dataUtils.dataCaches import create_particles_cache
 from .dataUtils.filterToResolution import low_pass_filter_fname
 
 from .dataUtils.dataTypes import IMAGEFNAME_MRCIMAGE, FNAME
 from starstack import ParticlesStarSet
-from .dataUtils.idxsToBatches import IdxsBatcher
 from .metrics import euler_degs_diff, shifst_angs_diff
-from .numbaUtils import (
-    init_int_to_intList_dict,
-    typed_dict_add_keyList_valList,
-)
+
 from .so3grid import SO3_discretizer
-from .torchUtils import OnlineStatsRecorder
 
 # Fourier-side ops and dataset
 from .fourierOperations import (
@@ -256,53 +245,7 @@ class Aligner(nn.Module):
             n_jobs=self.n_cpus,
             verbose=self.verbose,
         )
-
-        dataDict = particlesDataset.dataDict
-        pose_to_particleIdx = init_int_to_intList_dict()
-
-        threadLock = threading.Lock()
-
-        def preprocess_angles_batch(idxs):
-            batch_size = len(idxs)
-            eulerDegs = dataDict[idxs]["eulerDegs"].view(-1, 3).cpu()
-            eulerDegs_grid = self.get_so3_grid(eulerDegs)
-            poseIdxs = self.so3_discretizer.eulerDegs_to_idx(eulerDegs_grid).view(
-                batch_size, -1
-            )
-            poseIdxs = [poseIdxs[i, ...].unique(sorted=True) for i in range(poseIdxs.shape[0])]
-            _parts_idxs = [
-                np.ones(pIdxs.shape[-1], dtype=np.int64) * idxs[i]
-                for i, pIdxs in enumerate(poseIdxs)
-            ]
-            poseIdxs = np.concatenate(poseIdxs)
-            with threadLock:
-                typed_dict_add_keyList_valList(
-                    pose_to_particleIdx, poseIdxs, np.concatenate(_parts_idxs)
-                )
-            return poseIdxs.shape[0]
-
-        # Parallel angle pre-discretization/grouping
-        part_orientation_batch = min(
-            1 + (8 * batch_size // self.n_cpus), particlesDataset.n_partics
-        )
-        n_jobs = self.n_cpus
-        angles_idxs = Parallel(n_jobs=n_jobs, backend="threading", return_as="generator")(
-            delayed(preprocess_angles_batch)(batchIdxs)
-            for batchIdxs in chunked(
-                range(particlesDataset.n_partics), n=part_orientation_batch
-            )
-        )
-        n_items = 0
-        for n_i in tqdm(
-            angles_idxs,
-            total=particlesDataset.n_partics // part_orientation_batch
-            + bool(particlesDataset.n_partics % part_orientation_batch),
-            desc="Discretizing and grouping orientations",
-            disable=not self.verbose,
-        ):
-            n_items += n_i
-
-        return particlesDataset, pose_to_particleIdx, n_items
+        return particlesDataset
 
     @torch.inference_mode()
     def align_star(
@@ -313,7 +256,6 @@ class Aligner(nn.Module):
         particle_radius_angs=None,
         batch_size=256,
         device="cuda",
-        particles_gpu_cache_size=1024,
         fft_in_device=False,
     ) -> ParticlesStarSet:
         """
@@ -325,7 +267,7 @@ class Aligner(nn.Module):
                 starFnameOut
             ), f"Error, the starFnameOut {starFnameOut} already exists"
 
-        particlesDataSet, pose_to_particleIdx, n_items = self.preprocess_particles(
+        particlesDataSet = self.preprocess_particles(
             particles,
             data_rootdir,
             particle_radius_angs,
@@ -345,40 +287,6 @@ class Aligner(nn.Module):
 
         self.to(device)
         self.mainLogger.info(f"Total number of particles: {particlesDataSet.n_partics}")
-        self.mainLogger.info(
-            f"Total number of poses to explore: {len(pose_to_particleIdx.keys())}/{self.so3_discretizer.grid_size}"
-        )
-        # idxBatcher = IdxsBatcher(
-        #     self.so3_discretizer,
-        #     pose_to_particleIdx,
-        #     self.n_cpus,
-        #     sorting_method="idx_sorting",
-        #     verbose=self.verbose,
-        # )
-
-        # total_num_orientation_batches = n_items // batch_size + bool(n_items % batch_size)
-        # self.mainLogger.info(f"Total number of batches: {total_num_orientation_batches}")
-        #
-        # minimal_projs = self._compute_projections(torch.randn(1, 3))[0]
-        # renumbered_to_ori_poseIdxs = idxBatcher.renumbered_to_ori_poseIdxs
-        #
-        # class TensorCacheProjs(LookAheadTensorCache):
-        #     def compute_idxs(other, idxs):
-        #         degs = self.so3_discretizer.idx_to_eulerDegs(
-        #             renumbered_to_ori_poseIdxs[idxs]
-        #         )
-        #         return self._compute_projections(degs)[0]
-        #
-        # projs_cache = TensorCacheProjs(
-        #     cache_size=batch_size,
-        #     max_index=idxBatcher.maxindex,
-        #     tensor_shape=minimal_projs.shape[1:],
-        #     dtype=minimal_projs.dtype,
-        #     data_device=device,
-        # )
-        self.mainLogger.info("Projections cache initialized. Starting!!")
-
-        statsRecorder = OnlineStatsRecorder(particlesDataSet.n_partics, dtype=torch.float64)
         delta_so3 = self._get_so3_delta(device).T.contiguous()
         delta_so3_size = delta_so3.size(0)
         dl = DataLoader(particlesDataSet, batch_size=batch_size,
@@ -387,6 +295,7 @@ class Aligner(nn.Module):
         non_blocking = True
         for (partIdx, parts, ctfs, eulerDegs) in tqdm(dl,
                                                       desc="Aligning particles",disable=not self.verbose):
+            eulerDegs = eulerDegs.to(device, non_blocking=non_blocking)
             parts = parts.to(device, non_blocking=non_blocking)
             ctfs = ctfs.to(device, non_blocking=non_blocking)
             expanded_eulerDegs = delta_so3.unsqueeze(0) + eulerDegs.unsqueeze(1)
@@ -422,9 +331,12 @@ class Aligner(nn.Module):
 
         if delta_so3_size > 3:
             _mean, _std = stats_corr_matrix[:, 0], stats_corr_matrix[:, 1]
+            _small_std = _std <= 0
+            _std[_small_std] = 1
             prob_x_y = torch.distributions.normal.Normal(
                 _mean.unsqueeze(-1), _std.unsqueeze(-1)
             ).cdf(results_corr_matrix)
+            prob_x_y[_small_std] = 1
         elif delta_so3_size == 1:
             prob_x_y = torch.ones_like(results_corr_matrix)
         else:
@@ -506,46 +418,10 @@ class Aligner(nn.Module):
                 f"Shift: {agst_mean:2.3f} +/- {agst_std:2.3f}\t{agst_median:2.3f} +/- {agst_iqr:2.3f} "
             )
 
-        del particlesDataSet, pose_to_particleIdx
+        del particlesDataSet
         gc.collect()
         torch.cuda.empty_cache()
         return finalParticlesStar
-
-    def update_results_status(self, perImgCorr, pixelShiftsXY, results_corr_matrix, results_info_matrix,
-                              softmax_denominator,
-                              unique_flatten_img_idxs, local_img_idxs, renumbered_to_ori_poseIdxs, flatten_poses_idxs):
-        #TODO: This is not super efficient, but it is not the bottleneck
-
-        _denominator = scatter_sum(perImgCorr.double().exp(), local_img_idxs)
-        softmax_denominator[unique_flatten_img_idxs] += _denominator.cpu()  # This goes to +inf. We need normalized values.
-
-        prevCorr = results_corr_matrix[unique_flatten_img_idxs]
-        prevInfo = results_info_matrix[unique_flatten_img_idxs, ...]
-        for k in range(self.keep_top_k_values):
-            bestLocalCorrs, bestLocalImgIdxs = scatter_max(perImgCorr, local_img_idxs)
-            bestLocalpixelShiftsXY = pixelShiftsXY[bestLocalImgIdxs]
-            bestLocalCorrs = bestLocalCorrs.cpu()
-            bestLocalImgIdxs = bestLocalImgIdxs.cpu()
-            bestLocalpixelShiftsXY = bestLocalpixelShiftsXY.cpu()
-
-            bestLocalPoseIdx = renumbered_to_ori_poseIdxs[
-                flatten_poses_idxs[bestLocalImgIdxs]]
-
-            corrDiff = (bestLocalCorrs.unsqueeze(-1) - prevCorr)
-            replacebleMask = corrDiff > 0
-            corrDiffMask = torch.count_nonzero(replacebleMask,
-                                               -1).bool()  # Why bool? Beacause we will be indexing the dim=0 in prevCorr, with shape[1], and we only want to update the results if there is any positive case
-            replaceIdxs = (corrDiff + (~replacebleMask) * -1e7).argmax(-1)  # 1e7 is ~ inf, since we cannot use inf, that generates nan
-            replaceIdxs = replaceIdxs[corrDiffMask]  # This is to rule out rows that do not need to be updated
-            prevCorr[corrDiffMask, replaceIdxs] = bestLocalCorrs[corrDiffMask]
-
-            newInfo = torch.cat([bestLocalPoseIdx.unsqueeze(-1), bestLocalpixelShiftsXY], -1)
-            prevInfo[corrDiffMask, replaceIdxs, :] = newInfo[corrDiffMask, :]
-            perImgCorr[bestLocalImgIdxs] *= 0
-
-        results_corr_matrix[unique_flatten_img_idxs] = prevCorr
-        results_info_matrix[unique_flatten_img_idxs, ...] = prevInfo
-        return results_corr_matrix, results_info_matrix, softmax_denominator
 
     def _extract_ccor_max_unconstrained(self, corrs):
         pixelShiftsXY = torch.empty(corrs.shape[0], 2, device=corrs.device, dtype=torch.int64)
@@ -594,7 +470,6 @@ def align_star(
     filter_resolution_angst: Optional[float] = None,
     n_cpus_per_job: int = 1,
     batch_size: int = 1024,
-    cache_factor: float = 5.0,
     use_cuda: bool = True,
     verbose: bool = True,
     torch_matmul_precision: Literal["highest", "high", "medium"] = "high",
@@ -617,7 +492,6 @@ def align_star(
     :param filter_resolution_angst:
     :param n_cpus_per_job:
     :param batch_size:
-    :param cache_factor:
     :param use_cuda:
     :param verbose:
     :param torch_matmul_precision:
@@ -689,7 +563,6 @@ def align_star(
             data_rootdir=data_rootdir,
             batch_size=batch_size,
             particle_radius_angs=particle_radius_angs,
-            particles_gpu_cache_size=int(cache_factor * batch_size),
             device=device,
             fft_in_device=fft_in_cuda,
         )

@@ -380,7 +380,7 @@ class ProjectionMatcher(nn.Module):
             except AttributeError:
                 particlesStar = particlesDataSet.datasets[0].particles.copy()
                 try:
-                    confidence = particlesStar.particles_md[RELION_PRED_POSE_CONFIDENCE_NAME]
+                    confidence = torch.tensor(particlesStar.particles_md[RELION_PRED_POSE_CONFIDENCE_NAME], dtype=torch.float32)
                 except KeyError:
                     confidence = torch.ones(len(particlesStar.particles_md))
                 if "rlnImageId" in particlesStar.particles_md.columns:

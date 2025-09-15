@@ -109,9 +109,6 @@ def so3_near_identity_grid_cartesianprod(max_angle, n_angles,
         grid = grid.T.contiguous()
     return grid
 
-
-
-
 def _filter_duplicate_angles_in_grid(grid, degrees:bool, atol=None):
     """
 

@@ -23,10 +23,10 @@ def pick_hp_order(grid_resolution_degs):
             return i
     raise RuntimeError(f"Error, discretization required for {grid_resolution_degs} is beyond precision limit")
 
-cache.cache()
+@cache.cache()
 def s2_healpix_grid(hp_order, max_beta):
     """Returns healpix grid up to a max_beta
-
+    :param max_beta: Radians
     Alternative implementation:
             from escnn.group import so3_group
             so2grid = torch.stack([torch.as_tensor(x.to("ZYZ"), dtype=torch.float32).rad2deg() for x in so3_group(maximum_frequency=l_max).sphere_grid(N_side=2**2, type="healpix")])
@@ -39,7 +39,7 @@ def s2_healpix_grid(hp_order, max_beta):
     beta = torch.from_numpy(beta)
     return torch.stack((alpha, beta)).float()
 
-cache.cache()
+@cache.cache()
 def so3_healpix_grid_equiangular(hp_order: int = 3):
     """Returns healpix grid over so3 of equally spaced rotations
 
@@ -92,7 +92,7 @@ def so3_healpix_grid_equiangular(hp_order: int = 3):
 
 so3_healpix_grid = so3_healpix_grid_equiangular
 
-cache.cache() #TODO: This is not a great way of doing it
+@cache.cache()
 def so3_near_identity_grid_cartesianprod(max_angle, n_angles,
                                          transposed=True, degrees=False,
                                          remove_duplicates=True): #TODO: It is  better to use something like healpy rather than a cartesian product.
@@ -104,7 +104,7 @@ def so3_near_identity_grid_cartesianprod(max_angle, n_angles,
     angles_range = torch.linspace(-max_angle, max_angle, n_angles)
     grid = torch.cartesian_prod(angles_range, angles_range, angles_range)
     if remove_duplicates:
-        grid = _filter_duplicate_angles_in_grid(grid, degrees=degrees)
+        grid = _filter_duplicate_angles_in_grid(grid, degrees=degrees) #TODO: This seems working poorly
     if transposed:
         grid = grid.T.contiguous()
     return grid

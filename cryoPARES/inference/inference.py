@@ -196,7 +196,7 @@ class SingleInferencer:
             reference_map = self.reference_map
 
         if self.perform_localrefinement:
-            localRefiner = ProjectionMatcher(reference_vol=reference_map)
+            localRefiner = ProjectionMatcher(reference_vol=reference_map, keep_top_k_values=self.top_k)
         else:
             localRefiner = None
 
@@ -495,7 +495,6 @@ class SingleInferencer:
 
             batch_size = len(idd)
             end_idx = current_idx + batch_size
-
             result_arrays['eulerdegs'][current_idx:end_idx] = euler_degs.cpu()
             result_arrays['score'][current_idx:end_idx] = maxprobs.cpu()
             if pred_shiftsXYangs is None:

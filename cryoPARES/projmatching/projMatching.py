@@ -13,10 +13,12 @@ from torch.utils.data import DataLoader
 from cryoPARES.constants import RELION_EULER_CONVENTION
 from torch import nn
 from cryoPARES.configs.mainConfig import main_config
-from cryoPARES.geometry.convert_angles import euler_angles_to_matrix
+from cryoPARES.geometry.convert_angles import euler_angles_to_matrix, matrix_to_euler_angles
+from cryoPARES.geometry.grids import so3_near_identity_grid_cartesianprod
 from cryoPARES.utils.reconstructionUtils import get_vol
 from .loggers import getWorkerLogger
 from .myProgressBar import myTqdm as tqdm
+from joblib.externals.loky.backend import get_context
 
 from .dataUtils.filterToResolution import low_pass_filter_fname
 
@@ -31,13 +33,13 @@ from .fourierOperations import (
     phase_shift_dft_2d,
     compute_dft,
 )
-from .preprocessParticles import ParticlesFourierDataset
+from .preprocessParticles import ParticlesFourierDataset, _compute_one_batch_fft
 
 REPORT_ALIGNMENT_DISPLACEMENT = True
 def get_rotmat(degAngles, convention:str=RELION_EULER_CONVENTION, device="cpu"):
     return euler_angles_to_matrix(torch.deg2rad(degAngles), convention=convention).to(device)
 
-class Aligner(nn.Module):
+class ProjectionMatcher(nn.Module):
     """
     Single concrete aligner (Fourier pipeline).
     This class folds together the previous abstract base + Fourier subclass.
@@ -51,7 +53,7 @@ class Aligner(nn.Module):
         grid_step_degs: float | Tuple[float, float, float] = 2.0,
         max_resolution_A: Optional[float] = None,
         padding_factor: Optional[float] = 0.0,
-        keep_top_k_values: int = 2,
+        keep_top_k_values: int = 1,
         n_cpus: int = 1,
         verbose: bool = True,
         correct_ctf: bool = True,
@@ -81,7 +83,7 @@ class Aligner(nn.Module):
         Build a cached SO(3) delta grid (degrees) around (0,0,0) using
         self.grid_distance_degs and self.grid_step_degs.
         """
-        if not hasattr(self, "_so3_delta"):
+        if not hasattr(self, "_so3_delta") or self._so3_delta.device != device:
             if not isinstance(self.grid_distance_degs, Iterable):
                 grid_distance_degs = (
                     self.grid_distance_degs,
@@ -100,13 +102,20 @@ class Aligner(nn.Module):
             else:
                 grid_step_degs = self.grid_step_degs
 
-            get_grid = lambda dist, resol: torch.linspace(
-                -dist, dist, int(1 + 2 * (dist / resol)), device=device
-            )
-            a = get_grid(grid_distance_degs[0], grid_step_degs[0])
-            b = get_grid(grid_distance_degs[1], grid_step_degs[1])
-            c = get_grid(grid_distance_degs[2], grid_step_degs[2])
-            self._so3_delta = torch.cartesian_prod(a, b, c).T
+            # get_grid = lambda dist, resol: torch.linspace(
+            #     -dist, dist, int(1 + 2 * (dist / resol)), device=device
+            # )
+            # a = get_grid(grid_distance_degs[0], grid_step_degs[0])
+            # b = get_grid(grid_distance_degs[1], grid_step_degs[1])
+            # c = get_grid(grid_distance_degs[2], grid_step_degs[2])
+            # self._so3_delta = torch.cartesian_prod(a, b, c)
+
+            n_angles = math.ceil(self.grid_distance_degs * 2 / self.grid_step_degs)
+            n_angles = n_angles if n_angles % 2 == 1 else n_angles + 1  # We always want an odd number
+            self._so3_delta = so3_near_identity_grid_cartesianprod(self.grid_distance_degs, n_angles,
+                                                             transposed=False, degrees=True,
+                                                             remove_duplicates=False).to(device)
+            #TODO: Remove duplicates= True makes the whole thing broken
         return self._so3_delta
 
     # ----------------------- Fourier-specific core -----------------------
@@ -138,7 +147,10 @@ class Aligner(nn.Module):
 
         self.vol_shape = vol_shape
         self.image_shape = vol_shape[-2:]
-
+        assert len(self.vol_shape) == 3
+        assert len(set(self.vol_shape)) == 1, "Only cubic volumes are allowed"
+        assert self.image_shape[-2] % 2 == 0, "Only even boxsizes are allowed"
+        self.half_particle_size = 0.5 * self.image_shape[-2]
 
     def projectF(self, rotMats: torch.Tensor) -> torch.Tensor:
         return extract_central_slices_rfft(
@@ -177,13 +189,13 @@ class Aligner(nn.Module):
         b, options, l0, l1 = corrs.shape
         maxcorr, maxcorrIdxs =  self._extract_ccor_max(corrs.reshape(-1, *corrs.shape[-2:]),
                                       max_shift_fraction=self.max_shift_fraction)
-
+        del corrs
         return maxcorr.reshape(b, options), maxcorrIdxs.reshape(b, options, 2)
 
     # ----------------------- Shared helpers originally in base -----------------------
 
     def _compute_projections(self, so3_degs_grid: torch.Tensor):
-        so3_degs_grid = so3_degs_grid.to(self.reference_vol.device, non_blocking=True)
+        so3_degs_grid = so3_degs_grid.to(self.reference_vol.device)
         rotMats = get_rotmat(so3_degs_grid, device=so3_degs_grid.device)
         projs = self.projectF(rotMats)
         return projs, so3_degs_grid
@@ -234,6 +246,36 @@ class Aligner(nn.Module):
         )
         return particlesDataset
 
+    def _fourier_forward(self, fparts, ctfs, eulerDegs):
+        expanded_eulerDegs = self._get_so3_delta(eulerDegs.device).unsqueeze(0) + eulerDegs.unsqueeze(1)
+        bsize = expanded_eulerDegs.size(0)
+        expanded_eulerDegs = expanded_eulerDegs.reshape(bsize, -1, 3)  # unrolling all the input angles into one
+        # TODO: Remove duplicate angles if n_input_angles > 1
+        projs = self._compute_projections(expanded_eulerDegs.reshape(-1, 3))[0]
+
+        if self.correct_ctf:
+            projs = self._apply_ctfF(projs.reshape(bsize, -1, *projs.shape[-2:]), ctfs.unsqueeze(1))
+
+        perImgCorr, pixelShiftsXY = self.correlateF(fparts.unsqueeze(1), projs)
+
+        maxCorrs, maxCorrsIdxs = perImgCorr.topk(self.keep_top_k_values, sorted=True, largest=True, dim=-1)
+
+        batch_idxs_range = torch.arange(pixelShiftsXY.size(0)).unsqueeze(1)
+        pixelShiftsXY = pixelShiftsXY[batch_idxs_range, maxCorrsIdxs]
+        predEulerDegs = expanded_eulerDegs[batch_idxs_range, maxCorrsIdxs]
+        mean_corr = perImgCorr.mean(-1, keepdims=True)
+        std_corr = perImgCorr.std(-1, keepdims=True)
+        comparedWeight = torch.distributions.Normal(mean_corr, std_corr + 1e-6).cdf(maxCorrs)  # 1-P(I_i > All_images)
+        return maxCorrs, predEulerDegs, pixelShiftsXY, comparedWeight
+
+    def forward(self, imgs, ctfs, rotmats):
+        fparts = _compute_one_batch_fft(imgs)
+        eulerDegs = torch.rad2deg(matrix_to_euler_angles(rotmats, RELION_EULER_CONVENTION))
+        maxCorrs, predEulerDegs, pixelShiftsXY, comparedWeight = self._fourier_forward(fparts, ctfs, eulerDegs)
+        predShiftsAngsXY = -(pixelShiftsXY.float() - self.half_particle_size) * self.vol_voxel_size
+        predRotMats = euler_angles_to_matrix(torch.deg2rad(predEulerDegs), RELION_EULER_CONVENTION)
+        return maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight
+
     @torch.inference_mode()
     def align_star(
         self,
@@ -268,77 +310,52 @@ class Aligner(nn.Module):
         results_corr_matrix = torch.zeros(n_particles, self.keep_top_k_values)
         results_shifts_matrix = torch.zeros(n_particles, self.keep_top_k_values, 2, dtype=torch.int64)
         results_eulerDegs_matrix = torch.zeros(n_particles, self.keep_top_k_values, 3)
-        stats_corr_matrix = torch.zeros(n_particles, 2)
+        # stats_corr_matrix = torch.zeros(n_particles, 2)
+        stats_corr_matrix = torch.zeros(n_particles, self.keep_top_k_values)
 
         particlesDataSet.device = "cpu"
 
         self.to(device)
         self.mainLogger.info(f"Total number of particles: {particlesDataSet.n_partics}")
 
-        # delta_so3 = self._get_so3_delta(device).T.contiguous()
-        from cryoPARES.geometry.grids import so3_near_identity_grid_cartesianprod
-        n_angles = math.ceil(self.grid_distance_degs *2 / self.grid_step_degs)
-        n_angles = n_angles if n_angles % 2 == 1 else n_angles + 1  # We always want an odd number
-        delta_so3 = so3_near_identity_grid_cartesianprod(self.grid_distance_degs, n_angles,
-                                                          transposed=False, degrees=True,
-                                                          remove_duplicates=True).to(device)
-
-        delta_so3_size = delta_so3.size(0)
 
 
         dl = DataLoader(particlesDataSet, batch_size=batch_size,
                         num_workers=self.n_cpus, shuffle=False, pin_memory=True,
-                        multiprocessing_context='fork')
+                        multiprocessing_context='fork') #get_context('loky')
         non_blocking = True
-        for (partIdx, parts, ctfs, eulerDegs) in tqdm(dl,
-                                                      desc="Aligning particles",disable=not self.verbose):
+        for (partIdx, fparts, ctfs, eulerDegs) in tqdm(dl,
+                                                       desc="Aligning particles", disable=not self.verbose):
             eulerDegs = eulerDegs.to(device, non_blocking=non_blocking)
-            parts = parts.to(device, non_blocking=non_blocking)
+            fparts = fparts.to(device, non_blocking=non_blocking)
             ctfs = ctfs.to(device, non_blocking=non_blocking)
-            expanded_eulerDegs = delta_so3.unsqueeze(0) + eulerDegs.unsqueeze(1)
-            bsize = expanded_eulerDegs.size(0)
-            n_input_angles = expanded_eulerDegs.size(1)
-            expanded_eulerDegs = expanded_eulerDegs.reshape(bsize, -1, 3) #unrolling all the input angles into one
-            nrots = expanded_eulerDegs.size(1)
-            #TODO: Remove duplicate angles if n_input_angles > 1
 
-            projs = self._compute_projections(expanded_eulerDegs.reshape(-1, 3))[0]
+            maxCorrs, predEulerDegs, pixelShiftsXY, comparedWeight = self._fourier_forward(fparts, ctfs, eulerDegs)
 
-            if self.correct_ctf:
-                projs = self._apply_ctfF(projs.reshape(bsize, -1, *projs.shape[-2:]), ctfs.unsqueeze(1))
-
-            perImgCorr, pixelShiftsXY = self.correlateF(parts.unsqueeze(1), projs)
-
-            maxCorrs, maxCorrsIdxs = perImgCorr.topk(self.keep_top_k_values, sorted=True, largest=True, dim=-1)
-            maxCorrsIdxs = maxCorrsIdxs.to("cpu", non_blocking=non_blocking)
-            results_corr_matrix[partIdx, :] = maxCorrs.to("cpu", non_blocking=non_blocking)
-            batch_idxs_range = torch.arange(pixelShiftsXY.size(0)).unsqueeze(1)
-            results_shifts_matrix[partIdx, :] = pixelShiftsXY[batch_idxs_range,
-                                                              maxCorrsIdxs].to("cpu", non_blocking=non_blocking)
-            results_eulerDegs_matrix[partIdx, :] = expanded_eulerDegs[batch_idxs_range,
-                                                          maxCorrsIdxs].to("cpu", non_blocking=non_blocking)
-            stats_corr_matrix[partIdx, 0] = perImgCorr.mean(-1).to("cpu", non_blocking=non_blocking)
-            stats_corr_matrix[partIdx, 1] = perImgCorr.std(-1).to("cpu", non_blocking=non_blocking)
-
-
+            results_corr_matrix[partIdx, :] = maxCorrs.detach().to("cpu", non_blocking=False)
+            results_shifts_matrix[partIdx, :] = pixelShiftsXY.detach().to("cpu", non_blocking=False)
+            results_eulerDegs_matrix[partIdx, :] = predEulerDegs.detach().to("cpu", non_blocking=False)
+            stats_corr_matrix[partIdx, :] = comparedWeight.detach().to("cpu", non_blocking=False)
+            print()
 
         predEulerDegs = results_eulerDegs_matrix
 
         predShiftsAngs = -(results_shifts_matrix.float() - half_particle_size) * pixel_size
 
-        if delta_so3_size > 3:
-            _mean, _std = stats_corr_matrix[:, 0], stats_corr_matrix[:, 1]
-            _small_std = _std <= 0
-            _std[_small_std] = 1
-            prob_x_y = torch.distributions.normal.Normal(
-                _mean.unsqueeze(-1), _std.unsqueeze(-1)
-            ).cdf(results_corr_matrix)
-            prob_x_y[_small_std] = 1
-        elif delta_so3_size == 1:
-            prob_x_y = torch.ones_like(results_corr_matrix)
-        else:
-            raise NotImplementedError("I don't know how to compute p(x|y) with very little examples")
-
+        # delta_so3_size = self._get_so3_delta(device).size(0)
+        # if delta_so3_size > 3:
+        #     _mean, _std = stats_corr_matrix[:, 0], stats_corr_matrix[:, 1]
+        #     _small_std = _std <= 0
+        #     _std[_small_std] = 1
+        #     prob_x_y = torch.distributions.normal.Normal(
+        #         _mean.unsqueeze(-1), _std.unsqueeze(-1)
+        #     ).cdf(results_corr_matrix)
+        #     prob_x_y[_small_std] = 1
+        # elif delta_so3_size == 1:
+        #     prob_x_y = torch.ones_like(results_corr_matrix)
+        # else:
+        #     raise NotImplementedError("I don't know how to compute p(x|y) with very little examples")
+        prob_x_y = stats_corr_matrix
         n_topK = predEulerDegs.shape[1]
         finalParticlesStar = None
         for complement_topK in range(n_topK):
@@ -538,7 +555,7 @@ def align_star(
             reference_vol = new_reference_vol
 
         # Build aligner and run
-        aligner = Aligner(
+        aligner = ProjectionMatcher(
             reference_vol=reference_vol,
             grid_distance_degs=grid_distance_degs,
             grid_step_degs=grid_step_degs,

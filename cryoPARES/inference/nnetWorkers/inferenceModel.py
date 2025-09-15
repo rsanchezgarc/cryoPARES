@@ -60,7 +60,7 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
             passing_mask = (norm_nn_score > self.normalizedScore_thr).squeeze()
             if not passing_mask.any():
                 return None
-            valid_indices = torch.where(passing_mask)[0].to("cpu", non_blocking=True)
+            valid_indices = torch.where(passing_mask)[0].to("cpu", non_blocking=False)
             #fimg, ctf, rotmats
             batch_to_add = {
                 'imgs': fullSizeImg[passing_mask],

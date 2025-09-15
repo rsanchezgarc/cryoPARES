@@ -10,7 +10,7 @@ import starfile
 import torch
 from torch.utils.data import DataLoader
 from cryoPARES.constants import (RELION_EULER_CONVENTION, BATCH_POSE_NAME, RELION_PRED_POSE_CONFIDENCE_NAME,
-                                 BATCH_ORI_IMAGE_NAME, BATCH_ORI_CTF_NAME)
+                                 BATCH_ORI_IMAGE_NAME, BATCH_ORI_CTF_NAME, RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES)
 from torch import nn
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.geometry.convert_angles import euler_angles_to_matrix, matrix_to_euler_angles
@@ -336,7 +336,31 @@ class ProjectionMatcher(nn.Module):
         self.to(device)
         self.mainLogger.info(f"Total number of particles: {n_particles}")
 
+        try:
+            particlesStar = particlesDataSet.get_particles_starstack(drop_rlnImageId=True)
+            confidence = particlesDataSet.dataDict["confidences"].sum(-1)
+        except AttributeError:
+            particlesStar = particlesDataSet.datasets[0].particles.copy()
+            try:
+                confidence = torch.tensor(particlesStar.particles_md[RELION_PRED_POSE_CONFIDENCE_NAME],
+                                          dtype=torch.float32)
+            except KeyError:
+                confidence = torch.ones(len(particlesStar.particles_md))
+        if "rlnImageId" in particlesStar.particles_md.columns:
+            particlesStar.particles_md.drop("rlnImageId", axis=1)
 
+        parts_range = np.arange(results_corr_matrix.shape[0])
+        if REPORT_ALIGNMENT_DISPLACEMENT:
+            try:
+                ori_eulers = particlesDataSet.dataDict.get("eulerDegs")
+            except AttributeError:
+                ori_eulers = torch.tensor(particlesStar.particles_md[RELION_ANGLES_NAMES].values,
+                                          dtype=torch.float32).unsqueeze(-2)
+            try:
+                ori_shifts = particlesDataSet.dataDict.get("shiftsAngs")
+            except AttributeError:
+                ori_shifts = torch.tensor(particlesStar.particles_md[RELION_SHIFTS_NAMES].values,
+                                          dtype=torch.float32).unsqueeze(-2)
 
         dl = DataLoader(particlesDataSet, batch_size=batch_size,
                         num_workers=self.n_cpus, shuffle=False, pin_memory=True,
@@ -372,27 +396,14 @@ class ProjectionMatcher(nn.Module):
         prob_x_y = stats_corr_matrix
         n_topK = predEulerDegs.shape[1]
         finalParticlesStar = None
+
+
         for complement_topK in range(n_topK):
             topK = n_topK - 1 - complement_topK
-            try:
-                particlesStar = particlesDataSet.get_particles_starstack(drop_rlnImageId=True)
-                confidence = particlesDataSet.dataDict["confidences"].sum(-1)
-            except AttributeError:
-                particlesStar = particlesDataSet.datasets[0].particles.copy()
-                try:
-                    confidence = torch.tensor(particlesStar.particles_md[RELION_PRED_POSE_CONFIDENCE_NAME], dtype=torch.float32)
-                except KeyError:
-                    confidence = torch.ones(len(particlesStar.particles_md))
-                if "rlnImageId" in particlesStar.particles_md.columns:
-                    particlesStar.particles_md.drop("rlnImageId", axis=1)
-
-            parts_range = np.arange(results_corr_matrix.shape[0])
 
             if predEulerDegs.shape[1] > 1:
                 colname2change = {"copyNumber": topK}
                 particlesStar.updateMd(None, None, colname2change)
-
-
             particlesStar.updateMd(idxs=parts_range, colname2change={"previousConfidenceScore": confidence.numpy()})
 
             confidence *= prob_x_y[:, topK]
@@ -419,12 +430,8 @@ class ProjectionMatcher(nn.Module):
             self.mainLogger.info(f"particles were saved at {starFnameOut}")
 
         if REPORT_ALIGNMENT_DISPLACEMENT:
-            ori_eulers = particlesDataSet.dataDict.get("eulerDegs")[
-                range(predEulerDegs.shape[0]), ...
-            ]
-            ori_shifts = particlesDataSet.dataDict.get("shiftsAngs")[
-                range(predEulerDegs.shape[0]), ...
-            ]
+            ori_eulers = ori_eulers[range(predEulerDegs.shape[0]), ...]
+            ori_shifts = ori_shifts[range(predEulerDegs.shape[0]), ...]
             best_value = float("inf")
             for i in range(ori_eulers.shape[1]):
                 for j in range(predEulerDegs.shape[1]):

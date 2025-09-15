@@ -1,7 +1,6 @@
 import gc
 import os
 import tempfile
-import threading
 import math
 from functools import cached_property, lru_cache
 from typing import Tuple, Iterable, Optional, Literal
@@ -24,8 +23,6 @@ from .dataUtils.filterToResolution import low_pass_filter_fname
 from .dataUtils.dataTypes import IMAGEFNAME_MRCIMAGE, FNAME
 from starstack import ParticlesStarSet
 from .metrics import euler_degs_diff, shifst_angs_diff
-
-from .so3grid import SO3_discretizer
 
 # Fourier-side ops and dataset
 from .fourierOperations import (
@@ -68,9 +65,6 @@ class Aligner(nn.Module):
         self.max_shift_fraction = main_config.projmatching.max_shift_fraction
 
         self._store_reference_vol(reference_vol, pixel_size)
-        self.so3_discretizer = SO3_discretizer(
-            SO3_discretizer.pick_hp_order(self.grid_step_degs), verbose=verbose
-        )
         self.n_cpus = n_cpus if n_cpus > 0 else 1
         self.verbose = verbose
         self.correct_ctf = correct_ctf
@@ -114,13 +108,6 @@ class Aligner(nn.Module):
             c = get_grid(grid_distance_degs[2], grid_step_degs[2])
             self._so3_delta = torch.cartesian_prod(a, b, c).T
         return self._so3_delta
-
-    def get_so3_grid(self, eulers_degs: torch.Tensor) -> torch.Tensor:
-        """
-        Expand a center Euler (Bx3 degs) to a grid (BxKx3) over SO(3).
-        """
-        delta = self._get_so3_delta(eulers_degs.device)
-        return (eulers_degs[..., None] + delta[None, ...]).permute(0, 2, 1)
 
     # ----------------------- Fourier-specific core -----------------------
 
@@ -287,8 +274,18 @@ class Aligner(nn.Module):
 
         self.to(device)
         self.mainLogger.info(f"Total number of particles: {particlesDataSet.n_partics}")
-        delta_so3 = self._get_so3_delta(device).T.contiguous()
+
+        # delta_so3 = self._get_so3_delta(device).T.contiguous()
+        from cryoPARES.geometry.grids import so3_near_identity_grid_cartesianprod
+        n_angles = math.ceil(self.grid_distance_degs *2 / self.grid_step_degs)
+        n_angles = n_angles if n_angles % 2 == 1 else n_angles + 1  # We always want an odd number
+        delta_so3 = so3_near_identity_grid_cartesianprod(self.grid_distance_degs, n_angles,
+                                                          transposed=False, degrees=True,
+                                                          remove_duplicates=True).to(device)
+
         delta_so3_size = delta_so3.size(0)
+
+
         dl = DataLoader(particlesDataSet, batch_size=batch_size,
                         num_workers=self.n_cpus, shuffle=False, pin_memory=True,
                         multiprocessing_context='fork')
@@ -574,3 +571,18 @@ if __name__ == "__main__":
     print(' '.join(shlex.quote(arg) for arg in sys.argv[1:]))
     from argParseFromDoc import parse_function_and_call
     parse_function_and_call(align_star)
+
+"""
+
+--reference_vol /home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles_reconstruct.mrc 
+--star_fname ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles.star 
+--particles_dir ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/
+--out_fname /tmp/pruebaCryoparesProjMatch.star
+--n_first_particles 100
+--grid_distance_degs 15
+--grid_step_degs 5
+--filter_resolution_angst 6
+--batch_size 2
+
+# --grid_distance_degs 15 --grid_step_degs 5 ==> Grid goes from -15 to + 15
+"""

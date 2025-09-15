@@ -7,12 +7,12 @@ from functools import lru_cache
 
 import numpy as np
 import torch
+from cryoPARES.constants import RELION_IMAGE_FNAME
 from joblib.externals.loky.backend import get_context
 from tensordict import TensorDict
 from torch.utils.data import Dataset
 
 from libtilt.ctf.ctf_2d import calculate_ctf_cached
-from .dataUtils.starUtils import _get_repeated_image_idxs
 from .loggers import getWorkerLogger
 from .myProgressBar import myTqdm as tqdm
 
@@ -376,6 +376,15 @@ class TorchParticlesForFftDataset(torch.utils.data.Dataset):
         confs = self._confidences[idxs]
         return torch.as_tensor(item), img, (anglesDegs, xyShiftAngs, confs), ctf_params
 
+def _get_repeated_image_idxs(df):
+
+    #Deal with duplicate particles, like symmetry expanded ones
+    duplicates = df.reset_index(drop=True).groupby(RELION_IMAGE_FNAME).groups
+    repeated_indices = [list(indices) for name, indices in duplicates.items()]
+    n_copies = set([len(x) for x in repeated_indices])
+    assert len(n_copies) == 1, f"Error, different number of duplicated inputs {n_copies}"
+    n_duplication = n_copies.pop()
+    return repeated_indices, n_duplication
 
 COMPILE = False #TODO: move this to config
 if COMPILE:

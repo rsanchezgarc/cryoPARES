@@ -93,7 +93,9 @@ def so3_healpix_grid_equiangular(hp_order: int = 3):
 so3_healpix_grid = so3_healpix_grid_equiangular
 
 cache.cache() #TODO: This is not a great way of doing it
-def so3_near_identity_grid_cartesianprod(max_angle, n_angles, transposed=True, degrees=False): #TODO: It is probably better to use something like healpy rather than a cartesian product.
+def so3_near_identity_grid_cartesianprod(max_angle, n_angles,
+                                         transposed=True, degrees=False,
+                                         remove_duplicates=True): #TODO: It is  better to use something like healpy rather than a cartesian product.
     """Spatial grid over SO3 used to parametrize localized filter
 
     :return: a local grid of SO(3) points
@@ -101,8 +103,8 @@ def so3_near_identity_grid_cartesianprod(max_angle, n_angles, transposed=True, d
 
     angles_range = torch.linspace(-max_angle, max_angle, n_angles)
     grid = torch.cartesian_prod(angles_range, angles_range, angles_range)
-
-    grid = _filter_duplicate_angles_in_grid(grid, degrees=degrees) #TODO: This breaks at some angles
+    if remove_duplicates:
+        grid = _filter_duplicate_angles_in_grid(grid, degrees=degrees)
     if transposed:
         grid = grid.T.contiguous()
     return grid

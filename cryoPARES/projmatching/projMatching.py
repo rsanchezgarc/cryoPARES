@@ -342,7 +342,7 @@ class ProjectionMatcher(nn.Module):
         except AttributeError:
             particlesStar = particlesDataSet.datasets[0].particles.copy()
             try:
-                confidence = torch.tensor(particlesStar.particles_md.loc[:,RELION_PRED_POSE_CONFIDENCE_NAME],
+                confidence = torch.tensor(particlesStar.particles_md.loc[:,RELION_PRED_POSE_CONFIDENCE_NAME].values,
                                           dtype=torch.float32)
             except KeyError:
                 confidence = torch.ones(len(particlesStar.particles_md))
@@ -354,13 +354,19 @@ class ProjectionMatcher(nn.Module):
             try:
                 ori_eulers = particlesDataSet.dataDict.get("eulerDegs")
             except AttributeError:
-                ori_eulers = torch.tensor(particlesStar.particles_md.loc[:,RELION_ANGLES_NAMES].values,
-                                          dtype=torch.float32).unsqueeze(-2)
+                try:
+                    ori_eulers = torch.tensor(particlesStar.particles_md.loc[:,RELION_ANGLES_NAMES].values,
+                                              dtype=torch.float32).unsqueeze(-2)
+                except KeyError:
+                    ori_eulers = torch.ones(len(particlesStar.particles_md), 3)
             try:
                 ori_shifts = particlesDataSet.dataDict.get("shiftsAngs")
             except AttributeError:
-                ori_shifts = torch.tensor(particlesStar.particles_md.loc[:,RELION_SHIFTS_NAMES].values,
-                                          dtype=torch.float32).unsqueeze(-2)
+                try:
+                    ori_shifts = torch.tensor(particlesStar.particles_md.loc[:,RELION_SHIFTS_NAMES].values,
+                                              dtype=torch.float32).unsqueeze(-2)
+                except KeyError:
+                    ori_shifts = torch.ones(len(particlesStar.particles_md), 2)
 
         dl = DataLoader(particlesDataSet, batch_size=batch_size,
                         num_workers=self.n_cpus, shuffle=False, pin_memory=True,

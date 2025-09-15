@@ -71,7 +71,7 @@ class ParticlesDataset(Dataset, ABC):
         elif perImg_normalization == "noiseStats":
             self._normalize = self._normalizeNoiseStats
         elif perImg_normalization == "subtractMean":
-            self._normalize = self._normalizeSubtractMean
+            self._normalize = self.confidences_normalizeSubtractMean
         else:
             ValueError(f"Error, perImg_normalization {perImg_normalization} wrong option")
 

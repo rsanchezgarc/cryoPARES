@@ -9,8 +9,8 @@ import numpy as np
 import starfile
 import torch
 from torch.utils.data import DataLoader
-
-from cryoPARES.constants import RELION_EULER_CONVENTION
+from cryoPARES.constants import (RELION_EULER_CONVENTION, BATCH_POSE_NAME, RELION_PRED_POSE_CONFIDENCE_NAME,
+                                 BATCH_ORI_IMAGE_NAME, BATCH_ORI_CTF_NAME)
 from torch import nn
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.geometry.convert_angles import euler_angles_to_matrix, matrix_to_euler_angles
@@ -232,19 +232,34 @@ class ProjectionMatcher(nn.Module):
         assert np.isclose(particle_shape, self.ori_image_shape).all(), (
             "Error, particles and volume have different number of pixels"
         )
+        # particlesDataset = ParticlesFourierDataset(
+        #     particlesSet,
+        #     mmap_dirname=None,
+        #     particle_radius_angs=particle_radius_angs,
+        #     pad_length=self.pad_length,
+        #     device=device,
+        #     batch_size=3 * batch_size,
+        #     n_jobs=self.n_cpus,
+        #     verbose=self.verbose,
+        # )
+        # return particlesDataset
 
-        # NOTE: Directly use the Fourier dataset here; no class attribute indirection.
-        particlesDataset = ParticlesFourierDataset(
-            particlesSet,
-            mmap_dirname=None,
-            particle_radius_angs=particle_radius_angs,
-            pad_length=self.pad_length,
-            device=device,
-            batch_size=3 * batch_size,
-            n_jobs=self.n_cpus,
-            verbose=self.verbose,
-        )
-        return particlesDataset
+        from cryoPARES.datamanager.datamanager import DataManager
+        dm = DataManager(particles,
+                     symmetry="C1",
+                     particles_dir=data_rootdir,
+                     halfset=None,
+                     batch_size=batch_size,
+                     save_train_val_partition_dir=None,
+                     is_global_zero=True,
+                     num_augmented_copies_per_batch=1,
+                     num_data_workers = self.n_cpus,
+                     return_ori_imagen = True,
+                     subset_idxs=None
+                     )
+
+        ds = dm.create_dataset(None)
+        return ds
 
     def _fourier_forward(self, fparts, ctfs, eulerDegs):
         expanded_eulerDegs = self._get_so3_delta(eulerDegs.device).unsqueeze(0) + eulerDegs.unsqueeze(1)
@@ -303,7 +318,10 @@ class ProjectionMatcher(nn.Module):
             batch_size,
             device if fft_in_device else "cpu",
         )
-        pixel_size = particlesDataSet.sampling_rate
+        try:
+            pixel_size = particlesDataSet.sampling_rate
+        except AttributeError:
+            pixel_size = particlesDataSet.datasets[0].sampling_rate
         half_particle_size = self.image_shape[-1] / 2
         n_particles = len(particlesDataSet)
 
@@ -316,7 +334,7 @@ class ProjectionMatcher(nn.Module):
         particlesDataSet.device = "cpu"
 
         self.to(device)
-        self.mainLogger.info(f"Total number of particles: {particlesDataSet.n_partics}")
+        self.mainLogger.info(f"Total number of particles: {n_particles}")
 
 
 
@@ -324,12 +342,23 @@ class ProjectionMatcher(nn.Module):
                         num_workers=self.n_cpus, shuffle=False, pin_memory=True,
                         multiprocessing_context='fork') #get_context('loky')
         non_blocking = True
-        for (partIdx, fparts, ctfs, eulerDegs) in tqdm(dl,
-                                                       desc="Aligning particles", disable=not self.verbose):
-            eulerDegs = eulerDegs.to(device, non_blocking=non_blocking)
-            fparts = fparts.to(device, non_blocking=non_blocking)
-            ctfs = ctfs.to(device, non_blocking=non_blocking)
+        _partIdx = 0
+        for batch in tqdm(dl, desc="Aligning particles", disable=not self.verbose):
 
+            # (partIdx, fparts, ctfs, eulerDegs) = batch
+            # eulerDegs = eulerDegs.to(device, non_blocking=non_blocking)
+            # fparts = fparts.to(device, non_blocking=non_blocking)
+            # ctfs = ctfs.to(device, non_blocking=non_blocking)
+            # maxCorrs, predEulerDegs, pixelShiftsXY, comparedWeight = self._fourier_forward(fparts, ctfs, eulerDegs)
+
+            n_items = len(batch[BATCH_ORI_IMAGE_NAME])
+            partIdx = torch.arange(_partIdx, _partIdx + n_items); _partIdx += n_items
+            rotmats = batch[BATCH_POSE_NAME][0].to(device, non_blocking=non_blocking)
+            parts = batch[BATCH_ORI_IMAGE_NAME].to(device, non_blocking=non_blocking)
+            ctfs = batch[BATCH_ORI_CTF_NAME].to(device, non_blocking=non_blocking)
+
+            fparts = _compute_one_batch_fft(parts)
+            eulerDegs = torch.rad2deg(matrix_to_euler_angles(rotmats, RELION_EULER_CONVENTION))
             maxCorrs, predEulerDegs, pixelShiftsXY, comparedWeight = self._fourier_forward(fparts, ctfs, eulerDegs)
 
             results_corr_matrix[partIdx, :] = maxCorrs.detach().cpu()
@@ -338,28 +367,24 @@ class ProjectionMatcher(nn.Module):
             stats_corr_matrix[partIdx, :] = comparedWeight.detach().cpu()
 
         predEulerDegs = results_eulerDegs_matrix
-
         predShiftsAngs = -(results_shifts_matrix.float() - half_particle_size) * pixel_size
 
-        # delta_so3_size = self._get_so3_delta(device).size(0)
-        # if delta_so3_size > 3:
-        #     _mean, _std = stats_corr_matrix[:, 0], stats_corr_matrix[:, 1]
-        #     _small_std = _std <= 0
-        #     _std[_small_std] = 1
-        #     prob_x_y = torch.distributions.normal.Normal(
-        #         _mean.unsqueeze(-1), _std.unsqueeze(-1)
-        #     ).cdf(results_corr_matrix)
-        #     prob_x_y[_small_std] = 1
-        # elif delta_so3_size == 1:
-        #     prob_x_y = torch.ones_like(results_corr_matrix)
-        # else:
-        #     raise NotImplementedError("I don't know how to compute p(x|y) with very little examples")
         prob_x_y = stats_corr_matrix
         n_topK = predEulerDegs.shape[1]
         finalParticlesStar = None
         for complement_topK in range(n_topK):
             topK = n_topK - 1 - complement_topK
-            particlesStar = particlesDataSet.get_particles_starstack(drop_rlnImageId=True)
+            try:
+                particlesStar = particlesDataSet.get_particles_starstack(drop_rlnImageId=True)
+                confidence = particlesDataSet.dataDict["confidences"].sum(-1)
+            except AttributeError:
+                particlesStar = particlesDataSet.datasets[0].particles.copy()
+                try:
+                    confidence = particlesStar.particles_md[RELION_PRED_POSE_CONFIDENCE_NAME]
+                except KeyError:
+                    confidence = torch.ones(len(particlesStar.particles_md))
+                if "rlnImageId" in particlesStar.particles_md.columns:
+                    particlesStar.particles_md.drop("rlnImageId", axis=1)
 
             parts_range = np.arange(results_corr_matrix.shape[0])
 
@@ -367,7 +392,7 @@ class ProjectionMatcher(nn.Module):
                 colname2change = {"copyNumber": topK}
                 particlesStar.updateMd(None, None, colname2change)
 
-            confidence = particlesDataSet.dataDict["confidences"].sum(-1)
+
             particlesStar.updateMd(idxs=parts_range, colname2change={"previousConfidenceScore": confidence.numpy()})
 
             confidence *= prob_x_y[:, topK]

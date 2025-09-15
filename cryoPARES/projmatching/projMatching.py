@@ -332,11 +332,10 @@ class ProjectionMatcher(nn.Module):
 
             maxCorrs, predEulerDegs, pixelShiftsXY, comparedWeight = self._fourier_forward(fparts, ctfs, eulerDegs)
 
-            results_corr_matrix[partIdx, :] = maxCorrs.detach().to("cpu", non_blocking=False)
-            results_shifts_matrix[partIdx, :] = pixelShiftsXY.detach().to("cpu", non_blocking=False)
-            results_eulerDegs_matrix[partIdx, :] = predEulerDegs.detach().to("cpu", non_blocking=False)
-            stats_corr_matrix[partIdx, :] = comparedWeight.detach().to("cpu", non_blocking=False)
-            print()
+            results_corr_matrix[partIdx, :] = maxCorrs.detach().cpu()
+            results_shifts_matrix[partIdx, :] = pixelShiftsXY.detach().cpu()
+            results_eulerDegs_matrix[partIdx, :] = predEulerDegs.detach().cpu()
+            stats_corr_matrix[partIdx, :] = comparedWeight.detach().cpu()
 
         predEulerDegs = results_eulerDegs_matrix
 

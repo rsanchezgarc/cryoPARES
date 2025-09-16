@@ -192,7 +192,7 @@ def compute_inputs_fourier(particles, root_dir, pad_length: int, radius_px, comp
     dl = torch.utils.data.DataLoader(fftdataset, batch_size=batch_size, shuffle=False, num_workers=num_workers,
                                      persistent_workers=True if num_workers > 0 else False,
                                      pin_memory=str(compute_device).startswith("cuda"),
-                                     multiprocessing_context=get_context('loky') #TODO: make this more robust in case we don't use loky
+                                     multiprocessing_context=get_context('loky') if num_workers>0 else None
                                      )
     #TODO: How to deal with multiple copies of the same particle. At the moment we just recompute them, wasting compute
     n_particles = len(fftdataset)

@@ -19,6 +19,11 @@ def _get2DFreqsRFFT(imageSize, sampling_rate, fftshift: bool, device=None):
     if fftshift:
         freqs_y = torch.fft.fftshift(freqs_y)
 
+
+    if imageSize % 2 == 0 and freqs_x.numel() == imageSize // 2 + 1:
+        freqs_x = freqs_x.clone()
+        freqs_x[-1] = -freqs_x[-1]
+
     y, x = torch.meshgrid(freqs_y, freqs_x, indexing='ij')
     freqs = torch.stack([y, x], dim=-1)
 

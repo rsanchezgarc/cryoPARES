@@ -230,6 +230,7 @@ class ParticlesDataset(Dataset, ABC):
             img = torch.concat([img, wimg], dim=0)
         else:
             img = wimg
+        ctf = ctf.real
         return img, ctf
 
     def _correctCtfNone(self, img, md_row):

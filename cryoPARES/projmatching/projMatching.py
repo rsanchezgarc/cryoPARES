@@ -386,7 +386,7 @@ class ProjectionMatcher(nn.Module):
         _partIdx = 0
         for batch in tqdm(dl, desc="Aligning particles", disable=not self.verbose):
 
-            (partIdx, fparts, ctfs, eulerDegs) = batch
+            (partIdx, fparts, ctfs, eulerDegs, ids_list) = batch
             ctfs = ctfs.to(device, non_blocking=non_blocking)
             eulerDegs = eulerDegs.to(device, non_blocking=non_blocking)
             fparts = fparts.to(device, non_blocking=non_blocking)
@@ -399,7 +399,7 @@ class ProjectionMatcher(nn.Module):
             ctfs2 = batch[BATCH_ORI_CTF_NAME].to(device, non_blocking=non_blocking)
             fparts2 = _compute_one_batch_fft(parts2 * self.rmask)
             eulerDegs2 = torch.rad2deg(matrix_to_euler_angles(rotmats2, RELION_EULER_CONVENTION)).unsqueeze(1)
-
+            #print(fparts2.allclose(fparts))
             # print(ctfs.mean(), ctfs2.mean())
             # f, axes = plt.subplots(2, 3)
             # axes[0, 0].imshow(ctfs[0, ...].cpu())

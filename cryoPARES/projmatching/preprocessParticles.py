@@ -113,8 +113,9 @@ class ParticlesDatasetBase(Dataset):
         else:
             batch_size = batch_size
 
-        imgs, ctfs, (eulerDegs,
-                     xyShiftAngs, confidences), duplicated_indices = self.preprocess_particles(self.part_data, root_dir,
+        (imgs, ctfs, (eulerDegs,
+           xyShiftAngs, confidences),
+         duplicated_indices, ids_list) = self.preprocess_particles(self.part_data, root_dir,
                                                                             pad_length, radius_px,
                                                                             compute_device=self.device,
                                                                             batch_size=batch_size,
@@ -130,7 +131,7 @@ class ParticlesDatasetBase(Dataset):
                 confidences = confidences,
             ), batch_size=[imgs.shape[0]], device="cpu",
         )
-
+        self.ids_list = ids_list
         if self.mmap_dirname is not None:
             dataDict = dataDict.to(self.device)
         return dataDict, imgs.shape[0], duplicated_indices
@@ -139,7 +140,8 @@ class ParticlesDatasetBase(Dataset):
         dataDict = self.dataDict[item]
         return item, dataDict.get("imgs_reprep").to(self.device), \
             dataDict.get("ctfs").to(self.device), \
-            dataDict.get("eulerDegs").to(self.device)
+            dataDict.get("eulerDegs").to(self.device), \
+            self.ids_list[item]
 
     def getMd(self, item):
         raise NotImplementedError("Error, if there is duplicated particles, we need to remap them")
@@ -202,7 +204,7 @@ def compute_inputs_fourier(particles, root_dir, pad_length: int, radius_px, comp
     anglesDegs = torch.zeros(n_particles, fftdataset.n_copies, 3, dtype=DEFAULT_DTYPE, device="cpu")
     xyShiftAngs = torch.zeros(n_particles, fftdataset.n_copies, 2, dtype=DEFAULT_DTYPE, device="cpu")
     confidence = torch.zeros(n_particles, fftdataset.n_copies, dtype=DEFAULT_DTYPE, device="cpu")
-
+    ids_list = [None for i in range(n_particles)]
     ctf_constant_params = fftdataset.getCtfConstantParameters()
 
     if compute_device != "cpu":
@@ -215,13 +217,13 @@ def compute_inputs_fourier(particles, root_dir, pad_length: int, radius_px, comp
                                      image_shape=full_fft_img_shape,
                                      rfft=False, fftshift=True, device=compute_device)
 
-    for idxs, _imgs, (_anglesDegs, _xyShiftAngs, _conf), ctf_params in tqdm(dl, desc="Computing fft", disable=not verbose):
+    for idxs, _imgs, (_anglesDegs, _xyShiftAngs, _conf), ctf_params, ids in tqdm(dl, desc="Computing fft", disable=not verbose):
         imgs = _imgs.to(compute_device, non_blocking=True)
         images[idxs] = _compute_one_batch_fft(imgs).cpu()
         anglesDegs[idxs] = _anglesDegs
         xyShiftAngs[idxs] = _xyShiftAngs
         confidence[idxs] = _conf
-
+        for i_ids, _idx in enumerate(idxs): ids_list[_idx] = ids[i_ids]
         defocus_u = torch.as_tensor(ctf_params["defocus_u"] * 1e-4, dtype=DEFAULT_DTYPE, device=compute_device)  # micrometers
         defocus_v = torch.as_tensor(ctf_params["defocus_v"] * 1e-4, dtype=DEFAULT_DTYPE, device=compute_device)  # micrometers
         astigmatism_angle = torch.as_tensor(ctf_params["defocus_angle"], dtype=DEFAULT_DTYPE, device=compute_device)
@@ -247,7 +249,7 @@ def compute_inputs_fourier(particles, root_dir, pad_length: int, radius_px, comp
         ctfs[idxs, ..., -1] = _ctfs[:,0,..., 0]
 
 
-    return images, ctfs, (anglesDegs, xyShiftAngs, confidence), fftdataset.repeated_indices
+    return images, ctfs, (anglesDegs, xyShiftAngs, confidence), fftdataset.repeated_indices, ids_list
 
 def _compute_one_batch_fft(imgs): #TODO: Is it worth it to compile it?
     imgs = torch.fft.fftshift(imgs, dim=(-2, -1))
@@ -374,7 +376,7 @@ class TorchParticlesForFftDataset(torch.utils.data.Dataset):
         xyShiftAngs = self._poses[1][idxs]
         ctf_params = self._dataset.getCtfParamsFromMd(md)
         confs = self._confidences[idxs]
-        return torch.as_tensor(item), img, (anglesDegs, xyShiftAngs, confs), ctf_params
+        return torch.as_tensor(item), img, (anglesDegs, xyShiftAngs, confs), ctf_params, md[RELION_IMAGE_FNAME]
 
 def _get_repeated_image_idxs(df):
 

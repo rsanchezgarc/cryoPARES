@@ -236,34 +236,34 @@ class ProjectionMatcher(nn.Module):
         assert np.isclose(particle_shape, self.ori_image_shape).all(), (
             "Error, particles and volume have different number of pixels"
         )
-        # particlesDataset = ParticlesFourierDataset(
-        #     particlesSet,
-        #     mmap_dirname=None,
-        #     particle_radius_angs=particle_radius_angs,
-        #     pad_length=self.pad_length,
-        #     device=device,
-        #     batch_size=3 * batch_size,
-        #     n_jobs=self.n_cpus,
-        #     verbose=self.verbose,
-        # )
-        # return particlesDataset
-
-        from cryoPARES.datamanager.datamanager import DataManager
-        dm = DataManager(particles, #TODO: this does not apply circular mask to the particle
-                     symmetry="C1",
-                     particles_dir=data_rootdir,
-                     halfset=None,
-                     batch_size=batch_size,
-                     save_train_val_partition_dir=None,
-                     is_global_zero=True,
-                     num_augmented_copies_per_batch=1,
-                     num_data_workers = self.n_cpus,
-                     return_ori_imagen = True,
-                     subset_idxs=None
-                     )
-
-        ds = dm.create_dataset(None)
-        return ds
+        particlesDataset = ParticlesFourierDataset(
+            particlesSet,
+            mmap_dirname=None,
+            particle_radius_angs=particle_radius_angs,
+            pad_length=self.pad_length,
+            device=device,
+            batch_size=3 * batch_size,
+            n_jobs=self.n_cpus,
+            verbose=self.verbose,
+        )
+        return particlesDataset
+        #
+        # from cryoPARES.datamanager.datamanager import DataManager
+        # dm = DataManager(particles, #TODO: this does not apply circular mask to the particle
+        #              symmetry="C1",
+        #              particles_dir=data_rootdir,
+        #              halfset=None,
+        #              batch_size=batch_size,
+        #              save_train_val_partition_dir=None,
+        #              is_global_zero=True,
+        #              num_augmented_copies_per_batch=1,
+        #              num_data_workers = self.n_cpus,
+        #              return_ori_imagen = True,
+        #              subset_idxs=None
+        #              )
+        #
+        # ds = dm.create_dataset(None)
+        # return ds
 
     def _fourier_forward(self, fparts, ctfs, eulerDegs):
         expanded_eulerDegs = self._get_so3_delta(eulerDegs.device).unsqueeze(0) + eulerDegs.unsqueeze(1)
@@ -382,18 +382,18 @@ class ProjectionMatcher(nn.Module):
         _partIdx = 0
         for batch in tqdm(dl, desc="Aligning particles", disable=not self.verbose):
 
-            # (partIdx, fparts, ctfs, eulerDegs) = batch
-            # eulerDegs = eulerDegs.to(device, non_blocking=non_blocking)
-            # fparts = fparts.to(device, non_blocking=non_blocking)
-            # ctfs = ctfs.to(device, non_blocking=non_blocking)
+            (partIdx, fparts, ctfs, eulerDegs) = batch
+            eulerDegs = eulerDegs.to(device, non_blocking=non_blocking)
+            fparts = fparts.to(device, non_blocking=non_blocking)
+            ctfs = ctfs.to(device, non_blocking=non_blocking)
 
-            n_items = len(batch[BATCH_ORI_IMAGE_NAME])
-            partIdx = torch.arange(_partIdx, _partIdx + n_items); _partIdx += n_items
-            rotmats = batch[BATCH_POSE_NAME][0].to(device, non_blocking=non_blocking)
-            parts = batch[BATCH_ORI_IMAGE_NAME].to(device, non_blocking=non_blocking)
-            ctfs = batch[BATCH_ORI_CTF_NAME].to(device, non_blocking=non_blocking)
-            fparts = _compute_one_batch_fft(parts * self.rmask)
-            eulerDegs = torch.rad2deg(matrix_to_euler_angles(rotmats, RELION_EULER_CONVENTION))
+            # n_items = len(batch[BATCH_ORI_IMAGE_NAME])
+            # partIdx = torch.arange(_partIdx, _partIdx + n_items); _partIdx += n_items
+            # rotmats = batch[BATCH_POSE_NAME][0].to(device, non_blocking=non_blocking)
+            # parts = batch[BATCH_ORI_IMAGE_NAME].to(device, non_blocking=non_blocking)
+            # ctfs = batch[BATCH_ORI_CTF_NAME].to(device, non_blocking=non_blocking)
+            # fparts = _compute_one_batch_fft(parts * self.rmask)
+            # eulerDegs = torch.rad2deg(matrix_to_euler_angles(rotmats, RELION_EULER_CONVENTION))
 
             maxCorrs, predEulerDegs, pixelShiftsXY, comparedWeight = self._fourier_forward(fparts, ctfs, eulerDegs)
 

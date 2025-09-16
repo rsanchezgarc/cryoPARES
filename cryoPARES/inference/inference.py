@@ -438,7 +438,7 @@ class SingleInferencer:
                 if pbar is not None: pbar.update(1)
             result = self._process_batch(model, batch=None, batch_idx=-1)  # batch=None flushes the model buffer
             if result is not None:
-                all_results.append(result)
+                all_results.append(result) #TODO: We might want to call .cpu() to save GPU memory during inference.
         return all_results
 
     def _save_reconstruction(self, save_to_file: bool = True, materialize: bool = True):

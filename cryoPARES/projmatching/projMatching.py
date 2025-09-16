@@ -5,17 +5,19 @@ import math
 from functools import cached_property, lru_cache
 from typing import Tuple, Iterable, Optional, Literal
 
-import matplotlib.pyplot as plt
 import numpy as np
 import starfile
 import torch
+from scipy.spatial.transform import Rotation
 from torch.utils.data import DataLoader, default_collate
 from cryoPARES.constants import (RELION_EULER_CONVENTION, BATCH_POSE_NAME, RELION_PRED_POSE_CONFIDENCE_NAME,
-                                 BATCH_ORI_IMAGE_NAME, BATCH_ORI_CTF_NAME, RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES)
+                                 BATCH_ORI_IMAGE_NAME, BATCH_ORI_CTF_NAME, RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES,
+                                 BATCH_IDS_NAME)
 from torch import nn
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.geometry.convert_angles import euler_angles_to_matrix, matrix_to_euler_angles
 from cryoPARES.geometry.grids import so3_near_identity_grid_cartesianprod
+from cryoPARES.geometry.metrics_angles import rotation_error_with_sym
 from cryoPARES.utils.reconstructionUtils import get_vol
 from .loggers import getWorkerLogger
 from .myProgressBar import myTqdm as tqdm
@@ -341,6 +343,7 @@ class ProjectionMatcher(nn.Module):
         results_eulerDegs_matrix = torch.zeros(n_particles, self.keep_top_k_values, 3)
         # stats_corr_matrix = torch.zeros(n_particles, 2)
         stats_corr_matrix = torch.zeros(n_particles, self.keep_top_k_values)
+        idds_list = [None] * n_particles
 
         particlesDataSet.device = "cpu"
 
@@ -386,27 +389,20 @@ class ProjectionMatcher(nn.Module):
         _partIdx = 0
         for batch in tqdm(dl, desc="Aligning particles", disable=not self.verbose):
 
-            (partIdx, fparts, ctfs, eulerDegs, ids_list) = batch
-            ctfs = ctfs.to(device, non_blocking=non_blocking)
+            (partIdx, fparts, ctfs, eulerDegs, idds) = batch
             eulerDegs = eulerDegs.to(device, non_blocking=non_blocking)
             fparts = fparts.to(device, non_blocking=non_blocking)
-            ctfs = ctfs.real
-            batch = default_collate([self.ds[i] for i in partIdx.tolist()])
+            ctfs = ctfs.to(device, non_blocking=non_blocking)
+
+            # batch = default_collate([self.ds[i] for i in partIdx])
             # n_items = len(batch[BATCH_ORI_IMAGE_NAME])
             # partIdx = torch.arange(_partIdx, _partIdx + n_items); _partIdx += n_items
-            rotmats2 = batch[BATCH_POSE_NAME][0].to(device, non_blocking=non_blocking)
-            parts2 = batch[BATCH_ORI_IMAGE_NAME].to(device, non_blocking=non_blocking)
-            ctfs2 = batch[BATCH_ORI_CTF_NAME].to(device, non_blocking=non_blocking)
-            fparts2 = _compute_one_batch_fft(parts2 * self.rmask)
-            eulerDegs2 = torch.rad2deg(matrix_to_euler_angles(rotmats2, RELION_EULER_CONVENTION)).unsqueeze(1)
-            #print(fparts2.allclose(fparts))
-            # print(ctfs.mean(), ctfs2.mean())
-            # f, axes = plt.subplots(2, 3)
-            # axes[0, 0].imshow(ctfs[0, ...].cpu())
-            # axes[0, 1].imshow(ctfs2[0, ...].cpu())
-            # axes[0, 2].imshow(ctfs[0, ...].cpu() - ctfs2[0, ...].cpu())
-            # plt.show()
-            # breakpoint()
+            # idds = batch[BATCH_IDS_NAME]
+            # rotmats = batch[BATCH_POSE_NAME][0].to(device, non_blocking=non_blocking)
+            # parts = batch[BATCH_ORI_IMAGE_NAME].to(device, non_blocking=non_blocking)
+            # ctfs = batch[BATCH_ORI_CTF_NAME].to(device, non_blocking=non_blocking)
+            # fparts = _compute_one_batch_fft(parts * self.rmask)
+            # eulerDegs = torch.rad2deg(matrix_to_euler_angles(rotmats, RELION_EULER_CONVENTION))
 
             maxCorrs, predEulerDegs, pixelShiftsXY, comparedWeight = self._fourier_forward(fparts, ctfs, eulerDegs)
 
@@ -414,79 +410,113 @@ class ProjectionMatcher(nn.Module):
             results_shifts_matrix[partIdx, :] = pixelShiftsXY.detach().cpu()
             results_eulerDegs_matrix[partIdx, :] = predEulerDegs.detach().cpu()
             stats_corr_matrix[partIdx, :] = comparedWeight.detach().cpu()
+            for _i, partIdx in enumerate(partIdx): idds_list[partIdx] = idds[_i]
 
         predEulerDegs = results_eulerDegs_matrix
         predShiftsAngs = -(results_shifts_matrix.float() - half_particle_size) * pixel_size
 
         prob_x_y = stats_corr_matrix
         n_topK = predEulerDegs.shape[1]
-        finalParticlesStar = None
+        # finalParticlesStar = None
+        finalParticlesStar = particlesStar
+        particles_md = particlesStar.particles_md
+        for k in range(n_topK):
+            suffix = "" if k == 0 else f"_top{k}"
+            angles_names = [x + suffix for x in RELION_ANGLES_NAMES]
+            shiftsXYangs_names = [x + suffix for x in RELION_SHIFTS_NAMES]
+            confide_name = RELION_PRED_POSE_CONFIDENCE_NAME + suffix
+            for col in angles_names + shiftsXYangs_names + [confide_name]:
+                if col not in particles_md.columns:
+                    particles_md[col] = 0.0
+
+            eulerdegs = predEulerDegs[:, k, :].numpy()
+            shiftsXYangs = predShiftsAngs[:, k, :].numpy()
+            if REPORT_ALIGNMENT_DISPLACEMENT:
+                ######## Debug code
+                r1 = torch.FloatTensor(Rotation.from_euler(RELION_EULER_CONVENTION,
+                                                           eulerdegs,
+                                                           degrees=True).as_matrix())
+                r2 = torch.FloatTensor(Rotation.from_euler(RELION_EULER_CONVENTION,
+                                                           particles_md.loc[idds_list, angles_names],
+                                                           degrees=True).as_matrix())
+                ang_err = torch.rad2deg(rotation_error_with_sym(r1, r2, symmetry="C1"))# C1 since we do not use symemtry in local refinement. Ideally we would like to use the proper symmetry for eval purposes
+
+                s2 = particles_md.loc[idds_list, shiftsXYangs_names].values
+                shift_error = np.sqrt(((predShiftsAngs - s2) ** 2).sum(-1))
+                print(f"Median Ang   Error degs (top-{k + 1}):", np.median(ang_err))
+                print(f"Median Shift Error Angs (top-{k + 1}):", np.median(shift_error))
+                ######## END of Debug code
+
+            particles_md.loc[idds_list, angles_names] = eulerdegs
+            particles_md.loc[idds_list, shiftsXYangs_names] = shiftsXYangs
+            _confidence = confidence * prob_x_y[:, k]
+            particles_md.loc[idds_list, confide_name] = _confidence.numpy()
 
 
-        for complement_topK in range(n_topK):
-            topK = n_topK - 1 - complement_topK
-
-            if predEulerDegs.shape[1] > 1:
-                colname2change = {"copyNumber": topK}
-                particlesStar.updateMd(None, None, colname2change)
-            particlesStar.updateMd(idxs=parts_range, colname2change={"previousConfidenceScore": confidence.numpy()})
-
-            confidence *= prob_x_y[:, topK]
-            particlesStar.setPose(
-                parts_range,
-                eulerDegs=predEulerDegs[:, topK, ...].numpy(),
-                shiftsAngst=predShiftsAngs[:, topK, ...].numpy(),
-                confidence=confidence.numpy(),
-            )
-
-            particlesStar.updateMd(
-                idxs=parts_range, colname2change={"bruteForceScore": results_corr_matrix[:, topK].numpy()}
-            )
-            particlesStar.updateMd(
-                idxs=parts_range, colname2change={"bruteForceScoreNormalized": prob_x_y[:, topK].numpy()}
-            )
-            if complement_topK > 0:
-                finalParticlesStar += particlesStar
-            else:
-                finalParticlesStar = particlesStar
+        # for complement_topK in range(n_topK):
+        #     topK = n_topK - 1 - complement_topK
+        #
+        #     if predEulerDegs.shape[1] > 1:
+        #         colname2change = {"copyNumber": topK}
+        #         particlesStar.updateMd(None, None, colname2change)
+        #     particlesStar.updateMd(idxs=parts_range, colname2change={"previousConfidenceScore": confidence.numpy()})
+        #
+        #     confidence *= prob_x_y[:, topK]
+        #     particlesStar.setPose(
+        #         parts_range,
+        #         eulerDegs=predEulerDegs[:, topK, ...].numpy(),
+        #         shiftsAngst=predShiftsAngs[:, topK, ...].numpy(),
+        #         confidence=confidence.numpy(),
+        #     )
+        #
+        #     particlesStar.updateMd(
+        #         idxs=parts_range, colname2change={"bruteForceScore": results_corr_matrix[:, topK].numpy()}
+        #     )
+        #     particlesStar.updateMd(
+        #         idxs=parts_range, colname2change={"bruteForceScoreNormalized": prob_x_y[:, topK].numpy()}
+        #     )
+        #     if complement_topK > 0:
+        #         finalParticlesStar += particlesStar
+        #     else:
+        #         finalParticlesStar = particlesStar
 
         if starFnameOut is not None:
             finalParticlesStar.save(starFname=starFnameOut)
             self.mainLogger.info(f"particles were saved at {starFnameOut}")
 
-        if REPORT_ALIGNMENT_DISPLACEMENT:
-            ori_eulers = ori_eulers[range(predEulerDegs.shape[0]), ...]
-            ori_shifts = ori_shifts[range(predEulerDegs.shape[0]), ...]
-            best_value = float("inf")
-            for i in range(ori_eulers.shape[1]):
-                for j in range(predEulerDegs.shape[1]):
-                    degs_angular_displacement = euler_degs_diff(
-                        predEulerDegs[:, j, :], ori_eulers[:, i, :]
-                    )
-                    angst_translation_displacement = shifst_angs_diff(
-                        predShiftsAngs[:, j, :], ori_shifts[:, i, :]
-                    )
-                    degs_mean = degs_angular_displacement.mean()
-                    if best_value > degs_mean:
-                        best_value = degs_mean
-                        degs_mean, degs_std = (
-                            degs_angular_displacement.mean(),
-                            degs_angular_displacement.std(),
-                        )
-                        degs_median = np.median(degs_angular_displacement)
-                        degs_iqr = np.quantile(degs_angular_displacement, 0.75) - np.quantile(
-                            degs_angular_displacement, 0.25
-                        )
-
-            agst_mean, agst_std = angst_translation_displacement.mean(), angst_translation_displacement.std()
-            agst_median = np.median(angst_translation_displacement)
-            agst_iqr = (np.quantile(angst_translation_displacement, 0.75) -
-                        np.quantile(angst_translation_displacement, 0.25))
-            self.mainLogger.info(
-                "Alignment displacements mean (std)\tmedian (iqr)\n"
-                f"Angle: {degs_mean:2.3f} +/- {degs_std:2.3f}\t{degs_median:2.3f} +/- {degs_iqr:2.3f}\n"
-                f"Shift: {agst_mean:2.3f} +/- {agst_std:2.3f}\t{agst_median:2.3f} +/- {agst_iqr:2.3f} "
-            )
+        # if REPORT_ALIGNMENT_DISPLACEMENT:
+        #     ori_eulers = ori_eulers[range(predEulerDegs.shape[0]), ...]
+        #     ori_shifts = ori_shifts[range(predEulerDegs.shape[0]), ...]
+        #     best_value = float("inf")
+        #     for i in range(ori_eulers.shape[1]):
+        #         for j in range(predEulerDegs.shape[1]):
+        #             degs_angular_displacement = euler_degs_diff(
+        #                 predEulerDegs[:, j, :], ori_eulers[:, i, :]
+        #             )
+        #             angst_translation_displacement = shifst_angs_diff(
+        #                 predShiftsAngs[:, j, :], ori_shifts[:, i, :]
+        #             )
+        #             degs_mean = degs_angular_displacement.mean()
+        #             if best_value > degs_mean:
+        #                 best_value = degs_mean
+        #                 degs_mean, degs_std = (
+        #                     degs_angular_displacement.mean(),
+        #                     degs_angular_displacement.std(),
+        #                 )
+        #                 degs_median = np.median(degs_angular_displacement)
+        #                 degs_iqr = np.quantile(degs_angular_displacement, 0.75) - np.quantile(
+        #                     degs_angular_displacement, 0.25
+        #                 )
+        #
+        #     agst_mean, agst_std = angst_translation_displacement.mean(), angst_translation_displacement.std()
+        #     agst_median = np.median(angst_translation_displacement)
+        #     agst_iqr = (np.quantile(angst_translation_displacement, 0.75) -
+        #                 np.quantile(angst_translation_displacement, 0.25))
+        #     self.mainLogger.info(
+        #         "Alignment displacements mean (std)\tmedian (iqr)\n"
+        #         f"Angle: {degs_mean:2.3f} +/- {degs_std:2.3f}\t{degs_median:2.3f} +/- {degs_iqr:2.3f}\n"
+        #         f"Shift: {agst_mean:2.3f} +/- {agst_std:2.3f}\t{agst_median:2.3f} +/- {agst_iqr:2.3f} "
+        #     )
 
         del particlesDataSet
         gc.collect()

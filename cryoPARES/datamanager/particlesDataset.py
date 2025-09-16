@@ -226,7 +226,7 @@ class ParticlesDataset(Dataset, ABC):
                                 mode=self.ctf_correction, fftshift=True)
         wimg = torch.clamp(wimg, img.min(), img.max())
         wimg = torch.nan_to_num(wimg, nan=img.mean())
-        if self. ctf_correction_do_concat:
+        if self.ctf_correction_do_concat:
             img = torch.concat([img, wimg], dim=0)
         else:
             img = wimg

@@ -186,4 +186,5 @@ def _test_correct():
 
 if __name__ == "__main__":
     # _get2DFreqsRFFT(imageSize=8, sampling_rate=1.5)
-    _test_correct()
+    _test_vs_litbilt()
+    # _test_correct()

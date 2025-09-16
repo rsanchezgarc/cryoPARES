@@ -5,10 +5,11 @@ import math
 from functools import cached_property, lru_cache
 from typing import Tuple, Iterable, Optional, Literal
 
+import matplotlib.pyplot as plt
 import numpy as np
 import starfile
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, default_collate
 from cryoPARES.constants import (RELION_EULER_CONVENTION, BATCH_POSE_NAME, RELION_PRED_POSE_CONFIDENCE_NAME,
                                  BATCH_ORI_IMAGE_NAME, BATCH_ORI_CTF_NAME, RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES)
 from torch import nn
@@ -386,17 +387,26 @@ class ProjectionMatcher(nn.Module):
         for batch in tqdm(dl, desc="Aligning particles", disable=not self.verbose):
 
             (partIdx, fparts, ctfs, eulerDegs) = batch
+            ctfs = ctfs.to(device, non_blocking=non_blocking)
             eulerDegs = eulerDegs.to(device, non_blocking=non_blocking)
             fparts = fparts.to(device, non_blocking=non_blocking)
-            ctfs = ctfs.to(device, non_blocking=non_blocking)
-            breakpoint()
+            ctfs = ctfs.real
+            batch = default_collate([self.ds[i] for i in partIdx.tolist()])
             # n_items = len(batch[BATCH_ORI_IMAGE_NAME])
             # partIdx = torch.arange(_partIdx, _partIdx + n_items); _partIdx += n_items
-            # rotmats = batch[BATCH_POSE_NAME][0].to(device, non_blocking=non_blocking)
-            # parts = batch[BATCH_ORI_IMAGE_NAME].to(device, non_blocking=non_blocking)
-            # ctfs = batch[BATCH_ORI_CTF_NAME].to(device, non_blocking=non_blocking)
-            # fparts = _compute_one_batch_fft(parts * self.rmask)
-            # eulerDegs = torch.rad2deg(matrix_to_euler_angles(rotmats, RELION_EULER_CONVENTION))
+            rotmats2 = batch[BATCH_POSE_NAME][0].to(device, non_blocking=non_blocking)
+            parts2 = batch[BATCH_ORI_IMAGE_NAME].to(device, non_blocking=non_blocking)
+            ctfs2 = batch[BATCH_ORI_CTF_NAME].to(device, non_blocking=non_blocking)
+            fparts2 = _compute_one_batch_fft(parts2 * self.rmask)
+            eulerDegs2 = torch.rad2deg(matrix_to_euler_angles(rotmats2, RELION_EULER_CONVENTION)).unsqueeze(1)
+
+            # print(ctfs.mean(), ctfs2.mean())
+            # f, axes = plt.subplots(2, 3)
+            # axes[0, 0].imshow(ctfs[0, ...].cpu())
+            # axes[0, 1].imshow(ctfs2[0, ...].cpu())
+            # axes[0, 2].imshow(ctfs[0, ...].cpu() - ctfs2[0, ...].cpu())
+            # plt.show()
+            # breakpoint()
 
             maxCorrs, predEulerDegs, pixelShiftsXY, comparedWeight = self._fourier_forward(fparts, ctfs, eulerDegs)
 

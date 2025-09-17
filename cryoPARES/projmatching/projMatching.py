@@ -202,41 +202,6 @@ class ProjectionMatcher(nn.Module):
         batch_size,
         device,
     ):
-        # Load particle metadata
-        if not isinstance(particles, ParticlesStarSet):
-            particlesSet = ParticlesStarSet(particles, data_rootdir)
-        else:
-            particlesSet = particles
-
-        sampling_rate = particlesSet.sampling_rate
-        assert np.isclose(
-            sampling_rate, self.vol_voxel_size, atol=1e-2
-        ), (
-            "Error, particles and volume have different pixel_size "
-            f"{sampling_rate} {self.vol_voxel_size}"
-        )
-        try:
-            particle_shape = particlesSet.particle_shape
-        except FileNotFoundError:
-            self.mainLogger.error(
-                ">> particles mrcs file not found. Did you forget including --particles_dir"
-            )
-            raise
-
-        assert np.isclose(particle_shape, self.ori_image_shape).all(), (
-            "Error, particles and volume have different number of pixels"
-        )
-        particlesDataset = ParticlesFourierDataset(
-            particlesSet,
-            mmap_dirname=None,
-            particle_radius_angs=particle_radius_angs,
-            pad_length=self.pad_length,
-            device=device,
-            batch_size=3 * batch_size,
-            n_jobs=self.n_cpus,
-            verbose=self.verbose,
-        )
-        self.particlesDataset = particlesDataset
 
         from cryoPARES.datamanager.datamanager import DataManager
         dm = DataManager(particles, #TODO: this does not apply circular mask to the particle

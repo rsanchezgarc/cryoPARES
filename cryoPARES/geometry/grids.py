@@ -136,7 +136,6 @@ def _filter_duplicate_angles_in_grid(grid, degrees:bool, atol=None):
     grid = grid[idxs]
     return grid
 
-so3_grid_near_identity_fibo
 from cryoPARES.geometry.utilsGrid import so3_grid_near_identity_fibo as _so3_grid_near_identity_fibo
 
 @cache.cache()

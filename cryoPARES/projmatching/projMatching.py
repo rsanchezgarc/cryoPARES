@@ -200,7 +200,6 @@ class ProjectionMatcher(nn.Module):
         data_rootdir,
         particle_radius_angs,
         batch_size,
-        device,
     ):
 
         from cryoPARES.datamanager.datamanager import DataManager
@@ -218,8 +217,7 @@ class ProjectionMatcher(nn.Module):
                      )
 
         ds = dm.create_dataset(None)
-        self.ds = ds
-
+        return ds
 
     def _fourier_forward(self, fparts, ctfs, eulerDegs):
         expanded_eulerDegs = self._get_so3_delta(eulerDegs.device).unsqueeze(0) + eulerDegs.unsqueeze(1)
@@ -273,15 +271,13 @@ class ProjectionMatcher(nn.Module):
                 starFnameOut
             ), f"Error, the starFnameOut {starFnameOut} already exists"
 
-        self.preprocess_particles(
+        particlesDataSet = self.preprocess_particles(
             particles,
             data_rootdir,
             particle_radius_angs,
             batch_size,
-            device if fft_in_device else "cpu",
         )
 
-        particlesDataSet = self.ds #self.particlesDataset
         try:
             pixel_size = particlesDataSet.sampling_rate
         except AttributeError:
@@ -296,7 +292,6 @@ class ProjectionMatcher(nn.Module):
         stats_corr_matrix = torch.zeros(n_particles, self.keep_top_k_values)
         idds_list = [None] * n_particles
 
-        particlesDataSet.device = "cpu"
 
         self.to(device)
         self.mainLogger.info(f"Total number of particles: {n_particles}")
@@ -315,8 +310,7 @@ class ProjectionMatcher(nn.Module):
             particlesStar.particles_md.drop("rlnImageId", axis=1)
 
         dl = DataLoader(
-                        #particlesDataSet, 
-                        self.ds, 
+                        particlesDataSet,
                         batch_size=batch_size,
                         num_workers=self.n_cpus, shuffle=False, pin_memory=True,
                         multiprocessing_context='fork') #get_context('loky')

@@ -12,7 +12,7 @@ from scipy.spatial.transform import Rotation
 from torch.utils.data import DataLoader, default_collate
 from cryoPARES.constants import (RELION_EULER_CONVENTION, BATCH_POSE_NAME, RELION_PRED_POSE_CONFIDENCE_NAME,
                                  BATCH_ORI_IMAGE_NAME, BATCH_ORI_CTF_NAME, RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES,
-                                 BATCH_IDS_NAME)
+                                 BATCH_IDS_NAME, RELION_IMAGE_FNAME)
 from torch import nn
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.geometry.convert_angles import euler_angles_to_matrix, matrix_to_euler_angles
@@ -33,7 +33,6 @@ from .metrics import euler_degs_diff, shifst_angs_diff
 from .fourierOperations import (
     correlate_dft_2d,
     extract_central_slices_rfft,
-    phase_shift_dft_2d,
     compute_dft,
 )
 from .preprocessParticles import ParticlesFourierDataset, _compute_one_batch_fft, _getMask
@@ -105,20 +104,12 @@ class ProjectionMatcher(nn.Module):
             else:
                 grid_step_degs = self.grid_step_degs
 
-            # get_grid = lambda dist, resol: torch.linspace(
-            #     -dist, dist, int(1 + 2 * (dist / resol)), device=device
-            # )
-            # a = get_grid(grid_distance_degs[0], grid_step_degs[0])
-            # b = get_grid(grid_distance_degs[1], grid_step_degs[1])
-            # c = get_grid(grid_distance_degs[2], grid_step_degs[2])
-            # self._so3_delta = torch.cartesian_prod(a, b, c)
-
             n_angles = math.ceil(self.grid_distance_degs * 2 / self.grid_step_degs)
             n_angles = n_angles if n_angles % 2 == 1 else n_angles + 1  # We always want an odd number
             self._so3_delta = so3_near_identity_grid_cartesianprod(self.grid_distance_degs, n_angles,
                                                              transposed=False, degrees=True,
                                                              remove_duplicates=False).to(device)
-            #TODO: Remove duplicates= True makes the whole thing broken
+            #TODO: Remove duplicates=True makes the whole things broken. Probably due to euler angles singularities
         return self._so3_delta
 
     # ----------------------- Fourier-specific core -----------------------
@@ -167,10 +158,6 @@ class ProjectionMatcher(nn.Module):
             rotation_matrix_zyx=False,
         )
 
-    def _shiftF(self, projs: torch.Tensor, shift_fraction: torch.Tensor) -> torch.Tensor:
-        return phase_shift_dft_2d(
-            projs, image_shape=self.image_shape, shifts=shift_fraction, rfft=True, fftshifted=True
-        )
 
     def correlateF(self, parts: torch.Tensor, projs: torch.Tensor):
         return self._correlateCrossCorrelation(parts, projs)
@@ -250,7 +237,6 @@ class ProjectionMatcher(nn.Module):
             verbose=self.verbose,
         )
         self.particlesDataset = particlesDataset
-        # return particlesDataset
 
         from cryoPARES.datamanager.datamanager import DataManager
         dm = DataManager(particles, #TODO: this does not apply circular mask to the particle
@@ -268,8 +254,7 @@ class ProjectionMatcher(nn.Module):
 
         ds = dm.create_dataset(None)
         self.ds = ds
-        # return ds
-        return particlesDataset
+
 
     def _fourier_forward(self, fparts, ctfs, eulerDegs):
         expanded_eulerDegs = self._get_so3_delta(eulerDegs.device).unsqueeze(0) + eulerDegs.unsqueeze(1)
@@ -323,17 +308,19 @@ class ProjectionMatcher(nn.Module):
                 starFnameOut
             ), f"Error, the starFnameOut {starFnameOut} already exists"
 
-        particlesDataSet = self.preprocess_particles(
+        self.preprocess_particles(
             particles,
             data_rootdir,
             particle_radius_angs,
             batch_size,
             device if fft_in_device else "cpu",
         )
+
+        particlesDataSet = self.ds #self.particlesDataset
         try:
             pixel_size = particlesDataSet.sampling_rate
         except AttributeError:
-            pixel_size = particlesDataSet.datasets[0].sampling_rate
+            pixel_size = particlesDataSet.datasets[0].original_sampling_rate()
         half_particle_size = self.image_shape[-1] / 2
         assert half_particle_size == self.half_particle_size
         n_particles = len(particlesDataSet)
@@ -370,39 +357,44 @@ class ProjectionMatcher(nn.Module):
             except AttributeError:
                 try:
                     ori_eulers = torch.tensor(particlesStar.particles_md.loc[:,RELION_ANGLES_NAMES].values,
-                                              dtype=torch.float32).unsqueeze(-2)
+                                              dtype=torch.float32).unsqueeze(1)
                 except KeyError:
-                    ori_eulers = torch.ones(len(particlesStar.particles_md), 3)
+                    ori_eulers = torch.ones(len(particlesStar.particles_md), 1, 3)
             try:
                 ori_shifts = particlesDataSet.dataDict.get("shiftsAngs")
             except AttributeError:
                 try:
                     ori_shifts = torch.tensor(particlesStar.particles_md.loc[:,RELION_SHIFTS_NAMES].values,
-                                              dtype=torch.float32).unsqueeze(-2)
+                                              dtype=torch.float32).unsqueeze(1)
                 except KeyError:
-                    ori_shifts = torch.ones(len(particlesStar.particles_md), 2)
+                    ori_shifts = torch.ones(len(particlesStar.particles_md), 1, 2)
 
-        dl = DataLoader(particlesDataSet, batch_size=batch_size,
+        dl = DataLoader(
+                        #particlesDataSet, 
+                        self.ds, 
+                        batch_size=batch_size,
                         num_workers=self.n_cpus, shuffle=False, pin_memory=True,
                         multiprocessing_context='fork') #get_context('loky')
-        non_blocking = True
+        non_blocking = False
         _partIdx = 0
         for batch in tqdm(dl, desc="Aligning particles", disable=not self.verbose):
 
-            (partIdx, fparts, ctfs, eulerDegs, idds) = batch
-            eulerDegs = eulerDegs.to(device, non_blocking=non_blocking)
-            fparts = fparts.to(device, non_blocking=non_blocking)
-            ctfs = ctfs.to(device, non_blocking=non_blocking)
+            #(partIdx, fparts, ctfs, eulerDegs, idds) = batch
+            #eulerDegs = eulerDegs.to(device, non_blocking=non_blocking)
+            #fparts = fparts.to(device, non_blocking=non_blocking)
+            #ctfs = ctfs.to(device, non_blocking=non_blocking)
 
-            # batch = default_collate([self.ds[i] for i in partIdx])
-            # n_items = len(batch[BATCH_ORI_IMAGE_NAME])
-            # partIdx = torch.arange(_partIdx, _partIdx + n_items); _partIdx += n_items
-            # idds = batch[BATCH_IDS_NAME]
-            # rotmats = batch[BATCH_POSE_NAME][0].to(device, non_blocking=non_blocking)
-            # parts = batch[BATCH_ORI_IMAGE_NAME].to(device, non_blocking=non_blocking)
-            # ctfs = batch[BATCH_ORI_CTF_NAME].to(device, non_blocking=non_blocking)
-            # fparts = _compute_one_batch_fft(parts * self.rmask)
-            # eulerDegs = torch.rad2deg(matrix_to_euler_angles(rotmats, RELION_EULER_CONVENTION))
+            #batch = default_collate([self.ds[i] for i in self.ds.datasets[0].particles.particles_md.index.get_indexer(idds)])
+
+            n_items = len(batch[BATCH_ORI_IMAGE_NAME])
+            partIdx = torch.arange(_partIdx, _partIdx + n_items); _partIdx += n_items
+            idds = batch[BATCH_IDS_NAME]
+            rotmats = batch[BATCH_POSE_NAME][0].to(device, non_blocking=non_blocking)
+            parts = batch[BATCH_ORI_IMAGE_NAME].to(device, non_blocking=non_blocking)
+            ctfs = batch[BATCH_ORI_CTF_NAME].to(device, non_blocking=non_blocking)
+            fparts = _compute_one_batch_fft(parts * self.rmask)
+            eulerDegs = torch.rad2deg(matrix_to_euler_angles(rotmats, RELION_EULER_CONVENTION)).unsqueeze(1)
+
 
             maxCorrs, predEulerDegs, pixelShiftsXY, comparedWeight = self._fourier_forward(fparts, ctfs, eulerDegs)
 
@@ -410,7 +402,7 @@ class ProjectionMatcher(nn.Module):
             results_shifts_matrix[partIdx, :] = pixelShiftsXY.detach().cpu()
             results_eulerDegs_matrix[partIdx, :] = predEulerDegs.detach().cpu()
             stats_corr_matrix[partIdx, :] = comparedWeight.detach().cpu()
-            for _i, partIdx in enumerate(partIdx): idds_list[partIdx] = idds[_i]
+            for _i, i_partIdx in enumerate(partIdx): idds_list[i_partIdx] = idds[_i]
 
         predEulerDegs = results_eulerDegs_matrix
         predShiftsAngs = -(results_shifts_matrix.float() - half_particle_size) * pixel_size

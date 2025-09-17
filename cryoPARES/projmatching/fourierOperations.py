@@ -113,5 +113,12 @@ def correlate_dft_2d(
     return torch.real(result)
 
 
+def _compute_one_batch_fft(imgs): #TODO: Is it worth it to compile it?
+    imgs = torch.fft.fftshift(imgs, dim=(-2, -1))
+    imgs = torch.fft.rfftn(imgs, dim=(-2, -1))
+    imgs = torch.fft.fftshift(imgs, dim=(-2,))
+    # imgs = imgs / imgs.abs().sum() #Normalization
+    return imgs
+
 if not main_config.projmatching.disable_compile_projectVol:
     correlate_dft_2d = torch.compile(correlate_dft_2d, mode=main_config.projmatching.compile_correlate_dft_2d_mode)

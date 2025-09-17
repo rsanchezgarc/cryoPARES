@@ -11,6 +11,8 @@ import starfile
 import torch
 from scipy.spatial.transform import Rotation
 from torch.utils.data import DataLoader, default_collate
+from torch_grid_utils import circle
+
 from cryoPARES.constants import (RELION_EULER_CONVENTION, BATCH_POSE_NAME, RELION_PRED_POSE_CONFIDENCE_NAME,
                                  BATCH_ORI_IMAGE_NAME, BATCH_ORI_CTF_NAME, RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES,
                                  BATCH_IDS_NAME, RELION_IMAGE_FNAME)
@@ -31,10 +33,9 @@ from .dataUtils.dataTypes import IMAGEFNAME_MRCIMAGE, FNAME
 from starstack import ParticlesStarSet
 
 # Fourier-side ops and dataset
-from .fourierOperations import correlate_dft_2d, compute_dft_3d
+from .fourierOperations import correlate_dft_2d, compute_dft_3d, _compute_one_batch_fft
 
 from torch_fourier_slice.slice_extraction import extract_central_slices_rfft_3d
-from .preprocessParticles import  _compute_one_batch_fft, _getMask
 
 REPORT_ALIGNMENT_DISPLACEMENT = True
 def get_rotmat(degAngles, convention:str=RELION_EULER_CONVENTION, device="cpu"):
@@ -130,7 +131,8 @@ class ProjectionMatcher(nn.Module):
 
         # Prepare mask
         radius_px = self.image_shape[-2] // 2
-        self.register_buffer("rmask",_getMask(radius_px, self.image_shape, device="cpu"))
+        rmask = circle(radius_px, image_shape=self.image_shape, smoothing_radius=radius_px * .05)
+        self.register_buffer("rmask", rmask)
 
         if self.max_resolution_A is not None:
             nyquist_freq = 1 / (2 * self.vol_voxel_size)        # Nyquist freq in cycles/Å

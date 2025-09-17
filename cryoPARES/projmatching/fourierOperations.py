@@ -107,17 +107,16 @@ def correlate_dft_2d(
         projs = torch.view_as_complex(projs)
 
     result = parts * torch.conj(projs)
-    if max_freq_pixels is not None:  # TODO: use alister trick to project only the desired frequencies
-        mask = _mask_for_dft_2d(result.shape, max_freq_pixels, rfft=True, fftshifted=True,
-                            device=result.device)
-        result *= mask
+    # if max_freq_pixels is not None:
+    #     mask = _mask_for_dft_2d(result.shape, max_freq_pixels, rfft=True, fftshifted=True,
+    #                         device=result.device)
+    #     result *= mask
     result = torch.fft.ifftshift(result, dim=(-2,))
     result = torch.fft.irfftn(result, dim=(-2, -1))
     result = torch.fft.ifftshift(result, dim=(-2, -1))
     return torch.real(result)
 
-
-def _real_to_fourier_2d(imgs, view_complex_as_two_float32=False): #TODO: Is it worth it to compile it?
+def _real_to_fourier_2d(imgs, view_complex_as_two_float32=False):
     imgs = torch.fft.fftshift(imgs, dim=(-2, -1))
     imgs = torch.fft.rfftn(imgs, dim=(-2, -1))
     imgs = torch.fft.fftshift(imgs, dim=(-2,))

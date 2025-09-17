@@ -74,7 +74,15 @@ class ProjectionMatcher(nn.Module):
         self.mainLogger = getWorkerLogger(self.verbose)
 
         if USE_TWO_FLOAT32_FOR_COMPLEX:
+            if not main_config.projmatching.disable_compile_projectVol:
+                self.extract_central_slices_rfft_3d_multichannel = extract_central_slices_rfft_3d_multichannel
+            else:
+                self.extract_central_slices_rfft_3d_multichannel = torch.compile(
+                    extract_central_slices_rfft_3d_multichannel, fullgraph=True,
+                    disable=main_config.projmatching.disable_compile_projectVol,
+                    mode=main_config.projmatching.compile_projectVol_mode)
             self.projectF = self._projectF_USE_TWO_FLOAT32_FOR_COMPLEX
+
         else:
             self.projectF = self._projectF
 
@@ -177,7 +185,7 @@ class ProjectionMatcher(nn.Module):
 
     def _projectF_USE_TWO_FLOAT32_FOR_COMPLEX(self, rotMats: torch.Tensor) -> torch.Tensor:
 
-        projs = extract_central_slices_rfft_3d_multichannel(self.reference_vol, self.vol_shape,
+        projs = self.extract_central_slices_rfft_3d_multichannel(self.reference_vol, self.vol_shape,
                                                             rotation_matrices=rotMats,
                                                             fftfreq_max= self.fftfreq_max,
                                                             zyx_matrices=False)

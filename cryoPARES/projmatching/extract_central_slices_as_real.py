@@ -56,9 +56,6 @@ def extract_central_slices_rfft_3d_multichannel(
                                                         valid_coords,
                                                         freq_grid_mask,
                                                         zyx_matrices)
-#TODO: we should define a _extract_central_slices_rfft_3d_multichannel_FACTORY to use main_config.projmatching properly
-@torch.compile(fullgraph=True, disable=main_config.projmatching.disable_compile_projectVol,
-               mode=main_config.projmatching.compile_projectVol_mode)
 def _extract_central_slices_rfft_3d_multichannel(
     volume_rfft: torch.Tensor,  # (c, d, d, d)
     image_shape: tuple[int, int, int],
@@ -110,17 +107,10 @@ def _extract_central_slices_rfft_3d_multichannel(
         frequencies=rotated_coords, image_shape=image_shape, rfft=True
     )
     samples = sample_image_3d_compiled(
-        image=volume_rfft, coordinates=rotated_coords, interpolation="trilinear"
+        image=volume_rfft, coordinates=rotated_coords
     )  # shape is (..., c)
 
     # # take complex conjugate of values from redundant half transform
-    # half_transform = samples[conjugate_mask]
-    # half_transform[..., 1] *= -1
-    # half_transform = torch.stack([half_transform[..., 0], -half_transform[..., 1]], dim=-1)
-    # samples[conjugate_mask] = half_transform
-    # samples = einops.rearrange(samples, "... hw c -> ... c hw")
-
-    conjugate_mask_expanded = conjugate_mask.unsqueeze(-1)
 
     # For complex numbers, conjugate means flipping the sign of imaginary part
     # samples has shape (..., hw, 2) where last dim is [real, imag]
@@ -142,17 +132,13 @@ def _extract_central_slices_rfft_3d_multichannel(
     projection_image_dfts[..., freq_grid_mask] = samples
 
     return projection_image_dfts
-
-
 def sample_image_3d_compiled(
         image: torch.Tensor,
         coordinates: torch.Tensor,
-        interpolation: str = 'trilinear',
 ) -> torch.Tensor:
     """Compilation-friendly version of sample_image_3d that avoids in-place operations."""
 
     device = coordinates.device
-
     if image.ndim != 4:
         raise ValueError("Wrong input shape")
     # setup coordinates for sampling image with torch.nn.functional.grid_sample
@@ -165,11 +151,10 @@ def sample_image_3d_compiled(
     coordinates = einops.rearrange(coordinates, 'b zyx -> b 1 1 1 zyx')
 
     # take the samples
-    interpolation_mode = 'bilinear' if interpolation == 'trilinear' else interpolation
     samples = F.grid_sample(
         input=image,
         grid=array_to_grid_sample(coordinates, array_shape=image.shape[-3:]),
-        mode=interpolation_mode,
+        mode='bilinear',
         padding_mode='border',
         align_corners=True,
     )

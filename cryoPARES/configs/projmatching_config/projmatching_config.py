@@ -1,8 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Optional
 
-from cryoPARES.configs.models_config.image2sphere_config.image2sphere_config import Image2Sphere_config
-
 
 @dataclass
 class Projmatching_config:
@@ -13,8 +11,8 @@ class Projmatching_config:
     max_shift_fraction: float = 0.2
     correct_ctf: bool = True
 
-    disable_compile_projectVol: bool = True #TODO: I believe that this config is not going to work in a dynamic manner, as it is used with a inject_config
-    compile_projectVol_mode: Optional[str] = "max-autotune"
+    disable_compile_projectVol: bool = True
+    compile_projectVol_mode: Optional[str] = None #"max-autotune"
 
     disable_compile_correlate_dft_2d: bool = True
     compile_correlate_dft_2d_mode: Optional[str] = "max-autotune"

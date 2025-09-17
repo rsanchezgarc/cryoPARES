@@ -328,7 +328,6 @@ class ProjectionMatcher(nn.Module):
         results_corr_matrix = torch.zeros(n_particles, self.keep_top_k_values)
         results_shifts_matrix = torch.zeros(n_particles, self.keep_top_k_values, 2, dtype=torch.int64)
         results_eulerDegs_matrix = torch.zeros(n_particles, self.keep_top_k_values, 3)
-        # stats_corr_matrix = torch.zeros(n_particles, 2)
         stats_corr_matrix = torch.zeros(n_particles, self.keep_top_k_values)
         idds_list = [None] * n_particles
 
@@ -350,25 +349,6 @@ class ProjectionMatcher(nn.Module):
         if "rlnImageId" in particlesStar.particles_md.columns:
             particlesStar.particles_md.drop("rlnImageId", axis=1)
 
-        parts_range = np.arange(results_corr_matrix.shape[0])
-        if REPORT_ALIGNMENT_DISPLACEMENT:
-            try:
-                ori_eulers = particlesDataSet.dataDict.get("eulerDegs")
-            except AttributeError:
-                try:
-                    ori_eulers = torch.tensor(particlesStar.particles_md.loc[:,RELION_ANGLES_NAMES].values,
-                                              dtype=torch.float32).unsqueeze(1)
-                except KeyError:
-                    ori_eulers = torch.ones(len(particlesStar.particles_md), 1, 3)
-            try:
-                ori_shifts = particlesDataSet.dataDict.get("shiftsAngs")
-            except AttributeError:
-                try:
-                    ori_shifts = torch.tensor(particlesStar.particles_md.loc[:,RELION_SHIFTS_NAMES].values,
-                                              dtype=torch.float32).unsqueeze(1)
-                except KeyError:
-                    ori_shifts = torch.ones(len(particlesStar.particles_md), 1, 2)
-
         dl = DataLoader(
                         #particlesDataSet, 
                         self.ds, 
@@ -378,13 +358,6 @@ class ProjectionMatcher(nn.Module):
         non_blocking = False
         _partIdx = 0
         for batch in tqdm(dl, desc="Aligning particles", disable=not self.verbose):
-
-            #(partIdx, fparts, ctfs, eulerDegs, idds) = batch
-            #eulerDegs = eulerDegs.to(device, non_blocking=non_blocking)
-            #fparts = fparts.to(device, non_blocking=non_blocking)
-            #ctfs = ctfs.to(device, non_blocking=non_blocking)
-
-            #batch = default_collate([self.ds[i] for i in self.ds.datasets[0].particles.particles_md.index.get_indexer(idds)])
 
             n_items = len(batch[BATCH_ORI_IMAGE_NAME])
             partIdx = torch.arange(_partIdx, _partIdx + n_items); _partIdx += n_items
@@ -445,70 +418,10 @@ class ProjectionMatcher(nn.Module):
             particles_md.loc[idds_list, confide_name] = _confidence.numpy()
 
 
-        # for complement_topK in range(n_topK):
-        #     topK = n_topK - 1 - complement_topK
-        #
-        #     if predEulerDegs.shape[1] > 1:
-        #         colname2change = {"copyNumber": topK}
-        #         particlesStar.updateMd(None, None, colname2change)
-        #     particlesStar.updateMd(idxs=parts_range, colname2change={"previousConfidenceScore": confidence.numpy()})
-        #
-        #     confidence *= prob_x_y[:, topK]
-        #     particlesStar.setPose(
-        #         parts_range,
-        #         eulerDegs=predEulerDegs[:, topK, ...].numpy(),
-        #         shiftsAngst=predShiftsAngs[:, topK, ...].numpy(),
-        #         confidence=confidence.numpy(),
-        #     )
-        #
-        #     particlesStar.updateMd(
-        #         idxs=parts_range, colname2change={"bruteForceScore": results_corr_matrix[:, topK].numpy()}
-        #     )
-        #     particlesStar.updateMd(
-        #         idxs=parts_range, colname2change={"bruteForceScoreNormalized": prob_x_y[:, topK].numpy()}
-        #     )
-        #     if complement_topK > 0:
-        #         finalParticlesStar += particlesStar
-        #     else:
-        #         finalParticlesStar = particlesStar
-
         if starFnameOut is not None:
             finalParticlesStar.save(starFname=starFnameOut)
             self.mainLogger.info(f"particles were saved at {starFnameOut}")
 
-        # if REPORT_ALIGNMENT_DISPLACEMENT:
-        #     ori_eulers = ori_eulers[range(predEulerDegs.shape[0]), ...]
-        #     ori_shifts = ori_shifts[range(predEulerDegs.shape[0]), ...]
-        #     best_value = float("inf")
-        #     for i in range(ori_eulers.shape[1]):
-        #         for j in range(predEulerDegs.shape[1]):
-        #             degs_angular_displacement = euler_degs_diff(
-        #                 predEulerDegs[:, j, :], ori_eulers[:, i, :]
-        #             )
-        #             angst_translation_displacement = shifst_angs_diff(
-        #                 predShiftsAngs[:, j, :], ori_shifts[:, i, :]
-        #             )
-        #             degs_mean = degs_angular_displacement.mean()
-        #             if best_value > degs_mean:
-        #                 best_value = degs_mean
-        #                 degs_mean, degs_std = (
-        #                     degs_angular_displacement.mean(),
-        #                     degs_angular_displacement.std(),
-        #                 )
-        #                 degs_median = np.median(degs_angular_displacement)
-        #                 degs_iqr = np.quantile(degs_angular_displacement, 0.75) - np.quantile(
-        #                     degs_angular_displacement, 0.25
-        #                 )
-        #
-        #     agst_mean, agst_std = angst_translation_displacement.mean(), angst_translation_displacement.std()
-        #     agst_median = np.median(angst_translation_displacement)
-        #     agst_iqr = (np.quantile(angst_translation_displacement, 0.75) -
-        #                 np.quantile(angst_translation_displacement, 0.25))
-        #     self.mainLogger.info(
-        #         "Alignment displacements mean (std)\tmedian (iqr)\n"
-        #         f"Angle: {degs_mean:2.3f} +/- {degs_std:2.3f}\t{degs_median:2.3f} +/- {degs_iqr:2.3f}\n"
-        #         f"Shift: {agst_mean:2.3f} +/- {agst_std:2.3f}\t{agst_median:2.3f} +/- {agst_iqr:2.3f} "
-        #     )
 
         del particlesDataSet
         gc.collect()

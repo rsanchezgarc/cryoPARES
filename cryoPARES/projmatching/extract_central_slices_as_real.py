@@ -37,7 +37,7 @@ def _get_freq_grid_valid_coords_and_freq_grid_mask(image_shape, device:torch.dev
 
 
 def extract_central_slices_rfft_3d_multichannel(
-    volume_rfft: torch.Tensor,  # (c, d, d, d)
+    volume_rfft: torch.Tensor,  # (c, d, d, d//2+1)
     image_shape: tuple[int, int, int],
     rotation_matrices: torch.Tensor,  # (..., 3, 3)
     fftfreq_max: float | None = None,

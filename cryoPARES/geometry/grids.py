@@ -136,6 +136,21 @@ def _filter_duplicate_angles_in_grid(grid, degrees:bool, atol=None):
     grid = grid[idxs]
     return grid
 
+from cryoPARES.geometry.utilsGrid import so3_grid_near_identity_fibo as _so3_grid_near_identity_fibo
+
+@cache.cache()
+def so3_grid_near_identity_fibo(
+                    distance_deg: float,
+                    spacing_deg: float,
+                    use_small_aprox: bool = False,
+                    device=None,
+                    dtype=torch.float32,
+                    return_weights: bool = True,
+                    output: str = "matrix"):
+    return _so3_grid_near_identity_fibo(
+                distance_deg, spacing_deg, use_small_aprox, device,
+                dtype, return_weights, output)
+
 if __name__ == "__main__":
     # out = so3_near_identity_grid_cartesianprod(15, 3, transposed=False, degrees=True)
     out = so3_near_identity_grid_cartesianprod(np.pi/12, 8, transposed=False, degrees=False)

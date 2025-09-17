@@ -18,6 +18,7 @@ from torch_grid_utils import circle
 from cryoPARES.constants import (RELION_EULER_CONVENTION, BATCH_POSE_NAME, RELION_PRED_POSE_CONFIDENCE_NAME,
                                  BATCH_ORI_IMAGE_NAME, BATCH_ORI_CTF_NAME, RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES,
                                  BATCH_IDS_NAME)
+from cryoPARES.projmatching.extract_central_slices_as_real import extract_central_slices_rfft_3d_multichannel
 from cryoPARES.utils.paths import MAP_AS_ARRAY_OR_FNAME_TYPE, FNAME_TYPE
 
 from cryoPARES.configs.mainConfig import main_config
@@ -30,13 +31,12 @@ from .myProgressBar import myTqdm as tqdm
 
 from cryoPARES.projmatching.filterToResolution import low_pass_filter_fname
 
-
-# Fourier-side ops and dataset
-from .fourierOperations import correlate_dft_2d, compute_dft_3d, _compute_one_batch_fft
-
+from cryoPARES.projmatching.fourierOperations import correlate_dft_2d, compute_dft_3d, _real_to_fourier_2d
 from torch_fourier_slice.slice_extraction import extract_central_slices_rfft_3d
 
 REPORT_ALIGNMENT_DISPLACEMENT = True
+USE_TWO_FLOAT32_FOR_COMPLEX = True
+
 def get_rotmat(degAngles, convention:str=RELION_EULER_CONVENTION, device="cpu"):
     return euler_angles_to_matrix(torch.deg2rad(degAngles), convention=convention).to(device)
 
@@ -72,6 +72,30 @@ class ProjectionMatcher(nn.Module):
         self.verbose = verbose
         self.correct_ctf = correct_ctf
         self.mainLogger = getWorkerLogger(self.verbose)
+
+        if USE_TWO_FLOAT32_FOR_COMPLEX:
+            self.projectF = self._projectF_USE_TWO_FLOAT32_FOR_COMPLEX
+        else:
+            self.projectF = self._projectF
+
+        # if not main_config.projmatching.disable_compile_analyze_cc:
+        #     self._analyze_cross_correlation = torch.compile(_analyze_cross_correlation, fullgraph=True,
+        #                                                     mode=main_config.projmatching.compile_analyze_cc_mode,
+        #                                                     dynamic=True)
+        #     self._extract_ccor_max = torch.compile(_extract_ccor_max, fullgraph=True,
+        #                                                     mode=main_config.projmatching.compile_analyze_cc_mode,
+        #                                                     dynamic=True)
+        # else:
+        #     self._analyze_cross_correlation = _analyze_cross_correlation
+        #     self._extract_ccor_max = _extract_ccor_max
+
+
+        if main_config.projmatching.disable_compile_correlate_dft_2d:
+            self.correlate_dft_2d = correlate_dft_2d
+        else:
+            self.correlate_dft_2d = torch.compile(correlate_dft_2d, fullgraph=True,
+                                              mode=main_config.projmatching.compile_correlate_dft_2d_mode,
+                                              dynamic=True)
 
     # ----------------------- Basic props/helpers -----------------------
 
@@ -119,6 +143,9 @@ class ProjectionMatcher(nn.Module):
         )
         self.pad_length = pad_length
 
+        #We are storing the volumes as real and imaginary float32
+        reference_vol = torch.view_as_real(reference_vol).permute([-1, 0, 1, 2]).contiguous()
+
         self.register_buffer("reference_vol", reference_vol)
 
         self.vol_shape = vol_shape
@@ -138,7 +165,7 @@ class ProjectionMatcher(nn.Module):
             cutoff_freq = 1 / self.max_resolution_A             # cutoff freq in cycles/Å
             self.fftfreq_max =  min(cutoff_freq / nyquist_freq, 1.0)   # normalize to Nyquist (0..1)
 
-    def projectF(self, rotMats: torch.Tensor) -> torch.Tensor:
+    def _projectF(self, rotMats: torch.Tensor) -> torch.Tensor:
 
         return extract_central_slices_rfft_3d(
             self.reference_vol,
@@ -147,6 +174,15 @@ class ProjectionMatcher(nn.Module):
             fftfreq_max=self.fftfreq_max ,
             zyx_matrices=False,)
 
+
+    def _projectF_USE_TWO_FLOAT32_FOR_COMPLEX(self, rotMats: torch.Tensor) -> torch.Tensor:
+
+        projs = extract_central_slices_rfft_3d_multichannel(self.reference_vol, self.vol_shape,
+                                                            rotation_matrices=rotMats,
+                                                            fftfreq_max= self.fftfreq_max,
+                                                            zyx_matrices=False)
+        projs = projs.permute([0, 2, 3, 1]).contiguous()
+        return projs
 
     def correlateF(self, parts: torch.Tensor, projs: torch.Tensor):
         return self._correlateCrossCorrelation(parts, projs)
@@ -166,7 +202,7 @@ class ProjectionMatcher(nn.Module):
             return None
 
     def _correlateCrossCorrelation(self, parts: torch.Tensor, projs: torch.Tensor):
-        corrs = correlate_dft_2d(
+        corrs = self.correlate_dft_2d(
             parts, projs, max_freq_pixels=self.max_resoluton_freq_pixels
         )
         b, options, l0, l1 = corrs.shape
@@ -216,8 +252,10 @@ class ProjectionMatcher(nn.Module):
         projs = self._compute_projections(expanded_eulerDegs.reshape(-1, 3))[0]
 
         if self.correct_ctf:
-            projs = self._apply_ctfF(projs.reshape(bsize, -1, *projs.shape[-2:]), ctfs.unsqueeze(1))
-
+            _shapeIdx = -3 if USE_TWO_FLOAT32_FOR_COMPLEX else -3
+            ctfs = ctfs.unsqueeze(1).unsqueeze(-1)
+            projs = self._apply_ctfF(projs.reshape(bsize, -1, *projs.shape[_shapeIdx:]), ctfs)
+        del ctfs
         perImgCorr, pixelShiftsXY = self.correlateF(fparts.unsqueeze(1), projs)
 
         maxCorrs, maxCorrsIdxs = perImgCorr.topk(self.keep_top_k_values, sorted=True, largest=True, dim=-1)
@@ -233,7 +271,7 @@ class ProjectionMatcher(nn.Module):
     def forward(self, imgs, ctfs, rotmats):
 
         imgs = imgs * self.rmask
-        fparts = _compute_one_batch_fft(imgs)
+        fparts = _real_to_fourier_2d(imgs * self.rmask, view_complex_as_two_float32=USE_TWO_FLOAT32_FOR_COMPLEX)
         eulerDegs = torch.rad2deg(matrix_to_euler_angles(rotmats, RELION_EULER_CONVENTION))
         maxCorrs, predEulerDegs, pixelShiftsXY, comparedWeight = self._fourier_forward(fparts, ctfs, eulerDegs)
         predShiftsAngsXY = -(pixelShiftsXY.float() - self.half_particle_size) * self.vol_voxel_size
@@ -312,7 +350,7 @@ class ProjectionMatcher(nn.Module):
             rotmats = batch[BATCH_POSE_NAME][0].to(device, non_blocking=non_blocking)
             parts = batch[BATCH_ORI_IMAGE_NAME].to(device, non_blocking=non_blocking)
             ctfs = batch[BATCH_ORI_CTF_NAME].to(device, non_blocking=non_blocking)
-            fparts = _compute_one_batch_fft(parts * self.rmask)
+            fparts = _real_to_fourier_2d(parts * self.rmask, view_complex_as_two_float32=USE_TWO_FLOAT32_FOR_COMPLEX)
             eulerDegs = torch.rad2deg(matrix_to_euler_angles(rotmats, RELION_EULER_CONVENTION)).unsqueeze(1)
 
 
@@ -407,6 +445,55 @@ class ProjectionMatcher(nn.Module):
         pixelShiftsXY[:, 1] = h0 + maxIndxI
         pixelShiftsXY[:, 0] = w0 + torch.gather(maxIndxJ, 1, maxIndxI.unsqueeze(1)).squeeze(1)
         return perImgCorr, pixelShiftsXY
+
+def _analyze_cross_correlation(perImgCorr:torch.Tensor, pixelShiftsXY:torch.Tensor, grid_rotmats:torch.Tensor,
+                               return_top_k:int, half_particle_size:float,
+                               vol_voxel_size:float) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+
+    b, topk, nrots = perImgCorr.shape
+    batch_arange= torch.arange(b, device=perImgCorr.device).unsqueeze(1)
+
+    reshaped_perImgCorr = perImgCorr.reshape(b, -1)
+    maxCorrs, maxIdxs = reshaped_perImgCorr.topk(return_top_k, largest=True, sorted=True)
+    bestPixelShiftsXY = pixelShiftsXY.reshape(b, -1, 2)[batch_arange, maxIdxs]
+    mean_corr = torch.mean(reshaped_perImgCorr, dim=-1, keepdim=True)
+    std_corr = torch.std(reshaped_perImgCorr, dim=-1, keepdim=True)
+    comparedWeight = torch.distributions.Normal(mean_corr, std_corr+1e-6).cdf(maxCorrs)  # 1-P(I_i > All_images)
+    predShiftsAngsXY = -(bestPixelShiftsXY - half_particle_size) * vol_voxel_size
+
+    topk_input_indices = maxIdxs // nrots
+    predRotMatsIdxs = maxIdxs % nrots
+    predRotMats = grid_rotmats[batch_arange, topk_input_indices, predRotMatsIdxs]
+    return maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight
+
+@lru_cache(1)
+def _get_begin_end_from_max_shift(image_shape, max_shift):
+    h, w = image_shape
+    one_minus_max_shift = 1 - max_shift
+    delta_h = math.ceil((h * one_minus_max_shift) / 2)
+    h0 = delta_h
+    h1 = h - delta_h
+
+    delta_w = math.ceil((w * one_minus_max_shift) / 2)
+    w0 = delta_w
+    w1 = w - delta_w
+
+    return h0, h1, w0, w1
+
+def _extract_ccor_max(corrs, max_shift_fraction):
+    pixelShiftsXY = torch.empty(corrs.shape[:-2] + (2,), device=corrs.device, dtype=torch.int64)
+
+    if max_shift_fraction is not None:
+        h0, h1, w0, w1 = _get_begin_end_from_max_shift(corrs.shape[-2:], max_shift_fraction)
+        corrs = corrs[..., h0:h1, w0:w1]
+    else:
+        h0, w0 = 0, 0
+    maxCorrsJ, maxIndxJ = corrs.max(-1)
+    perImgCorr, maxIndxI = maxCorrsJ.max(-1)
+    pixelShiftsXY[..., 1] = h0 + maxIndxI
+    pixelShiftsXY[..., 0] = w0 + torch.gather(maxIndxJ, -1, maxIndxI.unsqueeze(-1)).squeeze(-1)
+
+    return perImgCorr, pixelShiftsXY
 
 
 def align_star(

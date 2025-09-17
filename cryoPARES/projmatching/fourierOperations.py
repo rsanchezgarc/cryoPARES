@@ -94,15 +94,19 @@ def _mask_for_dft_2d(img_shape, max_freq_pixels, rfft, fftshifted, device):
     return mask
 
 def correlate_dft_2d(
-    a: torch.Tensor,
-    b: torch.Tensor,
+    parts: torch.Tensor,
+    projs: torch.Tensor,
     max_freq_pixels: Optional[Union[int, Sequence[int]]] = None
 ) -> torch.Tensor:
     """Correlate fftshifted rfft discrete Fourier transforms of images"""
     #TODO: add Alister newcode to limit the resolution range
 
+    if not parts.is_complex():
+        parts = torch.view_as_complex(parts)
+    if not projs.is_complex():
+        projs = torch.view_as_complex(projs)
 
-    result = a * torch.conj(b)
+    result = parts * torch.conj(projs)
     if max_freq_pixels is not None:  # TODO: use alister trick to project only the desired frequencies
         mask = _mask_for_dft_2d(result.shape, max_freq_pixels, rfft=True, fftshifted=True,
                             device=result.device)
@@ -113,12 +117,22 @@ def correlate_dft_2d(
     return torch.real(result)
 
 
-def _compute_one_batch_fft(imgs): #TODO: Is it worth it to compile it?
+def _real_to_fourier_2d(imgs, view_complex_as_two_float32=False): #TODO: Is it worth it to compile it?
     imgs = torch.fft.fftshift(imgs, dim=(-2, -1))
     imgs = torch.fft.rfftn(imgs, dim=(-2, -1))
     imgs = torch.fft.fftshift(imgs, dim=(-2,))
     # imgs = imgs / imgs.abs().sum() #Normalization
+    if view_complex_as_two_float32:
+        imgs = torch.view_as_real(imgs)
     return imgs
 
-if not main_config.projmatching.disable_compile_projectVol:
-    correlate_dft_2d = torch.compile(correlate_dft_2d, mode=main_config.projmatching.compile_correlate_dft_2d_mode)
+def _fourier_proj_to_real_2d(projections, pad_length):
+    if not projections.is_complex():
+        projections = torch.view_as_complex(projections.contiguous())
+    projections = torch.fft.ifftshift(projections, dim=(-2,))  # ifftshift of rfft
+    projections = torch.fft.irfftn(projections, dim=(-2, -1))
+    projections = torch.fft.ifftshift(projections, dim=(-2, -1))  # recenter real space
+
+    if pad_length is not None:
+        projections = projections[..., pad_length: -pad_length, pad_length: -pad_length]
+    return projections

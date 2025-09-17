@@ -294,13 +294,15 @@ class SingleInferencer:
         self._datamanager = self._get_datamanager(rank)
         return self._datamanager.predict_dataloader()
 
-    def _process_batch(self, model: PlModel, batch: Dict[str, Any] | None, batch_idx: int):
+    def _process_batch(self, model: PlModel, batch: Dict[str, Any] | None, batch_idx: int,
+                       gpu_offload=False):
         """
         Processes a single batch of data through the model and returns the predictions.
 
         :param model: The inference model.
         :param batch: The batch of data to process. If None, it flushes the model's buffer.
         :param batch_idx: The index of the current batch.
+        :param gpu_offload: If True, the results will be moved from GPU to CPU
         :return: A tuple containing the particle IDs, predicted Euler angles, shifts, scores, and normalized scores. Returns None if there are no results.
         """
         device = self.device
@@ -326,7 +328,11 @@ class SingleInferencer:
         ids, pred_rotmats, pred_shiftsXYangs, score, norm_nn_score = result
         # Convert rotation matrices to euler angles
         euler_degs = torch.rad2deg(matrix_to_euler_angles(pred_rotmats, RELION_EULER_CONVENTION))
-
+        if gpu_offload:
+            euler_degs = euler_degs.cpu()
+            pred_shiftsXYangs = pred_shiftsXYangs.cpu()
+            score = score.cpu()
+            norm_nn_score = norm_nn_score.cpu()
         return ids, euler_degs, pred_shiftsXYangs, score, norm_nn_score
 
     def run(self):
@@ -420,23 +426,24 @@ class SingleInferencer:
         finally:
             pbar.close()
 
-    def _process_all_batches(self, model, dataloader, pbar=None):
+    def _process_all_batches(self, model, dataloader, pbar=None, gpu_offload=True):
         """
         Iterates through all batches in the data loader, processes them, and collects the results.
 
         :param model: The inference model.
         :param dataloader: The data loader.
         :param pbar: The progress bar.
+        :param gpu_offload: If true, results are moved from the GPU to the CPU
         :return: A list of results from processing each batch.
         """
         all_results = []
         with torch.inference_mode():
             for batch_idx, batch in enumerate(dataloader):
-                result = self._process_batch(model, batch, batch_idx)
+                result = self._process_batch(model, batch, batch_idx, gpu_offload=gpu_offload)
                 if result:
                     all_results.append(result)
-                if pbar is not None: pbar.update(1)
-            result = self._process_batch(model, batch=None, batch_idx=-1)  # batch=None flushes the model buffer
+                if pbar is not None: pbar.update(1) #TODO: Implement gpu offloading
+            result = self._process_batch(model, batch=None, batch_idx=-1, gpu_offload=gpu_offload)  # batch=None flushes the model buffer
             if result is not None:
                 all_results.append(result) #TODO: We might want to call .cpu() to save GPU memory during inference.
         return all_results

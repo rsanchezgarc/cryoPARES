@@ -32,7 +32,6 @@ from .metrics import euler_degs_diff, shifst_angs_diff
 # Fourier-side ops and dataset
 from .fourierOperations import (
     correlate_dft_2d,
-    extract_central_slices_rfft,
     compute_dft,
 )
 from torch_fourier_slice.slice_extraction import extract_central_slices_rfft_3d
@@ -151,18 +150,18 @@ class ProjectionMatcher(nn.Module):
         radius_px = self.image_shape[-2] // 2
         self.register_buffer("rmask",_getMask(radius_px, self.image_shape, device="cpu"))
 
+        if self.max_resolution_A is not None:
+            nyquist_freq = 1 / (2 * self.vol_voxel_size)        # Nyquist freq in cycles/Å
+            cutoff_freq = 1 / self.max_resolution_A             # cutoff freq in cycles/Å
+            self.fftfreq_max =  min(cutoff_freq / nyquist_freq, 1.0)   # normalize to Nyquist (0..1)
+
     def projectF(self, rotMats: torch.Tensor) -> torch.Tensor:
-        # return extract_central_slices_rfft(
-        #     self.reference_vol,
-        #     image_shape=self.vol_shape,
-        #     rotation_matrices=rotMats,
-        #     rotation_matrix_zyx=False,
-        # )
+
         return extract_central_slices_rfft_3d(
             self.reference_vol,
             image_shape=self.vol_shape,
             rotation_matrices=rotMats,
-            fftfreq_max=None,
+            fftfreq_max=self.fftfreq_max ,
             zyx_matrices=False,)
 
 

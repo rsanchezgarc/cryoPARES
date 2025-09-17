@@ -6,9 +6,7 @@ import torch
 
 from libtilt.shapes import circle
 
-from libtilt.projection.project_fourier import _compute_dft, extract_central_slices_rfft as _extract_central_slices_rfft
-from libtilt.shift import phase_shift_dft_2d as _phase_shift_dft_2d
-from .dataUtils.filterToResolution import _raised_cosine_filter
+from libtilt.projection.project_fourier import _compute_dft
 from ..configs.mainConfig import main_config
 
 compute_dft = _compute_dft
@@ -69,15 +67,4 @@ def correlate_dft_2d(
 
 
 if not main_config.projmatching.disable_compile_projectVol:
-
-    extract_central_slices_rfft = torch.compile(_extract_central_slices_rfft, mode=main_config.projmatching.compile_projectVol_mode)
-    # explanation, out_guards, graphs, ops_per_graph = torch._dynamo.explain(extract_central_slices_rfft,
-    #                                                                        _compute_dft(torch.randn(128,128,128))[0],
-    #                                                                        (128,128,128), torch.randn(16,3,3), True)
-    # print(explanation)
-
     correlate_dft_2d = torch.compile(correlate_dft_2d, mode=main_config.projmatching.compile_correlate_dft_2d_mode)
-    phase_shift_dft_2d = torch.compile(_phase_shift_dft_2d, mode=main_config.projmatching.compile_correlate_dft_2d_mode)
-else:
-    extract_central_slices_rfft = _extract_central_slices_rfft
-    phase_shift_dft_2d = _phase_shift_dft_2d

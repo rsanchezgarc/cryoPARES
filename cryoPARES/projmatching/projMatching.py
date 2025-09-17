@@ -4,6 +4,7 @@ import tempfile
 import math
 from functools import cached_property, lru_cache
 from typing import Tuple, Iterable, Optional, Literal
+from torch import nn
 
 import numpy as np
 import starfile
@@ -13,7 +14,8 @@ from torch.utils.data import DataLoader, default_collate
 from cryoPARES.constants import (RELION_EULER_CONVENTION, BATCH_POSE_NAME, RELION_PRED_POSE_CONFIDENCE_NAME,
                                  BATCH_ORI_IMAGE_NAME, BATCH_ORI_CTF_NAME, RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES,
                                  BATCH_IDS_NAME, RELION_IMAGE_FNAME)
-from torch import nn
+from cryoPARES.utils.paths import MAP_AS_ARRAY_OR_FNAME_TYPE
+
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.geometry.convert_angles import euler_angles_to_matrix, matrix_to_euler_angles
 from cryoPARES.geometry.grids import so3_near_identity_grid_cartesianprod
@@ -27,13 +29,10 @@ from .dataUtils.filterToResolution import low_pass_filter_fname
 
 from .dataUtils.dataTypes import IMAGEFNAME_MRCIMAGE, FNAME
 from starstack import ParticlesStarSet
-from .metrics import euler_degs_diff, shifst_angs_diff
 
 # Fourier-side ops and dataset
-from .fourierOperations import (
-    correlate_dft_2d,
-    compute_dft,
-)
+from .fourierOperations import correlate_dft_2d, compute_dft_3d
+
 from torch_fourier_slice.slice_extraction import extract_central_slices_rfft_3d
 from .preprocessParticles import  _compute_one_batch_fft, _getMask
 
@@ -49,7 +48,7 @@ class ProjectionMatcher(nn.Module):
 
     def __init__(
         self,
-        reference_vol: IMAGEFNAME_MRCIMAGE,
+        reference_vol: MAP_AS_ARRAY_OR_FNAME_TYPE,
         pixel_size: float | None = None,
         grid_distance_degs: float | Tuple[float, float, float] = 8.0,
         grid_step_degs: float | Tuple[float, float, float] = 2.0,
@@ -86,30 +85,13 @@ class ProjectionMatcher(nn.Module):
         self.grid_distance_degs and self.grid_step_degs.
         """
         if not hasattr(self, "_so3_delta") or self._so3_delta.device != device:
-            if not isinstance(self.grid_distance_degs, Iterable):
-                grid_distance_degs = (
-                    self.grid_distance_degs,
-                    self.grid_distance_degs,
-                    self.grid_distance_degs,
-                )
-            else:
-                grid_distance_degs = self.grid_distance_degs
-
-            if not isinstance(self.grid_step_degs, Iterable):
-                grid_step_degs = (
-                    self.grid_step_degs,
-                    self.grid_step_degs,
-                    self.grid_step_degs,
-                )
-            else:
-                grid_step_degs = self.grid_step_degs
 
             n_angles = math.ceil(self.grid_distance_degs * 2 / self.grid_step_degs)
             n_angles = n_angles if n_angles % 2 == 1 else n_angles + 1  # We always want an odd number
             self._so3_delta = so3_near_identity_grid_cartesianprod(self.grid_distance_degs, n_angles,
                                                              transposed=False, degrees=True,
                                                              remove_duplicates=False).to(device)
-            #TODO: Remove duplicates=True makes the whole things broken. Probably due to euler angles singularities
+            #TODO: remove_duplicates=True makes the whole things broken. Probably due to euler angles singularities
         return self._so3_delta
 
     # ----------------------- Fourier-specific core -----------------------
@@ -132,7 +114,7 @@ class ProjectionMatcher(nn.Module):
         )
 
         pad_length = int(self.padding_factor * reference_vol.shape[-1] // 2)
-        reference_vol, vol_shape, pad_length = compute_dft(
+        reference_vol, vol_shape, pad_length = compute_dft_3d(
             reference_vol, pad_length=pad_length
         )
         self.pad_length = pad_length
@@ -204,7 +186,7 @@ class ProjectionMatcher(nn.Module):
         self,
         particles: FNAME | ParticlesStarSet,
         data_rootdir,
-        particle_radius_angs, #TODO: This is not used
+        particle_radius_angs, #TODO: This is not used. Would need to be in the builder?
         batch_size,
     ):
 
@@ -266,7 +248,6 @@ class ProjectionMatcher(nn.Module):
         particle_radius_angs=None,
         batch_size=256,
         device="cuda",
-        fft_in_device=False,
     ) -> ParticlesStarSet:
         """
         Align particles (input STAR file or ParticlesStarSet) to the reference.
@@ -347,7 +328,7 @@ class ProjectionMatcher(nn.Module):
 
         prob_x_y = stats_corr_matrix
         n_topK = predEulerDegs.shape[1]
-        # finalParticlesStar = None
+
         finalParticlesStar = particlesStar
         particles_md = particlesStar.particles_md
         for k in range(n_topK):
@@ -443,7 +424,6 @@ def align_star(
     use_cuda: bool = True,
     verbose: bool = True,
     torch_matmul_precision: Literal["highest", "high", "medium"] = "high",
-    fft_in_cuda: bool = True,
     gpu_id: Optional[int] = None,
     n_first_particles: Optional[int] = None,
     correct_ctf: bool = True,
@@ -465,7 +445,6 @@ def align_star(
     :param use_cuda:
     :param verbose:
     :param torch_matmul_precision:
-    :param fft_in_cuda:
     :param gpu_id:
     :param n_first_particles:
     :param correct_ctf:
@@ -493,7 +472,6 @@ def align_star(
 
     with tempfile.TemporaryDirectory() as tmpdir:
         # Optional limit subset
-        ori_star_fname = None
         if n_first_particles is not None:
             star_data = starfile.read(star_fname)
             particles_df = star_data["particles"]
@@ -534,7 +512,6 @@ def align_star(
             batch_size=batch_size,
             particle_radius_angs=particle_radius_angs,
             device=device,
-            fft_in_device=fft_in_cuda,
         )
 
 

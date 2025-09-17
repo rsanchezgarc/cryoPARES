@@ -1,15 +1,62 @@
 from functools import lru_cache
-from typing import Optional, Sequence, Union
+from typing import Optional, Sequence, Union, Tuple
 
-import numpy as np
 import torch
+import torch.nn.functional as F
+import numpy as np
 
-from libtilt.shapes import circle
+from torch_grid_utils import fftfreq_grid
+from torch_grid_utils.shapes_2d import circle
 
-from libtilt.projection.project_fourier import _compute_dft
 from ..configs.mainConfig import main_config
 
-compute_dft = _compute_dft
+
+def compute_dft_3d(
+    volume: torch.Tensor,
+    pad: bool = True,
+    pad_length: int | None = None
+) -> Tuple[torch.Tensor, Tuple[int,int,int], int | None]:
+    """Computes the DFT of a volume. Intended to be used as a preprocessing before using extract_central_slices_rfft.
+
+    Parameters
+    ----------
+    volume: torch.Tensor
+        `(d, d, d)` volume.
+    pad: bool
+        Whether to pad the volume with zeros to increase sampling in the DFT.
+    pad_length: int | None
+        The length used for padding each side of each dimension. If pad_length=None, and pad=True then volume.shape[-1] // 2 is used instead
+
+    Returns
+    -------
+    projections: Tuple[torch.Tensor, torch.Tensor, int]
+        `(..., d, d, d)` dft of the volume. fftshifted rfft
+        Tuple[int,int,int] the shape of the volume after padding
+        int with the padding length
+    """
+    # padding
+    if pad is True:
+        if pad_length is None:
+            pad_length = volume.shape[-1] // 2
+        volume = F.pad(volume, pad=[pad_length] * 6, mode='constant', value=0)
+
+    vol_shape = tuple(volume.shape)
+    # premultiply by sinc2
+    grid = fftfreq_grid(
+        image_shape=vol_shape,
+        rfft=False,
+        fftshift=True,
+        norm=True,
+        device=volume.device
+    )
+    volume = volume * torch.sinc(grid) ** 2
+
+    # calculate DFT
+    dft = torch.fft.fftshift(volume, dim=(-3, -2, -1))  # volume center to array origin
+    dft = torch.fft.rfftn(dft, dim=(-3, -2, -1))
+    dft = torch.fft.fftshift(dft, dim=(-3, -2,))  # actual fftshift of rfft
+
+    return dft, vol_shape, pad_length
 
 
 @lru_cache(1)
@@ -31,8 +78,8 @@ def _mask_for_dft_2d(img_shape, max_freq_pixels, rfft, fftshifted, device):
     if rfft:
         centre = img_size // 2
         last_freq = mask[..., 0:1]
-        begining = mask[..., centre:]
-        mask = torch.concatenate([begining, last_freq], dim=-1)
+        beginning = mask[..., centre:]
+        mask = torch.concatenate([beginning, last_freq], dim=-1)
 
 
     # import matplotlib.pyplot as plt

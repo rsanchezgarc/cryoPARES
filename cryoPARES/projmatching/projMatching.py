@@ -35,7 +35,8 @@ from .fourierOperations import (
     extract_central_slices_rfft,
     compute_dft,
 )
-from .preprocessParticles import ParticlesFourierDataset, _compute_one_batch_fft, _getMask
+from torch_fourier_slice.slice_extraction import extract_central_slices_rfft_3d
+from .preprocessParticles import  _compute_one_batch_fft, _getMask
 
 REPORT_ALIGNMENT_DISPLACEMENT = True
 def get_rotmat(degAngles, convention:str=RELION_EULER_CONVENTION, device="cpu"):
@@ -151,12 +152,18 @@ class ProjectionMatcher(nn.Module):
         self.register_buffer("rmask",_getMask(radius_px, self.image_shape, device="cpu"))
 
     def projectF(self, rotMats: torch.Tensor) -> torch.Tensor:
-        return extract_central_slices_rfft(
+        # return extract_central_slices_rfft(
+        #     self.reference_vol,
+        #     image_shape=self.vol_shape,
+        #     rotation_matrices=rotMats,
+        #     rotation_matrix_zyx=False,
+        # )
+        return extract_central_slices_rfft_3d(
             self.reference_vol,
             image_shape=self.vol_shape,
             rotation_matrices=rotMats,
-            rotation_matrix_zyx=False,
-        )
+            fftfreq_max=None,
+            zyx_matrices=False,)
 
 
     def correlateF(self, parts: torch.Tensor, projs: torch.Tensor):
@@ -198,7 +205,7 @@ class ProjectionMatcher(nn.Module):
         self,
         particles: FNAME | ParticlesStarSet,
         data_rootdir,
-        particle_radius_angs,
+        particle_radius_angs, #TODO: This is not used
         batch_size,
     ):
 

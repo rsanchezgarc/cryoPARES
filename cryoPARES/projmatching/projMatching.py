@@ -3,20 +3,22 @@ import os
 import tempfile
 import math
 from functools import cached_property, lru_cache
-from typing import Tuple, Iterable, Optional, Literal
+from typing import Tuple, Optional, Literal
+
+from starstack import ParticlesStarSet
 from torch import nn
 
 import numpy as np
 import starfile
 import torch
 from scipy.spatial.transform import Rotation
-from torch.utils.data import DataLoader, default_collate
+from torch.utils.data import DataLoader
 from torch_grid_utils import circle
 
 from cryoPARES.constants import (RELION_EULER_CONVENTION, BATCH_POSE_NAME, RELION_PRED_POSE_CONFIDENCE_NAME,
                                  BATCH_ORI_IMAGE_NAME, BATCH_ORI_CTF_NAME, RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES,
-                                 BATCH_IDS_NAME, RELION_IMAGE_FNAME)
-from cryoPARES.utils.paths import MAP_AS_ARRAY_OR_FNAME_TYPE
+                                 BATCH_IDS_NAME)
+from cryoPARES.utils.paths import MAP_AS_ARRAY_OR_FNAME_TYPE, FNAME_TYPE
 
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.geometry.convert_angles import euler_angles_to_matrix, matrix_to_euler_angles
@@ -25,12 +27,9 @@ from cryoPARES.geometry.metrics_angles import rotation_error_with_sym
 from cryoPARES.utils.reconstructionUtils import get_vol
 from .loggers import getWorkerLogger
 from .myProgressBar import myTqdm as tqdm
-from joblib.externals.loky.backend import get_context
 
-from .dataUtils.filterToResolution import low_pass_filter_fname
+from cryoPARES.projmatching.filterToResolution import low_pass_filter_fname
 
-from .dataUtils.dataTypes import IMAGEFNAME_MRCIMAGE, FNAME
-from starstack import ParticlesStarSet
 
 # Fourier-side ops and dataset
 from .fourierOperations import correlate_dft_2d, compute_dft_3d, _compute_one_batch_fft
@@ -98,7 +97,7 @@ class ProjectionMatcher(nn.Module):
     # ----------------------- Fourier-specific core -----------------------
 
     def _store_reference_vol(
-        self, reference_vol: IMAGEFNAME_MRCIMAGE, pixel_size: float | None = None
+        self, reference_vol: MAP_AS_ARRAY_OR_FNAME_TYPE, pixel_size: float | None = None
     ):
         """
         Load volume, move to Fourier domain (rfft & shift), register buffers and
@@ -186,7 +185,7 @@ class ProjectionMatcher(nn.Module):
 
     def preprocess_particles(
         self,
-        particles: FNAME | ParticlesStarSet,
+        particles: FNAME_TYPE,
         data_rootdir,
         particle_radius_angs, #TODO: This is not used. Would need to be in the builder?
         batch_size,
@@ -244,15 +243,15 @@ class ProjectionMatcher(nn.Module):
     @torch.inference_mode()
     def align_star(
         self,
-        particles: FNAME | ParticlesStarSet,
-        starFnameOut: FNAME,
+        particles: FNAME_TYPE ,
+        starFnameOut: FNAME_TYPE,
         data_rootdir: str | None = None,
         particle_radius_angs=None,
         batch_size=256,
         device="cuda",
     ) -> ParticlesStarSet:
         """
-        Align particles (input STAR file or ParticlesStarSet) to the reference.
+        Align particles (input STAR file) to the reference.
         Writes a STAR with predicted poses/shifts if starFnameOut provided.
         """
         if starFnameOut is not None:

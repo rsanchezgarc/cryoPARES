@@ -400,7 +400,7 @@ class ProjectionMatcher(nn.Module):
                 ang_err = torch.rad2deg(rotation_error_with_sym(r1, r2, symmetry="C1"))# C1 since we do not use symemtry in local refinement. Ideally we would like to use the proper symmetry for eval purposes
 
                 s2 = particles_md.loc[idds_list, shiftsXYangs_names].values
-                shift_error = np.sqrt(((predShiftsAngs - s2) ** 2).sum(-1))
+                shift_error = np.sqrt(((shiftsXYangs - s2) ** 2).sum(-1))
                 print(f"Median Ang   Error degs (top-{k + 1}):", np.median(ang_err))
                 print(f"Median Shift Error Angs (top-{k + 1}):", np.median(shift_error))
                 ######## END of Debug code

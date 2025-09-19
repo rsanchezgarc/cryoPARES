@@ -96,7 +96,6 @@ def _mask_for_dft_2d(img_shape, max_freq_pixels, rfft, fftshifted, device):
 def correlate_dft_2d(
     parts: torch.Tensor,
     projs: torch.Tensor,
-    max_freq_pixels: Optional[Union[int, Sequence[int]]] = None
 ) -> torch.Tensor:
     """Correlate fftshifted rfft discrete Fourier transforms of images"""
     #TODO: add Alister newcode to limit the resolution range
@@ -107,10 +106,6 @@ def correlate_dft_2d(
         projs = torch.view_as_complex(projs)
 
     result = parts * torch.conj(projs)
-    # if max_freq_pixels is not None:
-    #     mask = _mask_for_dft_2d(result.shape, max_freq_pixels, rfft=True, fftshifted=True,
-    #                         device=result.device)
-    #     result *= mask
     result = torch.fft.ifftshift(result, dim=(-2,))
     result = torch.fft.irfftn(result, dim=(-2, -1))
     result = torch.fft.ifftshift(result, dim=(-2, -1))

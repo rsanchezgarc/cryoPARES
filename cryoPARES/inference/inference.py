@@ -7,7 +7,6 @@ from functools import cached_property
 import numpy as np
 import torch
 import yaml
-from lightning import seed_everything
 from scipy.spatial.transform import Rotation
 from tqdm import tqdm
 from typing import Optional, List, Literal, Dict, Any, Tuple
@@ -595,7 +594,8 @@ class SingleInferencer:
 
 
 if __name__ == "__main__":
-    seed_everything(111)
+    # from lightning import seed_everything
+    # seed_everything(111)
     os.environ[constants.SCRIPT_ENTRY_POINT] = "inference.py"
     print("---------------------------------------")
     print(" ".join(sys.argv))

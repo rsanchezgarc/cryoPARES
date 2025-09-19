@@ -132,6 +132,7 @@ def _extract_central_slices_rfft_3d_multichannel(
     projection_image_dfts[..., freq_grid_mask] = samples
 
     return projection_image_dfts
+
 def sample_image_3d_compiled(
         image: torch.Tensor,
         coordinates: torch.Tensor,

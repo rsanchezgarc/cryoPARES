@@ -12,8 +12,9 @@ class Image2Sphere_config:
     label_smoothing: float = 0.05 #TODO: Move this to a future loss config
     enforce_symmetry: bool = True
     use_simCLR: bool = False
-    n_neigs_to_compute: int = 10
     average_neigs_for_pred: bool = False #Sligthly slower and slightly more accurate
+    n_neigs_to_compute: int = 10 #Number of neigs used for averaging
+
     imageencoder: ImageEncoder_config = field(default_factory=ImageEncoder_config)
     so3components: So3Components_config = field(default_factory=So3Components_config)
     gaussianfilters: GaussianFilters_config = field(default_factory=GaussianFilters_config)

@@ -65,4 +65,4 @@ def get_most_recent_file(folder_path: str, template: str) -> str | None:
 
 
 FNAME_TYPE = Union[PathLike, str]
-MAP_AS_ARRAY_OR_FNAME_TYPE = Union[FNAME_TYPE | torch.Tensor | np.ndarray]
+MAP_AS_ARRAY_OR_FNAME_TYPE = Union[FNAME_TYPE, torch.Tensor, np.ndarray]

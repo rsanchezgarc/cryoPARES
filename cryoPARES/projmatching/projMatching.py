@@ -15,6 +15,7 @@ from scipy.spatial.transform import Rotation
 from torch.utils.data import DataLoader
 from torch_grid_utils import circle
 
+from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.constants import (RELION_EULER_CONVENTION, BATCH_POSE_NAME, RELION_PRED_POSE_CONFIDENCE_NAME,
                                  BATCH_ORI_IMAGE_NAME, BATCH_ORI_CTF_NAME, RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES,
                                  BATCH_IDS_NAME)
@@ -54,30 +55,27 @@ class ProjectionMatcher(nn.Module):
     Single concrete aligner (Fourier pipeline).
     This class folds together the previous abstract base + Fourier subclass.
     """
-
+    @inject_defaults_from_config(default_config=main_config.projmatching)
     def __init__(
-        self,
-        reference_vol: MAP_AS_ARRAY_OR_FNAME_TYPE,
-        pixel_size: float | None = None,
-        grid_distance_degs: float | Tuple[float, float, float] = 8.0,
-        grid_step_degs: float | Tuple[float, float, float] = 2.0,
-        max_resolution_A: Optional[float] = None,
-        padding_factor: Optional[float] = 0.0,
-        keep_top_k_values: int = 1,
-        n_cpus: int = 1,
-        verbose: bool = True,
-        correct_ctf: bool = True,
+            self,
+            reference_vol: MAP_AS_ARRAY_OR_FNAME_TYPE,
+            pixel_size: float | None = None,  #Only needed if reference_vol is not a filename
+            grid_distance_degs: float | Tuple[float, float, float] = CONFIG_PARAM(),
+            grid_step_degs: float | Tuple[float, float, float] = CONFIG_PARAM(),
+            max_resolution_A: Optional[float] = CONFIG_PARAM(),
+            keep_top_k_values: int = CONFIG_PARAM(),
+            verbose: bool = CONFIG_PARAM(),
+            correct_ctf: bool = CONFIG_PARAM(),
     ):
         super().__init__()
         self.grid_distance_degs = grid_distance_degs
         self.grid_step_degs = grid_step_degs
         self.max_resolution_A = max_resolution_A
-        self.padding_factor = padding_factor
+        self.padding_factor = 0 # We do not support padding yet
         self.keep_top_k_values = keep_top_k_values
         self.max_shift_fraction = main_config.projmatching.max_shift_fraction
 
         self._store_reference_vol(reference_vol, pixel_size)
-        self.n_cpus = n_cpus if n_cpus > 0 else 1
         self.verbose = verbose
         self.correct_ctf = correct_ctf
         self.mainLogger = getWorkerLogger(self.verbose)
@@ -87,9 +85,9 @@ class ProjectionMatcher(nn.Module):
                 self.extract_central_slices_rfft_3d_multichannel = extract_central_slices_rfft_3d_multichannel
             else:
                 self.extract_central_slices_rfft_3d_multichannel = torch.compile(
-                    extract_central_slices_rfft_3d_multichannel, fullgraph=True,
-                    disable=main_config.projmatching.disable_compile_projectVol,
-                    mode=main_config.projmatching.compile_projectVol_mode)
+                            extract_central_slices_rfft_3d_multichannel, fullgraph=True,
+                            disable=main_config.projmatching.disable_compile_projectVol,
+                            mode=main_config.projmatching.compile_projectVol_mode)
             self.projectF = self._projectF_USE_TWO_FLOAT32_FOR_COMPLEX
 
         else:
@@ -134,7 +132,7 @@ class ProjectionMatcher(nn.Module):
                                                              transposed=False, degrees=True,
                                                              remove_duplicates=False).to(device)
             #TODO: remove_duplicates=True makes the whole things broken. Probably due to euler angles singularities
-            if as_rotmats:
+            if as_rotmats: #Using rotamts seems a bad idea as well. Not giving good results
                 self._so3_delta_is_rotmat = True
                 self._so3_delta = get_rotmat(self._so3_delta)
             else:
@@ -251,6 +249,7 @@ class ProjectionMatcher(nn.Module):
         data_rootdir,
         particle_radius_angs, #TODO: This is not used. Would need to be in the builder? That is where we create the rmask
         batch_size,
+        n_cpus,
     ):
 
         from cryoPARES.datamanager.datamanager import DataManager
@@ -262,7 +261,7 @@ class ProjectionMatcher(nn.Module):
                      save_train_val_partition_dir=None,
                      is_global_zero=True,
                      num_augmented_copies_per_batch=1,
-                     num_data_workers = self.n_cpus,
+                     num_data_workers = n_cpus,
                      return_ori_imagen = True,
                      subset_idxs=None
                      )
@@ -316,6 +315,7 @@ class ProjectionMatcher(nn.Module):
         particle_radius_angs=None,
         batch_size=256,
         device="cuda",
+        n_cpus= 1
     ) -> ParticlesStarSet:
         """
         Align particles (input STAR file) to the reference.
@@ -326,11 +326,13 @@ class ProjectionMatcher(nn.Module):
                 starFnameOut
             ), f"Error, the starFnameOut {starFnameOut} already exists"
 
+        n_cpus = n_cpus if n_cpus > 0 else 1
         particlesDataSet = self.preprocess_particles(
             particles,
             data_rootdir,
             particle_radius_angs,
             batch_size,
+            n_cpus
         )
 
         try:
@@ -369,7 +371,7 @@ class ProjectionMatcher(nn.Module):
         dl = DataLoader(
                         particlesDataSet,
                         batch_size=batch_size,
-                        num_workers=self.n_cpus, shuffle=False, pin_memory=True,
+                        num_workers=n_cpus, shuffle=False, pin_memory=True,
                         multiprocessing_context='fork') #get_context('loky')
         non_blocking = True
         _partIdx = 0
@@ -393,7 +395,7 @@ class ProjectionMatcher(nn.Module):
             predEulerDegs = get_eulers(predRotMats)
             results_eulerDegs_matrix[partIdx, :] = predEulerDegs.detach().cpu()
             stats_corr_matrix[partIdx, :] = comparedWeight.detach().cpu()
-            for _i, i_partIdx in enumerate(partIdx): idds_list[i_partIdx] = idds[_i]
+            for _i, i_partIdx in enumerate(partIdx.tolist()): idds_list[i_partIdx] = idds[_i]
 
         predEulerDegs = results_eulerDegs_matrix
         # predShiftsAngs = -(results_shifts_matrix.float() - half_particle_size) * pixel_size
@@ -538,7 +540,6 @@ def align_star(
     grid_distance_degs: float = 8.0,
     grid_step_degs: float = 2.0,
     return_top_k_poses: int = 1,
-    padding_factor: float = 0.0,
     filter_resolution_angst: Optional[float] = None,
     n_cpus_per_job: int = 1,
     batch_size: int = 1024,
@@ -559,7 +560,6 @@ def align_star(
     :param grid_distance_degs:
     :param grid_step_degs:
     :param return_top_k_poses:
-    :param padding_factor:
     :param filter_resolution_angst:
     :param n_cpus_per_job:
     :param batch_size:
@@ -615,9 +615,7 @@ def align_star(
             grid_distance_degs=grid_distance_degs,
             grid_step_degs=grid_step_degs,
             keep_top_k_values=return_top_k_poses,
-            padding_factor=padding_factor,
             max_resolution_A=filter_resolution_angst,
-            n_cpus=_n_cpus_per_job,
             verbose=verbose,
             correct_ctf=correct_ctf,
         )

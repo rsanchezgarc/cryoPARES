@@ -162,7 +162,7 @@ To avoid overfitting and to ensure a fair evaluation, cryo-EM datasets are often
 **Important Inference Parameters (in config files):**
 
 *   **`inference.directional_zscore_thr`**: A crucial parameter for filtering particles. It is a threshold on the confidence score of the neural network's prediction. Particles with a score below this threshold can be discarded.
-*   **`projmatching.grid_distance_degs`**: The most important parameter for local refinement. It defines the angular search range (in degrees) around the neural network's predicted orientation.
+*   **`projmatching.grid_distance_degs`**: The most important parameter for local refinement. It defines the angular search range (in degrees) around the neural network's predicted orientation (current_pose - grid_distance_degs ... current_pose + grid_distance_degs).
 *   **`projmatching.grid_step_degs`**: The step size for the angular search during refinement.
 
 #### Daemon Mode

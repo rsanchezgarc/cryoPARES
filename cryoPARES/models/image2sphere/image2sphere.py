@@ -37,6 +37,7 @@ class Image2Sphere(nn.Module):
                  enforce_symmetry: bool = CONFIG_PARAM(),
                  encoder: Optional[nn.Module] = None,
                  use_simCLR: bool = False,
+                 average_neigs_for_pred: bool = CONFIG_PARAM(),
                  example_batch: Optional[Dict[str, Any]] = None):
         super().__init__()
 
@@ -73,11 +74,16 @@ class Image2Sphere(nn.Module):
         self.has_symmetry = (self.symmetry != "C1")
 
         self.enforce_symmetry = enforce_symmetry
-
-        # Register nearest neighbors buffer
-        self._initialize_neigs()
+        self.average_neigs_for_pred = average_neigs_for_pred
         self._initialize_caches()
+        self._initialize_neigs() # Register nearest neighbors buffer
 
+        if average_neigs_for_pred:
+            self.forward = self.forward_with_neigs
+        else:
+            self.forward = self.forward_standard
+
+    @torch.jit.ignore
     def _initialize_neigs(self, k: Optional[int] = None):
         """Initialize nearest neighbors matrix."""
         if k is None:
@@ -146,8 +152,8 @@ class Image2Sphere(nn.Module):
             pred_rotmat = self.so3_grid.output_rotmats[pred_rotmat_id]
         return rotMat_logits, pred_rotmat_id, pred_rotmat
 
-
-    def forward(self, img:torch.Tensor, top_k:int):
+    @torch.jit.export
+    def forward_standard(self, img:torch.Tensor, top_k:int):
         '''
 
         :img: float tensor of shape (B, c, L, L)
@@ -160,7 +166,7 @@ class Image2Sphere(nn.Module):
         maxprob = probs.gather(dim=-1, index=pred_rotmat_id)
         return wD, rotMat_logits, pred_rotmat_id, pred_rotmat, maxprob
 
-
+    @torch.jit.export
     def forward_with_neigs(self, img:torch.Tensor, top_k:int): #TODO: FORWARD WITH NEIGS NEEDS TO BE EXPOSED
 
         wD = self.predict_wignerDs(img)
@@ -213,9 +219,9 @@ class Image2Sphere(nn.Module):
         :param k: The number of nearest neighbours to compute
         :return: Tesor Pxk, where P is the number of points in SO(3) and k is the number of nearest neigbors
         """
-        neigs = getattr(self, "_neigs", None)
-        if neigs is None:
-            self._initialize_neigs()
+        # neigs = getattr(self, "_neigs", None)
+        # if neigs is None:
+        #     self._initialize_neigs()
         return self._neigs
 
 
@@ -418,20 +424,24 @@ def _test():
     print(out[0].shape)
     scripted_model = torch.jit.script(model)
     torch.jit.save(scripted_model, '/tmp/scripted_model.pt')
+    model = scripted_model
     with torch.inference_mode():
         from scipy.spatial.transform import Rotation
         gt_rot = torch.from_numpy(Rotation.random(b, random_state=42).as_matrix().astype(np.float32))
-        wD, rotMat_logits, pred_rotmat_idxs, pred_rotmat, maxprob = model.forward(imgs, top_k=2)
-        wD, rotMat_logits, pred_rotmat_idxs, pred_rotmat, maxprob = model.forward_with_neigs(imgs, top_k=2)
+        wD, rotMat_logits, pred_rotmat_idxs, pred_rotmat, maxprob1 = model.forward(imgs, top_k=2)
+        wD2, rotMat_logits2, pred_rotmat_idxs2, pred_rotmat2, maxprob2 = model.forward_with_neigs(imgs, top_k=2)
+        wD3, rotMat_logits3, pred_rotmat_idxs3, pred_rotmat3, maxprob3 = model.forward_standard(imgs, top_k=2)
+        print(maxprob1.allclose(maxprob2), maxprob1.allclose(maxprob3), maxprob2.allclose(maxprob3))
         # (wD, rotMat_logits, pred_rotmat_ids, pred_rotmat, maxprobs), loss, error_rads = model.forward_and_loss(imgs, gt_rot)
 
 
         print("logits", rotMat_logits.shape)
         print("pred_rotmat", pred_rotmat.shape)
         fog_wn = model.forward_with_neigs(imgs, top_k=1)
-        probs, output_rotmats = model.compute_probabilities(imgs)
+        # probs, output_rotmats = model.compute_probabilities(imgs) #Not working in jitted model
+        probs, output_rotmats = rotMat_logits.softmax(-1), model.so3_grid.output_rotmats
         plot_so3_distribution(probs[0], output_rotmats, gt_rotation=gt_rot[0])
-
+        print("Done!")
 
 def _test_rotation_invariance(n_samples=10):
     """
@@ -565,7 +575,7 @@ def _test2():
     print(out3[4])
 
 if __name__ == "__main__":
-    # _test()
+    _test()
     # _test_rotation_invariance()
     _test2()
     print("Done!")

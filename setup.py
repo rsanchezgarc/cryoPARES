@@ -22,7 +22,7 @@ with open('requirements.txt') as f:
     requirements = f.read().splitlines()
 
 version = None
-with open(path.join(here, 'cesped', '__init__.py'), encoding='utf-8') as f:
+with open(path.join(here, 'cryoPARES', '__init__.py'), encoding='utf-8') as f:
     for line in f:
         if line.startswith("__version__"):
             version = line.split("=")[-1].strip().strip('"')
@@ -31,11 +31,11 @@ assert version
 setup(
     name='cryoPARES',
     version=version,
-    description='Code utilities for the CESPED (Cryo-EM Supervised Pose Estimation Dataset) benchmark',
+    description='Cryo-EM Pose-Assignment for Related Experiments via Supervision',
     long_description=long_description,  # Optional
-    url='https://github.com/rsanchezgarc/cesped',  # Optional
+    url='https://github.com/rsanchezgarc/cryoPARES',  # Optional
     author='Ruben Sanchez-Garcia',  # Optional
-    author_email='ruben.sanchez-garcia@stats.ox.ac.uk',  # Optional
+    author_email='rsanchezgarc@faculty.ie.edu',  # Optional
     keywords='deep learning cryoem pose estimation',  # Optional
     packages=find_packages(),
     install_requires=[requirements],

@@ -9,6 +9,7 @@ from cryoPARES.configs.datamanager_config.datamanager_config import DataManager_
 from cryoPARES.configs.inference_config.inference_config import Inference_config
 from cryoPARES.configs.models_config.models_config import Models_config
 from cryoPARES.configs.projmatching_config.projmatching_config import Projmatching_config
+from cryoPARES.configs.reconstruct_config.reconstruct_config import Reconstruct_config
 from cryoPARES.configs.train_config.train_config import Train_config
 from cryoPARES.utils.paths import find_project_root
 
@@ -57,6 +58,7 @@ class MainConfig:
     train: Train_config = field(default_factory=Train_config)
     inference: Inference_config = field(default_factory=Inference_config)
     projmatching: Projmatching_config = field(default_factory=Projmatching_config)
+    reconstruct: Reconstruct_config = field(default_factory=Reconstruct_config)
 
 # Create an instance
 main_config = MainConfig()

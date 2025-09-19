@@ -1,8 +1,6 @@
 from dataclasses import dataclass
 from typing import List, Optional
 
-from omegaconf import MISSING
-
 
 @dataclass
 class GaussianFilters_config:

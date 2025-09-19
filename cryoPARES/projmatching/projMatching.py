@@ -37,8 +37,18 @@ from torch_fourier_slice.slice_extraction import extract_central_slices_rfft_3d
 REPORT_ALIGNMENT_DISPLACEMENT = True
 USE_TWO_FLOAT32_FOR_COMPLEX = True
 
-def get_rotmat(degAngles, convention:str=RELION_EULER_CONVENTION, device="cpu"):
+def get_rotmat(degAngles, convention:str=RELION_EULER_CONVENTION, device=None):
+    if device is None:
+        device = degAngles.device
     return euler_angles_to_matrix(torch.deg2rad(degAngles), convention=convention).to(device)
+
+def get_eulers(rotmats, convention:str=RELION_EULER_CONVENTION, device=None):
+    if device is None:
+        device = rotmats.device
+    ori_shape = rotmats.shape
+    eulerDegs =  torch.rad2deg(matrix_to_euler_angles(rotmats.view(-1, 3, 3), convention=convention)).to(device)
+    eulerDegs = eulerDegs.view(*ori_shape[:-2], 3)
+    return eulerDegs
 
 class ProjectionMatcher(nn.Module):
     """
@@ -111,12 +121,13 @@ class ProjectionMatcher(nn.Module):
     def device(self):
         return self.reference_vol.device
 
-    def _get_so3_delta(self, device: torch.device):
+    def _get_so3_delta(self, device: torch.device, as_rotmats=False):
         """
         Build a cached SO(3) delta grid (degrees) around (0,0,0) using
         self.grid_distance_degs and self.grid_step_degs.
         """
-        if not hasattr(self, "_so3_delta") or self._so3_delta.device != device:
+        if (not hasattr(self, "_so3_delta") or self._so3_delta.device != device or
+                getattr(self, "_so3_delta_is_rotmat", None) != as_rotmats):
 
             n_angles = math.ceil(self.grid_distance_degs * 2 / self.grid_step_degs)
             n_angles = n_angles if n_angles % 2 == 1 else n_angles + 1  # We always want an odd number
@@ -124,6 +135,12 @@ class ProjectionMatcher(nn.Module):
                                                              transposed=False, degrees=True,
                                                              remove_duplicates=False).to(device)
             #TODO: remove_duplicates=True makes the whole things broken. Probably due to euler angles singularities
+            if as_rotmats:
+                self._so3_delta_is_rotmat = True
+                self._so3_delta = get_rotmat(self._so3_delta)
+            else:
+                self._so3_delta_is_rotmat = False
+
         return self._so3_delta
 
     # ----------------------- Fourier-specific core -----------------------
@@ -185,10 +202,10 @@ class ProjectionMatcher(nn.Module):
 
     def _projectF_USE_TWO_FLOAT32_FOR_COMPLEX(self, rotMats: torch.Tensor) -> torch.Tensor:
 
-        projs = self.extract_central_slices_rfft_3d_multichannel(self.reference_vol, self.vol_shape,
-                                                            rotation_matrices=rotMats,
-                                                            fftfreq_max= self.fftfreq_max,
-                                                            zyx_matrices=False)
+        projs = self.extract_central_slices_rfft_3d_multichannel(self.reference_vol,
+                                                                 self.vol_shape,
+                                                                 rotation_matrices=rotMats,
+                                                                 zyx_matrices=False)
         projs = projs.permute([0, 2, 3, 1]).contiguous()
         return projs
 
@@ -210,9 +227,7 @@ class ProjectionMatcher(nn.Module):
             return None
 
     def _correlateCrossCorrelation(self, parts: torch.Tensor, projs: torch.Tensor):
-        corrs = self.correlate_dft_2d(
-            parts, projs, max_freq_pixels=self.max_resoluton_freq_pixels
-        )
+        corrs = self.correlate_dft_2d(parts, projs)
         b, options, l0, l1 = corrs.shape
         maxcorr, maxcorrIdxs = self._extract_ccor_max(corrs.reshape(-1, *corrs.shape[-2:]),
                                       max_shift_fraction=self.max_shift_fraction)
@@ -221,17 +236,21 @@ class ProjectionMatcher(nn.Module):
 
     # ----------------------- Shared helpers originally in base -----------------------
 
-    def _compute_projections(self, so3_degs_grid: torch.Tensor):
+    def _compute_projections_from_euleres(self, so3_degs_grid: torch.Tensor):
         so3_degs_grid = so3_degs_grid.to(self.reference_vol.device)
         rotMats = get_rotmat(so3_degs_grid, device=so3_degs_grid.device)
         projs = self.projectF(rotMats)
         return projs, so3_degs_grid
 
+    def _compute_projections_from_rotmats(self, rotMats: torch.Tensor):
+        projs = self.projectF(rotMats)
+        return projs
+
     def preprocess_particles(
         self,
         particles: FNAME_TYPE,
         data_rootdir,
-        particle_radius_angs, #TODO: This is not used. Would need to be in the builder?
+        particle_radius_angs, #TODO: This is not used. Would need to be in the builder? That is where we create the rmask
         batch_size,
     ):
 
@@ -252,12 +271,24 @@ class ProjectionMatcher(nn.Module):
         ds = dm.create_dataset(None)
         return ds
 
-    def _fourier_forward(self, fparts, ctfs, eulerDegs):
+    def forward(self, imgs, ctfs, rotmats):
+
+        imgs = imgs * self.rmask
+        fparts = _real_to_fourier_2d(imgs * self.rmask, view_complex_as_two_float32=USE_TWO_FLOAT32_FOR_COMPLEX)
+
+        eulerDegs = get_eulers(rotmats)
         expanded_eulerDegs = self._get_so3_delta(eulerDegs.device).unsqueeze(0) + eulerDegs.unsqueeze(1)
         bsize = expanded_eulerDegs.size(0)
-        expanded_eulerDegs = expanded_eulerDegs.reshape(bsize, -1, 3)  # unrolling all the input angles into one
-        # TODO: Remove duplicate angles if n_input_angles > 1
-        projs = self._compute_projections(expanded_eulerDegs.reshape(-1, 3))[0]
+        expanded_eulerDegs = expanded_eulerDegs.reshape(bsize, -1, 3)  # unrolling all the input angles into one dim
+        # TODO: Remove duplicate angles if n_input_angles > 1. Duplicates may happen if several topK poses were provided as input
+        # Also, for large batches, there could be redundant angles (to a certain precision)
+        projs = self._compute_projections_from_euleres(expanded_eulerDegs.reshape(-1, 3))[0]
+
+
+        # expanded_rotmats = (rotmats.unsqueeze(1) @ self._get_so3_delta(rotmats.device, as_rotmats=True).unsqueeze(0))
+        # bsize = expanded_rotmats.size(0)
+        # expanded_rotmats = expanded_rotmats.reshape(bsize, -1, 3, 3)  # unrolling all the input angles into one
+        # projs = self._compute_projections_from_rotmats(expanded_rotmats.reshape(-1, 3, 3))
 
         if self.correct_ctf:
             _shapeIdx = -3 if USE_TWO_FLOAT32_FOR_COMPLEX else -3
@@ -265,25 +296,16 @@ class ProjectionMatcher(nn.Module):
             projs = self._apply_ctfF(projs.reshape(bsize, -1, *projs.shape[_shapeIdx:]), ctfs)
         del ctfs
         perImgCorr, pixelShiftsXY = self.correlateF(fparts.unsqueeze(1), projs)
-
         maxCorrs, maxCorrsIdxs = perImgCorr.topk(self.keep_top_k_values, sorted=True, largest=True, dim=-1)
 
         batch_idxs_range = torch.arange(pixelShiftsXY.size(0)).unsqueeze(1)
         pixelShiftsXY = pixelShiftsXY[batch_idxs_range, maxCorrsIdxs]
-        predEulerDegs = expanded_eulerDegs[batch_idxs_range, maxCorrsIdxs]
+        predEulers = expanded_eulerDegs[batch_idxs_range, maxCorrsIdxs] #TODO: Try to minimize euler->rotmat conversions
+        predRotMats = get_rotmat(predEulers)
         mean_corr = perImgCorr.mean(-1, keepdims=True)
         std_corr = perImgCorr.std(-1, keepdims=True)
         comparedWeight = torch.distributions.Normal(mean_corr, std_corr + 1e-6).cdf(maxCorrs)  # 1-P(I_i > All_images)
-        return maxCorrs, predEulerDegs, pixelShiftsXY, comparedWeight
-
-    def forward(self, imgs, ctfs, rotmats):
-
-        imgs = imgs * self.rmask
-        fparts = _real_to_fourier_2d(imgs * self.rmask, view_complex_as_two_float32=USE_TWO_FLOAT32_FOR_COMPLEX)
-        eulerDegs = torch.rad2deg(matrix_to_euler_angles(rotmats, RELION_EULER_CONVENTION))
-        maxCorrs, predEulerDegs, pixelShiftsXY, comparedWeight = self._fourier_forward(fparts, ctfs, eulerDegs)
         predShiftsAngsXY = -(pixelShiftsXY.float() - self.half_particle_size) * self.vol_voxel_size
-        predRotMats = euler_angles_to_matrix(torch.deg2rad(predEulerDegs), RELION_EULER_CONVENTION)
         return maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight
 
     @torch.inference_mode()
@@ -316,12 +338,14 @@ class ProjectionMatcher(nn.Module):
             pixel_size = particlesDataSet.sampling_rate
         except AttributeError:
             pixel_size = particlesDataSet.datasets[0].original_sampling_rate()
+        assert np.isclose(pixel_size, self.vol_voxel_size, atol=1e-2)
         half_particle_size = self.image_shape[-1] / 2
         assert half_particle_size == self.half_particle_size
         n_particles = len(particlesDataSet)
 
         results_corr_matrix = torch.zeros(n_particles, self.keep_top_k_values)
-        results_shifts_matrix = torch.zeros(n_particles, self.keep_top_k_values, 2, dtype=torch.int64)
+        # results_shifts_matrix = torch.zeros(n_particles, self.keep_top_k_values, 2, dtype=torch.int64)
+        results_shiftsAngs_matrix = torch.zeros(n_particles, self.keep_top_k_values, 2)
         results_eulerDegs_matrix = torch.zeros(n_particles, self.keep_top_k_values, 3)
         stats_corr_matrix = torch.zeros(n_particles, self.keep_top_k_values)
         idds_list = [None] * n_particles
@@ -348,7 +372,7 @@ class ProjectionMatcher(nn.Module):
                         batch_size=batch_size,
                         num_workers=self.n_cpus, shuffle=False, pin_memory=True,
                         multiprocessing_context='fork') #get_context('loky')
-        non_blocking = False
+        non_blocking = True
         _partIdx = 0
         for batch in tqdm(dl, desc="Aligning particles", disable=not self.verbose):
 
@@ -358,21 +382,23 @@ class ProjectionMatcher(nn.Module):
             rotmats = batch[BATCH_POSE_NAME][0].to(device, non_blocking=non_blocking)
             parts = batch[BATCH_ORI_IMAGE_NAME].to(device, non_blocking=non_blocking)
             ctfs = batch[BATCH_ORI_CTF_NAME].to(device, non_blocking=non_blocking)
-            fparts = _real_to_fourier_2d(parts * self.rmask, view_complex_as_two_float32=USE_TWO_FLOAT32_FOR_COMPLEX)
-            eulerDegs = torch.rad2deg(matrix_to_euler_angles(rotmats, RELION_EULER_CONVENTION)).unsqueeze(1)
 
+            # fparts = _real_to_fourier_2d(parts * self.rmask, view_complex_as_two_float32=USE_TWO_FLOAT32_FOR_COMPLEX)
+            # eulerDegs = torch.rad2deg(matrix_to_euler_angles(rotmats, RELION_EULER_CONVENTION)).unsqueeze(1)
+            # maxCorrs, predEulerDegs, pixelShiftsXY, comparedWeight = self._fourier_forward(fparts, ctfs, eulerDegs)
 
-            maxCorrs, predEulerDegs, pixelShiftsXY, comparedWeight = self._fourier_forward(fparts, ctfs, eulerDegs)
-
+            maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight = self.forward(parts, ctfs, rotmats)
             results_corr_matrix[partIdx, :] = maxCorrs.detach().cpu()
-            results_shifts_matrix[partIdx, :] = pixelShiftsXY.detach().cpu()
+            # results_shifts_matrix[partIdx, :] = pixelShiftsXY.detach().cpu()
+            results_shiftsAngs_matrix[partIdx, :] = predShiftsAngsXY.detach().cpu()
+            predEulerDegs = get_eulers(predRotMats)
             results_eulerDegs_matrix[partIdx, :] = predEulerDegs.detach().cpu()
             stats_corr_matrix[partIdx, :] = comparedWeight.detach().cpu()
             for _i, i_partIdx in enumerate(partIdx): idds_list[i_partIdx] = idds[_i]
 
         predEulerDegs = results_eulerDegs_matrix
-        predShiftsAngs = -(results_shifts_matrix.float() - half_particle_size) * pixel_size
-
+        # predShiftsAngs = -(results_shifts_matrix.float() - half_particle_size) * pixel_size
+        predShiftsAngs = results_shiftsAngs_matrix
         prob_x_y = stats_corr_matrix
         n_topK = predEulerDegs.shape[1]
 

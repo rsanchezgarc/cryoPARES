@@ -616,17 +616,5 @@ if __name__ == "__main__":
         inferencer.run()
 
     """
---particles_star_fname
-/home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/1000particles.star
---results_dir
-/tmp/cryoPARES_train/cryoPARES_inference/
---particles_dir
-/home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data
---checkpoint_dir
-/tmp/cryoPARES_train/version_0/
---NOT_use_cuda
---config
-inference.before_refiner_buffer_size=4
---batch_size
-8
+--particles_star_fname /home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/1000particles.star  --results_dir /tmp/cryoPARES_train/cryoPARES_inference/ --particles_dir /home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data --checkpoint_dir /tmp/cryoPARES_train/version_0/ --NOT_use_cuda --config inference.before_refiner_buffer_size=4 --batch_size 8     
     """

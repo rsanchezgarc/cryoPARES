@@ -4,10 +4,6 @@ Cryo-EM 3-D reconstruction
 A pipeline that reconstructs a Coulomb potential
 volume from a RELION-style particle STAR file using open-source
 libraries.
-
-This version optionally supports per-particle confidence weighting.
-By default, confidence weighting is DISABLED (no overhead).
-Enable by passing use_confidence=True to reconstruct_starfile().
 """
 
 import os
@@ -15,7 +11,6 @@ import sys
 from functools import lru_cache
 from typing import List, Optional, Tuple, Union
 
-import mrcfile
 import torch
 import tqdm
 from starstack import ParticlesStarSet
@@ -48,9 +43,10 @@ class Reconstructor(nn.Module):
     def __init__(
         self,
         symmetry: str,
-        correct_ctf: bool = True,
+        correct_ctf: bool = CONFIG_PARAM(),
         eps: float = CONFIG_PARAM(),
         min_denominator_value: Optional[float] = None,
+        weight_with_confidence: bool = CONFIG_PARAM(),
         *args,
         **kwargs,
     ):
@@ -66,6 +62,7 @@ class Reconstructor(nn.Module):
         if min_denominator_value is None:
             min_denominator_value = eps * 0.1
         self.min_denominator_value = min_denominator_value
+        self.weight_with_confidence = weight_with_confidence
 
         self.register_buffer("dummy_buffer", torch.ones(1))
         if self.has_symmetry:
@@ -199,14 +196,13 @@ class Reconstructor(nn.Module):
         particles_star_fname,
         particles_dir,
         subset_idxs=None,
-        use_confidence: bool = False,
     ):
         particlesDataset = ReconstructionParticlesDataset(
             particles_star_fname,
             particles_dir,
             correct_ctf=self.correct_ctf,
             subset_idxs=subset_idxs,
-            return_confidence=use_confidence,
+            return_confidence=self.weight_with_confidence,
         )
         self.set_metadata_from_particles(particlesDataset)
         return particlesDataset
@@ -219,7 +215,6 @@ class Reconstructor(nn.Module):
         num_dataworkers=0,
         use_only_n_first_batches=None,
         subset_idxs=None,
-        use_confidence: bool = False,
     ):
         for _ in self._backproject_particles(
             particles_star_fname,
@@ -228,7 +223,6 @@ class Reconstructor(nn.Module):
             num_dataworkers,
             use_only_n_first_batches,
             subset_idxs,
-            use_confidence=use_confidence,
         ):
             pass
 
@@ -241,11 +235,9 @@ class Reconstructor(nn.Module):
         use_only_n_first_batches=None,
         subset_idxs=None,
         verbose=True,
-        use_confidence: bool = False,
     ):
-        particlesDataset = self._get_reconstructionParticlesDataset(
-            particles_star_fname, particles_dir, subset_idxs=subset_idxs, use_confidence=use_confidence
-        )
+        particlesDataset = self._get_reconstructionParticlesDataset(particles_star_fname, particles_dir,
+                                                                    subset_idxs=subset_idxs )
         dl = DataLoader(
             particlesDataset,
             batch_size=batch_size,
@@ -259,7 +251,7 @@ class Reconstructor(nn.Module):
         for bidx, batch in enumerate(
             tqdm.tqdm(dl, desc=f"backprojecting PID({os.getpid()})", disable=not verbose)
         ):
-            if use_confidence:
+            if self.weight_with_confidence:
                 ids, imgs, ctf, rotMats, hwShiftAngs, confidence = batch
                 self._backproject_batch(
                     imgs, ctf, rotMats, hwShiftAngs, confidence=confidence, zyx_matrices=zyx_matrices
@@ -349,7 +341,7 @@ class Reconstructor(nn.Module):
             # Prepare channels: [real, imag, ctf^2]
             # NOTE: we only build alpha if confidence is provided (to avoid overhead).
             if confidence is not None:
-                alpha = confidence.view(-1, 1, 1, 1)  # broadcast over channels and pixels
+                alpha = confidence.view(-1, 1, 1, 1).to(ctf.device)  # broadcast over channels and pixels
                 stacked = torch.stack([imgs.real, imgs.imag, ctf**2], dim=1) * alpha
             else:
                 stacked = torch.stack([imgs.real, imgs.imag, ctf**2], dim=1)
@@ -484,7 +476,7 @@ def reconstruct_starfile(
     min_denominator_value: Optional[float] = None,
     use_only_n_first_batches: Optional[int] = None,
     float32_matmul_precision: Optional[str] = "high",
-    use_confidence: bool = False,
+    weight_with_confidence: bool = CONFIG_PARAM(),
 ):
     """
     :param particles_star_fname: The particles to reconstruct
@@ -499,7 +491,7 @@ def reconstruct_starfile(
     :param min_denominator_value: Used to prevent division by 0. By default is 0.1*eps
     :param use_only_n_first_batches: Use only the n first batches to reconstruct
     :param float32_matmul_precision: Set it to high or medium for speed up at a precision cost
-    :param use_confidence: If True, read and apply per-particle confidence. If False (default),
+    :param weight_with_confidence: If True, read and apply per-particle confidence. If False (default),
                            do NOT fetch/pass confidence (zero overhead).
     """
     if float32_matmul_precision is not None:
@@ -507,7 +499,8 @@ def reconstruct_starfile(
 
     device = "cpu" if not use_cuda else "cuda"
     reconstructor = Reconstructor(
-        symmetry=symmetry, correct_ctf=correct_ctf, eps=eps, min_denominator_value=min_denominator_value
+        symmetry=symmetry, correct_ctf=correct_ctf, eps=eps, min_denominator_value=min_denominator_value,
+        weight_with_confidence=weight_with_confidence
     )
     reconstructor.to(device=device)
     reconstructor.backproject_particles(
@@ -516,7 +509,6 @@ def reconstruct_starfile(
         batch_size,
         num_dataworkers,
         use_only_n_first_batches=use_only_n_first_batches,
-        use_confidence=use_confidence,
     )
     print(f"Saving map at {output_fname}")
     reconstructor.generate_volume(output_fname)
@@ -525,3 +517,5 @@ def reconstruct_starfile(
 if __name__ == "__main__":
     from argParseFromDoc import parse_function_and_call
     parse_function_and_call(reconstruct_starfile)
+    """
+python -m cryoPARES.reconstruction.reconstruction --symmetry C1  --particles_star_fname ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/donwsampled/down1000particles.star  --particles_dir  ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/donwsampled/ --output_fname /tmp/reconstruction.mrc  --weight_with_confidence    """

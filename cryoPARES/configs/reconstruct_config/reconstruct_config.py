@@ -9,3 +9,5 @@ class Reconstruct_config:
     compile_insert_central_slices_rfft_3d_multichanne_mode: Optional[str] = None #"max-autotune" does not work
 
     eps: float = 1e-3 #epsilon in the denominator. ~ tikhonov regularization
+    weight_with_confidence: bool = False
+    correct_ctf: bool = True

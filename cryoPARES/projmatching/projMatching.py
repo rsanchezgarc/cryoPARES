@@ -18,6 +18,7 @@ from torch_grid_utils import circle
 from cryoPARES.constants import (RELION_EULER_CONVENTION, BATCH_POSE_NAME, RELION_PRED_POSE_CONFIDENCE_NAME,
                                  BATCH_ORI_IMAGE_NAME, BATCH_ORI_CTF_NAME, RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES,
                                  BATCH_IDS_NAME)
+from torch_fourier_slice.slice_extraction import extract_central_slices_rfft_3d
 from cryoPARES.projmatching.extract_central_slices_as_real import extract_central_slices_rfft_3d_multichannel
 from cryoPARES.utils.paths import MAP_AS_ARRAY_OR_FNAME_TYPE, FNAME_TYPE
 
@@ -30,9 +31,7 @@ from .loggers import getWorkerLogger
 from .myProgressBar import myTqdm as tqdm
 
 from cryoPARES.projmatching.filterToResolution import low_pass_filter_fname
-
 from cryoPARES.projmatching.fourierOperations import correlate_dft_2d, compute_dft_3d, _real_to_fourier_2d
-from torch_fourier_slice.slice_extraction import extract_central_slices_rfft_3d
 
 REPORT_ALIGNMENT_DISPLACEMENT = True
 USE_TWO_FLOAT32_FOR_COMPLEX = True

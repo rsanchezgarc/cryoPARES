@@ -501,7 +501,7 @@ class ConfigArgumentParser(AutoArgumentParser):
             sys.exit(0)
 
         if args_list.count("--config") > 1:
-            print("Only one --config allowed! Review your command line argument!")
+            print("Only one --config allowed! Review your command line arguments!")
             sys.exit(1)
         # Now do normal parsing
         # Parse once to get all arguments, including config and direct ones.

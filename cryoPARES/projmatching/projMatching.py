@@ -97,16 +97,12 @@ class ProjectionMatcher(nn.Module):
         else:
             self.projectF = self._projectF
 
-        # if not main_config.projmatching.disable_compile_analyze_cc:
-        #     self._analyze_cross_correlation = torch.compile(_analyze_cross_correlation, fullgraph=True,
-        #                                                     mode=main_config.projmatching.compile_analyze_cc_mode,
-        #                                                     dynamic=True)
-        #     self._extract_ccor_max = torch.compile(_extract_ccor_max, fullgraph=True,
-        #                                                     mode=main_config.projmatching.compile_analyze_cc_mode,
-        #                                                     dynamic=True)
-        # else:
-        #     self._analyze_cross_correlation = _analyze_cross_correlation
-        #     self._extract_ccor_max = _extract_ccor_max
+        if not main_config.projmatching.disable_compile_analyze_cc:
+            self._extract_ccor_max = torch.compile(_extract_ccor_max, fullgraph=True,
+                                                            mode=main_config.projmatching.compile_analyze_cc_mode,
+                                                            dynamic=True)
+        else:
+            self._extract_ccor_max = _extract_ccor_max
 
         if main_config.projmatching.disable_compile_correlate_dft_2d:
             self.correlate_dft_2d = correlate_dft_2d
@@ -136,7 +132,9 @@ class ProjectionMatcher(nn.Module):
                                                                    transposed=False, degrees=True,
                                                                    remove_duplicates=False).to(device)
             #TODO: remove_duplicates=True makes the whole things broken. Probably due to euler angles singularities
-            if as_rotmats:  #Using rotamts seems a bad idea as well. Not giving good results
+            if as_rotmats:
+                # Using rotmats seems a bad idea as well. Not giving good results. Is it perhaps because we
+                # convert the grid from euler to rots, and near identity the numerical errors are important?
                 self._so3_delta_is_rotmat = True
                 self._so3_delta = get_rotmat(self._so3_delta)
             else:
@@ -233,6 +231,7 @@ class ProjectionMatcher(nn.Module):
         b, options, l0, l1 = corrs.shape
         maxcorr, maxcorrIdxs = self._extract_ccor_max(corrs.reshape(-1, *corrs.shape[-2:]),
                                                       max_shift_fraction=self.max_shift_fraction)
+
         del corrs
         return maxcorr.reshape(b, options), maxcorrIdxs.reshape(b, options, 2)
 
@@ -458,13 +457,6 @@ class ProjectionMatcher(nn.Module):
         torch.cuda.empty_cache()
         return finalParticlesStar
 
-    def _extract_ccor_max_unconstrained(self, corrs):
-        pixelShiftsXY = torch.empty(corrs.shape[0], 2, device=corrs.device, dtype=torch.int64)
-        maxCorrsJ, maxIndxJ = corrs.max(-1)
-        perImgCorr, maxIndxI = maxCorrsJ.max(-1)
-        pixelShiftsXY[:, 1] = maxIndxI
-        pixelShiftsXY[:, 0] = torch.gather(maxIndxJ, 1, maxIndxI.unsqueeze(1)).squeeze(1)
-        return perImgCorr, pixelShiftsXY
 
     @classmethod
     @lru_cache(1)
@@ -492,24 +484,6 @@ class ProjectionMatcher(nn.Module):
         return perImgCorr, pixelShiftsXY
 
 
-def _analyze_cross_correlation(perImgCorr: torch.Tensor, pixelShiftsXY: torch.Tensor, grid_rotmats: torch.Tensor,
-                               return_top_k: int, half_particle_size: float,
-                               vol_voxel_size: float) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    b, topk, nrots = perImgCorr.shape
-    batch_arange = torch.arange(b, device=perImgCorr.device).unsqueeze(1)
-
-    reshaped_perImgCorr = perImgCorr.reshape(b, -1)
-    maxCorrs, maxIdxs = reshaped_perImgCorr.topk(return_top_k, largest=True, sorted=True)
-    bestPixelShiftsXY = pixelShiftsXY.reshape(b, -1, 2)[batch_arange, maxIdxs]
-    mean_corr = torch.mean(reshaped_perImgCorr, dim=-1, keepdim=True)
-    std_corr = torch.std(reshaped_perImgCorr, dim=-1, keepdim=True)
-    comparedWeight = torch.distributions.Normal(mean_corr, std_corr + 1e-6).cdf(maxCorrs)  # 1-P(I_i > All_images)
-    predShiftsAngsXY = -(bestPixelShiftsXY - half_particle_size) * vol_voxel_size
-
-    topk_input_indices = maxIdxs // nrots
-    predRotMatsIdxs = maxIdxs % nrots
-    predRotMats = grid_rotmats[batch_arange, topk_input_indices, predRotMatsIdxs]
-    return maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight
 
 
 @lru_cache(1)
@@ -525,7 +499,6 @@ def _get_begin_end_from_max_shift(image_shape, max_shift):
     w1 = w - delta_w
 
     return h0, h1, w0, w1
-
 
 def _extract_ccor_max(corrs, max_shift_fraction):
     pixelShiftsXY = torch.empty(corrs.shape[:-2] + (2,), device=corrs.device, dtype=torch.int64)

@@ -28,6 +28,7 @@ from cryoPARES.projmatching.projMatching import ProjectionMatcher
 from cryoPARES.reconstruction.reconstruction import Reconstructor
 from cryoPARES.utils.paths import get_most_recent_file
 from cryoPARES.scripts.computeFsc import compute_fsc
+from cryoPARES.utils.reconstructionUtils import get_vol
 
 
 class SingleInferencer:
@@ -47,6 +48,7 @@ class SingleInferencer:
                  compile_model: bool = False,
                  top_k: int = CONFIG_PARAM(),
                  reference_map: Optional[str] = None,
+                 reference_mask: Optional[str] = None, #Only used for FSC estimation
                  directional_zscore_thr: Optional[float] = CONFIG_PARAM(),
                  perform_localrefinement: bool = CONFIG_PARAM(),
                  perform_reconstruction: bool = CONFIG_PARAM(),
@@ -72,6 +74,7 @@ class SingleInferencer:
         :param compile_model: Whether to compile the model using `torch.compile` for potential speed-up.
         :param top_k: The number of top predictions to consider for each particle.
         :param reference_map: Path to the reference map for local refinement. If not provided, it will be loaded from the checkpoint.
+        :param reference_mask: Path to the mask of the reference map. Used only for FSC calculation.
         :param directional_zscore_thr: The threshold for the directional Z-score to filter particles.
         :param perform_localrefinement: Whether to perform local refinement of the particle poses.
         :param perform_reconstruction: Whether to perform 3D reconstruction from the inferred poses.
@@ -104,6 +107,7 @@ class SingleInferencer:
         self.compile_model = compile_model
         self.top_k = top_k
         self.reference_map = reference_map
+        self.reference_mask = reference_mask
         self.directional_zscore_thr = directional_zscore_thr
         self.perform_localrefinement = perform_localrefinement
         self.perform_reconstruction = perform_reconstruction
@@ -383,8 +387,14 @@ class SingleInferencer:
 
                 if vol1 is not None and vol2 is not None and sampling_rate is not None:
                     print("Computing FSC...")
+                    if self.reference_mask is not None:
+                        reference_mask = get_vol(self.reference_mask, pixel_size=None)
+                    else:
+                        reference_mask = None
                     fsc, spatial_freq, resolution_A, (res_05, res_0143) = compute_fsc(vol1.cpu().numpy(),
-                                                                                     vol2.cpu().numpy(), sampling_rate)
+                                                                                     vol2.cpu().numpy(),
+                                                                                      sampling_rate,
+                                                                                      mask=reference_mask)
                     print(f"Resolution at FSC=0.143 ('gold-standard'): {res_0143:.3f} Å")
                     print(f"Resolution at FSC=0.5: {res_05:.3f} Å")
             self._model = None

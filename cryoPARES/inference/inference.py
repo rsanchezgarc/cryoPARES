@@ -27,6 +27,7 @@ from cryoPARES.datamanager.datamanager import DataManager
 from cryoPARES.projmatching.projMatching import ProjectionMatcher
 from cryoPARES.reconstruction.reconstruction import Reconstructor
 from cryoPARES.utils.paths import get_most_recent_file
+from cryoPARES.scripts.computeFsc import compute_fsc
 
 
 class SingleInferencer:
@@ -353,19 +354,35 @@ class SingleInferencer:
         else:
             data_halfset_list = [self.data_halfset]
 
-        out_list = []
+        all_out_list = []
         for model_halfset in model_halfset_list:
+            out_list = []
+            sampling_rate = None
             for data_halfset in data_halfset_list:
-                if model_halfset == None:
+                if model_halfset is None:
                     self.model_halfset = data_halfset
                 else:
                     self.model_halfset = model_halfset
                 self.data_halfset = data_halfset
                 print(f"Running inference for data {self.data_halfset} with model {self.model_halfset}")
                 out = self._run()
+                if self._model and hasattr(self._model, "reconstructor"):
+                    sampling_rate = self._model.reconstructor.sampling_rate
                 out_list.append(out)
+                all_out_list.append(out_list)
+
+            if len(out_list) == 2 and self.perform_reconstruction:
+                vol1 = out_list[0][1]
+                vol2 = out_list[1][1]
+
+                if vol1 is not None and vol2 is not None and sampling_rate is not None:
+                    print("Computing FSC...")
+                    fsc, spatial_freq, resolution_A, (res_05, res_0143) = compute_fsc(vol1.cpu().numpy(),
+                                                                                     vol2.cpu().numpy(), sampling_rate)
+                    print(f"Resolution at FSC=0.143 ('gold-standard'): {res_0143:.3f} Å")
+                    print(f"Resolution at FSC=0.5: {res_05:.3f} Å")
             self._model = None
-        return out_list
+        return all_out_list
 
     def _get_pbar(self, total):
         """

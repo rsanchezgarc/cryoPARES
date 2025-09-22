@@ -34,7 +34,7 @@ from cryoPARES.projmatching.filterToResolution import low_pass_filter_fname
 from cryoPARES.projmatching.fourierOperations import correlate_dft_2d, compute_dft_3d, _real_to_fourier_2d
 
 REPORT_ALIGNMENT_DISPLACEMENT = True
-USE_TWO_FLOAT32_FOR_COMPLEX = False
+USE_TWO_FLOAT32_FOR_COMPLEX = True
 
 
 def get_rotmat(degAngles, convention: str = RELION_EULER_CONVENTION, device=None):
@@ -85,7 +85,6 @@ class ProjectionMatcher(nn.Module):
         if USE_TWO_FLOAT32_FOR_COMPLEX:
             from cryoPARES.projmatching.extract_central_slices_as_real import \
                 extract_central_slices_rfft_3d_multichannel, compiled_extract_central_slices_rfft_3d_multichannel
-
             if main_config.projmatching.disable_compile_projectVol:
                 self.extract_central_slices_rfft_3d_multichannel = extract_central_slices_rfft_3d_multichannel
             else:

@@ -33,7 +33,9 @@ def _get_freq_grid_valid_coords_and_freq_grid_mask(image_shape, device:torch.dev
         )
         valid_coords = einops.rearrange(freq_grid, "h w zyx -> (h w) zyx")
     valid_coords = einops.rearrange(valid_coords, "b zyx -> b zyx 1")
-    return rfft_shape, valid_coords, freq_grid_mask
+    freq_mask_indices = torch.nonzero(freq_grid_mask, as_tuple=True)
+
+    return rfft_shape, valid_coords, freq_mask_indices
 
 
 def extract_central_slices_rfft_3d_multichannel(
@@ -45,16 +47,16 @@ def extract_central_slices_rfft_3d_multichannel(
 ) -> torch.Tensor:  # (..., c, h, w)
     """Extract central slice from an fftshifted rfft."""
     rotation_matrices = rotation_matrices.to(torch.float32)
-
-
-    rfft_shape, valid_coords, freq_grid_mask = _get_freq_grid_valid_coords_and_freq_grid_mask(image_shape, volume_rfft.device, fftfreq_max)
-    return _extract_central_slices_rfft_3d_multichannel(
+    rfft_shape, valid_coords, freq_mask_indices = _get_freq_grid_valid_coords_and_freq_grid_mask(image_shape,
+                                                                                                 volume_rfft.device,
+                                                                                                 fftfreq_max)
+    return _extract_central_slices_rfft_3d_multichannel_precomputed(
                                                         volume_rfft,
                                                         image_shape,
                                                         rotation_matrices,  # (..., 3, 3)
                                                         rfft_shape,
                                                         valid_coords,
-                                                        freq_grid_mask,
+                                                        freq_mask_indices,
                                                         zyx_matrices)
 
 def compiled_extract_central_slices_rfft_3d_multichannel(
@@ -66,99 +68,72 @@ def compiled_extract_central_slices_rfft_3d_multichannel(
 ) -> torch.Tensor:  # (..., c, h, w)
     """Extract central slice from an fftshifted rfft."""
     rotation_matrices = rotation_matrices.to(torch.float32)
-
-
-    rfft_shape, valid_coords, freq_grid_mask = _get_freq_grid_valid_coords_and_freq_grid_mask(image_shape, volume_rfft.device, fftfreq_max)
+    rfft_shape, valid_coords, freq_mask_indices = _get_freq_grid_valid_coords_and_freq_grid_mask(image_shape,
+                                                                                                 volume_rfft.device,
+                                                                                                 fftfreq_max)
     return _compiled_extract_central_slices_rfft_3d_multichannel(
                                                         volume_rfft,
                                                         image_shape,
                                                         rotation_matrices,  # (..., 3, 3)
                                                         rfft_shape,
                                                         valid_coords,
-                                                        freq_grid_mask,
+                                                        freq_mask_indices,
                                                         zyx_matrices)
 
-def _extract_central_slices_rfft_3d_multichannel(
-    volume_rfft: torch.Tensor,  # (c, d, d, d)
-    image_shape: tuple[int, int, int],
-    rotation_matrices: torch.Tensor,  # (..., 3, 3)
-    rfft_shape: tuple[int, int],
-    valid_coords: torch.Tensor,
-    freq_grid_mask: torch.Tensor,
-    zyx_matrices: bool = False,
-) -> torch.Tensor:  # (..., c, h, w)
-    """Extract central slice from an fftshifted rfft."""
 
-    # freq_grid, rfft_shape, valid_coords, freq_grid_mask = _get_freq_grid_valid_coords_and_freq_grid_mask(image_shape, volume_rfft.device, fftfreq_max)
+def _extract_central_slices_rfft_3d_multichannel_precomputed(
+        volume_rfft: torch.Tensor,
+        image_shape: tuple[int, int, int],
+        rotation_matrices: torch.Tensor,
+        rfft_shape: tuple[int, int],
+        valid_coords: torch.Tensor,
+        freq_mask_indices: torch.Tensor,
+        zyx_matrices: bool = False,
+) -> torch.Tensor:
+    """Version with pre-computed indices - fastest for repeated calls."""
 
+    # ... [same initial processing as above] ...
     rotation_matrices = rotation_matrices.to(torch.float32)
-
-    # keep track of some shapes
     channels = volume_rfft.shape[0]
     stack_shape = tuple(rotation_matrices.shape[:-2])
     output_shape = (*stack_shape, channels, *rfft_shape)
 
-    # rotation matrices rotate xyz coordinates, make them rotate zyx coordinates
-    # xyz:
-    # [a b c] [x]   [ax + by + cz]   [x']
-    # [d e f] [y]   [dx + ey + fz]   [y']
-    # [g h i] [z] = [gx + hy + iz] = [z']
-    #
-    # zyx:
-    # [i h g] [z]   [gx + hy + iz]   [z']
-    # [f e d] [y]   [dx + ey + fz]   [y']
-    # [c b a] [x] = [ax + by + cz] = [x']
     if not zyx_matrices:
         rotation_matrices = torch.flip(rotation_matrices, dims=(-2, -1))
-    # add extra dim to rotation matrices for broadcasting
+
     rotation_matrices = einops.rearrange(rotation_matrices, "... i j -> ... 1 i j")
-
-    # rotate all valid coordinates by each rotation matrix
-    rotated_coords = rotation_matrices @ valid_coords  # (..., b, zyx, 1)
-
-    # remove last dim of size 1
+    rotated_coords = rotation_matrices @ valid_coords
     rotated_coords = einops.rearrange(rotated_coords, "... hw zyx 1 -> ... hw zyx")
 
-    # flip coordinates that ended up in redundant half transform after rotation
     conjugate_mask = rotated_coords[..., 2] < 0
-    # rotated_coords[conjugate_mask, ...] *= -1
     rotated_coords = torch.where(conjugate_mask.unsqueeze(-1), -rotated_coords, rotated_coords)
 
-    # convert frequencies to array coordinates in fftshifted DFT
     rotated_coords = _fftfreq_to_dft_coordinates(
         frequencies=rotated_coords, image_shape=image_shape, rfft=True
     )
+
     samples = sample_image_3d_compiled(
         image=volume_rfft, coordinates=rotated_coords
-    )  # shape is (..., c)
+    )
 
-    # # take complex conjugate of values from redundant half transform
-
-    # For complex numbers, conjugate means flipping the sign of imaginary part
-    # samples has shape (..., hw, 2) where last dim is [real, imag]
-    real_part = samples[..., 0]  # Real part stays the same
-    imag_part = samples[..., 1]  # Imaginary part
-
-    # Apply conjugate where needed: flip imaginary part sign
+    real_part = samples[..., 0]
+    imag_part = samples[..., 1]
     imag_conjugated = torch.where(conjugate_mask, -imag_part, imag_part)
-
-    # Reconstruct the complex samples
     samples = torch.stack([real_part, imag_conjugated], dim=-1)
-
     samples = einops.rearrange(samples, "... hw c -> ... c hw")
 
-    # insert samples back into DFTs
+
     projection_image_dfts = torch.zeros(
         output_shape, device=volume_rfft.device, dtype=volume_rfft.dtype
     )
-    projection_image_dfts[..., freq_grid_mask] = samples
+    projection_image_dfts[..., freq_mask_indices[0], freq_mask_indices[1]] = samples
 
     return projection_image_dfts
 
 _compiled_extract_central_slices_rfft_3d_multichannel = torch.compile(
-    _extract_central_slices_rfft_3d_multichannel,
-    mode=main_config.projmatching.compile_projectVol_mode
-)
+    _extract_central_slices_rfft_3d_multichannel_precomputed,
+    mode=main_config.projmatching.compile_projectVol_mode)
+
 
 def sample_image_3d_compiled(
         image: torch.Tensor,

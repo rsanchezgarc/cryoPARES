@@ -13,7 +13,7 @@ class Projmatching_config:
     verbose: bool = False
     keep_top_k_values: int = 1
 
-    disable_compile_projectVol: bool = True
+    disable_compile_projectVol: bool = False
     compile_projectVol_mode: Optional[str] = "max-autotune"
 
     disable_compile_correlate_dft_2d: bool = True

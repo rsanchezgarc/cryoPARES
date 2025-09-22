@@ -20,7 +20,6 @@ from cryoPARES.constants import (RELION_EULER_CONVENTION, BATCH_POSE_NAME, RELIO
                                  BATCH_ORI_IMAGE_NAME, BATCH_ORI_CTF_NAME, RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES,
                                  BATCH_IDS_NAME)
 from torch_fourier_slice.slice_extraction import extract_central_slices_rfft_3d
-from cryoPARES.projmatching.extract_central_slices_as_real import extract_central_slices_rfft_3d_multichannel
 from cryoPARES.utils.paths import MAP_AS_ARRAY_OR_FNAME_TYPE, FNAME_TYPE
 
 from cryoPARES.configs.mainConfig import main_config
@@ -35,27 +34,31 @@ from cryoPARES.projmatching.filterToResolution import low_pass_filter_fname
 from cryoPARES.projmatching.fourierOperations import correlate_dft_2d, compute_dft_3d, _real_to_fourier_2d
 
 REPORT_ALIGNMENT_DISPLACEMENT = True
-USE_TWO_FLOAT32_FOR_COMPLEX = True
+USE_TWO_FLOAT32_FOR_COMPLEX = False
 
-def get_rotmat(degAngles, convention:str=RELION_EULER_CONVENTION, device=None):
+
+def get_rotmat(degAngles, convention: str = RELION_EULER_CONVENTION, device=None):
     if device is None:
         device = degAngles.device
     return euler_angles_to_matrix(torch.deg2rad(degAngles), convention=convention).to(device)
 
-def get_eulers(rotmats, convention:str=RELION_EULER_CONVENTION, device=None):
+
+def get_eulers(rotmats, convention: str = RELION_EULER_CONVENTION, device=None):
     if device is None:
         device = rotmats.device
     ori_shape = rotmats.shape
-    eulerDegs =  torch.rad2deg(matrix_to_euler_angles(rotmats.view(-1, 3, 3), convention=convention)).to(device)
+    eulerDegs = torch.rad2deg(matrix_to_euler_angles(rotmats.view(-1, 3, 3), convention=convention)).to(device)
     eulerDegs = eulerDegs.view(*ori_shape[:-2], 3)
     return eulerDegs
+
 
 class ProjectionMatcher(nn.Module):
     """
     Single concrete aligner (Fourier pipeline).
     This class folds together the previous abstract base + Fourier subclass.
     """
-    @inject_defaults_from_config(default_config=main_config.projmatching)
+
+    @inject_defaults_from_config(default_config=main_config.projmatching, update_config_with_args=True)
     def __init__(
             self,
             reference_vol: MAP_AS_ARRAY_OR_FNAME_TYPE,
@@ -71,7 +74,7 @@ class ProjectionMatcher(nn.Module):
         self.grid_distance_degs = grid_distance_degs
         self.grid_step_degs = grid_step_degs
         self.max_resolution_A = max_resolution_A
-        self.padding_factor = 0 # We do not support padding yet
+        self.padding_factor = 0  # We do not support padding yet
         self.keep_top_k_values = keep_top_k_values
         self.max_shift_fraction = main_config.projmatching.max_shift_fraction
 
@@ -80,14 +83,14 @@ class ProjectionMatcher(nn.Module):
         self.correct_ctf = correct_ctf
         self.mainLogger = getWorkerLogger(self.verbose)
         if USE_TWO_FLOAT32_FOR_COMPLEX:
+            from cryoPARES.projmatching.extract_central_slices_as_real import \
+                extract_central_slices_rfft_3d_multichannel, compiled_extract_central_slices_rfft_3d_multichannel
+
             if main_config.projmatching.disable_compile_projectVol:
                 self.extract_central_slices_rfft_3d_multichannel = extract_central_slices_rfft_3d_multichannel
             else:
                 print("Compiling extract_central_slices_rfft_3d_multichannel")
-                self.extract_central_slices_rfft_3d_multichannel = torch.compile(
-                            extract_central_slices_rfft_3d_multichannel, fullgraph=True,
-                            disable=main_config.projmatching.disable_compile_projectVol,
-                            mode=main_config.projmatching.compile_projectVol_mode, dynamic=True)
+                self.extract_central_slices_rfft_3d_multichannel = compiled_extract_central_slices_rfft_3d_multichannel
             self.projectF = self._projectF_USE_TWO_FLOAT32_FOR_COMPLEX
 
         else:
@@ -104,13 +107,12 @@ class ProjectionMatcher(nn.Module):
         #     self._analyze_cross_correlation = _analyze_cross_correlation
         #     self._extract_ccor_max = _extract_ccor_max
 
-
         if main_config.projmatching.disable_compile_correlate_dft_2d:
             self.correlate_dft_2d = correlate_dft_2d
         else:
             print("Compiling correlate_dft_2d")
             self.correlate_dft_2d = torch.compile(correlate_dft_2d, fullgraph=True,
-                                              mode=main_config.projmatching.compile_correlate_dft_2d_mode
+                                                  mode=main_config.projmatching.compile_correlate_dft_2d_mode
                                                   )
 
     # ----------------------- Basic props/helpers -----------------------
@@ -130,10 +132,10 @@ class ProjectionMatcher(nn.Module):
             n_angles = math.ceil(self.grid_distance_degs * 2 / self.grid_step_degs)
             n_angles = n_angles if n_angles % 2 == 1 else n_angles + 1  # We always want an odd number
             self._so3_delta = so3_near_identity_grid_cartesianprod(self.grid_distance_degs, n_angles,
-                                                             transposed=False, degrees=True,
-                                                             remove_duplicates=False).to(device)
+                                                                   transposed=False, degrees=True,
+                                                                   remove_duplicates=False).to(device)
             #TODO: remove_duplicates=True makes the whole things broken. Probably due to euler angles singularities
-            if as_rotmats: #Using rotamts seems a bad idea as well. Not giving good results
+            if as_rotmats:  #Using rotamts seems a bad idea as well. Not giving good results
                 self._so3_delta_is_rotmat = True
                 self._so3_delta = get_rotmat(self._so3_delta)
             else:
@@ -144,7 +146,7 @@ class ProjectionMatcher(nn.Module):
     # ----------------------- Fourier-specific core -----------------------
 
     def _store_reference_vol(
-        self, reference_vol: MAP_AS_ARRAY_OR_FNAME_TYPE, pixel_size: float | None = None
+            self, reference_vol: MAP_AS_ARRAY_OR_FNAME_TYPE, pixel_size: float | None = None
     ):
         """
         Load volume, move to Fourier domain (rfft & shift), register buffers and
@@ -185,9 +187,9 @@ class ProjectionMatcher(nn.Module):
         self.register_buffer("rmask", rmask)
 
         if self.max_resolution_A is not None:
-            nyquist_freq = 1 / (2 * self.vol_voxel_size)        # Nyquist freq in cycles/Å
-            cutoff_freq = 1 / self.max_resolution_A             # cutoff freq in cycles/Å
-            self.fftfreq_max =  min(cutoff_freq / nyquist_freq, 1.0)   # normalize to Nyquist (0..1)
+            nyquist_freq = 1 / (2 * self.vol_voxel_size)  # Nyquist freq in cycles/Å
+            cutoff_freq = 1 / self.max_resolution_A  # cutoff freq in cycles/Å
+            self.fftfreq_max = min(cutoff_freq / nyquist_freq, 1.0)  # normalize to Nyquist (0..1)
 
     def _projectF(self, rotMats: torch.Tensor) -> torch.Tensor:
 
@@ -195,9 +197,8 @@ class ProjectionMatcher(nn.Module):
             self.reference_vol,
             image_shape=self.vol_shape,
             rotation_matrices=rotMats,
-            fftfreq_max=self.fftfreq_max ,
-            zyx_matrices=False,)
-
+            fftfreq_max=self.fftfreq_max,
+            zyx_matrices=False, )
 
     def _projectF_USE_TWO_FLOAT32_FOR_COMPLEX(self, rotMats: torch.Tensor) -> torch.Tensor:
 
@@ -230,7 +231,7 @@ class ProjectionMatcher(nn.Module):
         corrs = self.correlate_dft_2d(parts, projs)
         b, options, l0, l1 = corrs.shape
         maxcorr, maxcorrIdxs = self._extract_ccor_max(corrs.reshape(-1, *corrs.shape[-2:]),
-                                      max_shift_fraction=self.max_shift_fraction)
+                                                      max_shift_fraction=self.max_shift_fraction)
         del corrs
         return maxcorr.reshape(b, options), maxcorrIdxs.reshape(b, options, 2)
 
@@ -247,27 +248,28 @@ class ProjectionMatcher(nn.Module):
         return projs
 
     def preprocess_particles(
-        self,
-        particles: FNAME_TYPE,
-        data_rootdir,
-        particle_radius_angs, #TODO: This is not used. Would need to be in the builder? That is where we create the rmask
-        batch_size,
-        n_cpus,
+            self,
+            particles: FNAME_TYPE,
+            data_rootdir,
+            particle_radius_angs,
+            #TODO: particle_radius_angs is not used. Would need to be in the builder? That is where we create the rmask
+            batch_size,
+            n_cpus,
     ):
 
         from cryoPARES.datamanager.datamanager import DataManager
-        dm = DataManager(particles, #TODO: this does not apply circular mask to the particle
-                     symmetry="C1",
-                     particles_dir=data_rootdir,
-                     halfset=None,
-                     batch_size=batch_size,
-                     save_train_val_partition_dir=None,
-                     is_global_zero=True,
-                     num_augmented_copies_per_batch=1,
-                     num_data_workers = n_cpus,
-                     return_ori_imagen = True,
-                     subset_idxs=None
-                     )
+        dm = DataManager(particles,
+                         symmetry="C1",
+                         particles_dir=data_rootdir,
+                         halfset=None,
+                         batch_size=batch_size,
+                         save_train_val_partition_dir=None,
+                         is_global_zero=True,
+                         num_augmented_copies_per_batch=1,
+                         num_data_workers=n_cpus,
+                         return_ori_imagen=True,
+                         subset_idxs=None
+                         )
 
         ds = dm.create_dataset(None)
         return ds
@@ -285,15 +287,19 @@ class ProjectionMatcher(nn.Module):
         # Also, for large batches, there could be redundant angles (to a certain precision)
         projs = self._compute_projections_from_euleres(expanded_eulerDegs.reshape(-1, 3))[0]
 
-
+        #TODO: I need another way of generating the rotmats grid to avoid singularities
         # expanded_rotmats = (rotmats.unsqueeze(1) @ self._get_so3_delta(rotmats.device, as_rotmats=True).unsqueeze(0))
         # bsize = expanded_rotmats.size(0)
         # expanded_rotmats = expanded_rotmats.reshape(bsize, -1, 3, 3)  # unrolling all the input angles into one
         # projs = self._compute_projections_from_rotmats(expanded_rotmats.reshape(-1, 3, 3))
 
         if self.correct_ctf:
-            _shapeIdx = -3 if USE_TWO_FLOAT32_FOR_COMPLEX else -3
-            ctfs = ctfs.unsqueeze(1).unsqueeze(-1)
+            ctfs = ctfs.unsqueeze(1)
+            if USE_TWO_FLOAT32_FOR_COMPLEX:
+                _shapeIdx = -3
+                ctfs = ctfs.unsqueeze(-1)
+            else:
+                _shapeIdx = -2
             projs = self._apply_ctfF(projs.reshape(bsize, -1, *projs.shape[_shapeIdx:]), ctfs)
         del ctfs
         perImgCorr, pixelShiftsXY = self.correlateF(fparts.unsqueeze(1), projs)
@@ -301,7 +307,8 @@ class ProjectionMatcher(nn.Module):
 
         batch_idxs_range = torch.arange(pixelShiftsXY.size(0)).unsqueeze(1)
         pixelShiftsXY = pixelShiftsXY[batch_idxs_range, maxCorrsIdxs]
-        predEulers = expanded_eulerDegs[batch_idxs_range, maxCorrsIdxs] #TODO: Try to minimize euler->rotmat conversions
+        predEulers = expanded_eulerDegs[
+            batch_idxs_range, maxCorrsIdxs]  #TODO: Try to minimize euler->rotmat conversions
         predRotMats = get_rotmat(predEulers)
         mean_corr = perImgCorr.mean(-1, keepdims=True)
         std_corr = perImgCorr.std(-1, keepdims=True)
@@ -311,14 +318,14 @@ class ProjectionMatcher(nn.Module):
 
     @torch.inference_mode()
     def align_star(
-        self,
-        particles: FNAME_TYPE ,
-        starFnameOut: FNAME_TYPE,
-        data_rootdir: str | None = None,
-        particle_radius_angs=None,
-        batch_size=256,
-        device="cuda",
-        n_cpus= 1
+            self,
+            particles: FNAME_TYPE,
+            starFnameOut: FNAME_TYPE,
+            data_rootdir: str | None = None,
+            particle_radius_angs=None,
+            batch_size=256,
+            device="cuda",
+            n_cpus=1
     ) -> ParticlesStarSet:
         """
         Align particles (input STAR file) to the reference.
@@ -354,7 +361,6 @@ class ProjectionMatcher(nn.Module):
         stats_corr_matrix = torch.zeros(n_particles, self.keep_top_k_values)
         idds_list = [None] * n_particles
 
-
         self.to(device)
         self.mainLogger.info(f"Total number of particles: {n_particles}")
 
@@ -364,7 +370,7 @@ class ProjectionMatcher(nn.Module):
         except AttributeError:
             particlesStar = particlesDataSet.datasets[0].particles.copy()
             try:
-                confidence = torch.tensor(particlesStar.particles_md.loc[:,RELION_PRED_POSE_CONFIDENCE_NAME].values,
+                confidence = torch.tensor(particlesStar.particles_md.loc[:, RELION_PRED_POSE_CONFIDENCE_NAME].values,
                                           dtype=torch.float32)
             except KeyError:
                 confidence = torch.ones(len(particlesStar.particles_md))
@@ -372,16 +378,17 @@ class ProjectionMatcher(nn.Module):
             particlesStar.particles_md.drop("rlnImageId", axis=1)
 
         dl = DataLoader(
-                        particlesDataSet,
-                        batch_size=batch_size,
-                        num_workers=n_cpus, shuffle=False, pin_memory=True,
-                        multiprocessing_context='fork') #get_context('loky')
+            particlesDataSet,
+            batch_size=batch_size,
+            num_workers=n_cpus, shuffle=False, pin_memory=True,
+            multiprocessing_context='fork')  #get_context('loky')
         non_blocking = True
         _partIdx = 0
         for batch in tqdm(dl, desc="Aligning particles", disable=not self.verbose):
 
             n_items = len(batch[BATCH_ORI_IMAGE_NAME])
-            partIdx = torch.arange(_partIdx, _partIdx + n_items); _partIdx += n_items
+            partIdx = torch.arange(_partIdx, _partIdx + n_items);
+            _partIdx += n_items
             idds = batch[BATCH_IDS_NAME]
             rotmats = batch[BATCH_POSE_NAME][0].to(device, non_blocking=non_blocking)
             parts = batch[BATCH_ORI_IMAGE_NAME].to(device, non_blocking=non_blocking)
@@ -427,7 +434,8 @@ class ProjectionMatcher(nn.Module):
                 r2 = torch.FloatTensor(Rotation.from_euler(RELION_EULER_CONVENTION,
                                                            particles_md.loc[idds_list, angles_names],
                                                            degrees=True).as_matrix())
-                ang_err = torch.rad2deg(rotation_error_with_sym(r1, r2, symmetry="C1"))# C1 since we do not use symemtry in local refinement. Ideally we would like to use the proper symmetry for eval purposes
+                ang_err = torch.rad2deg(rotation_error_with_sym(r1, r2,
+                                                                symmetry="C1"))  # C1 since we do not use symemtry in local refinement. Ideally we would like to use the proper symmetry for eval purposes
 
                 s2 = particles_md.loc[idds_list, shiftsXYangs_names].values
                 shift_error = np.sqrt(((shiftsXYangs - s2) ** 2).sum(-1))
@@ -440,11 +448,9 @@ class ProjectionMatcher(nn.Module):
             _confidence = confidence * prob_x_y[:, k]
             particles_md.loc[idds_list, confide_name] = _confidence.numpy()
 
-
         if starFnameOut is not None:
             finalParticlesStar.save(starFname=starFnameOut)
             self.mainLogger.info(f"particles were saved at {starFnameOut}")
-
 
         del particlesDataSet
         gc.collect()
@@ -484,25 +490,26 @@ class ProjectionMatcher(nn.Module):
         pixelShiftsXY[:, 0] = w0 + torch.gather(maxIndxJ, 1, maxIndxI.unsqueeze(1)).squeeze(1)
         return perImgCorr, pixelShiftsXY
 
-def _analyze_cross_correlation(perImgCorr:torch.Tensor, pixelShiftsXY:torch.Tensor, grid_rotmats:torch.Tensor,
-                               return_top_k:int, half_particle_size:float,
-                               vol_voxel_size:float) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
 
+def _analyze_cross_correlation(perImgCorr: torch.Tensor, pixelShiftsXY: torch.Tensor, grid_rotmats: torch.Tensor,
+                               return_top_k: int, half_particle_size: float,
+                               vol_voxel_size: float) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     b, topk, nrots = perImgCorr.shape
-    batch_arange= torch.arange(b, device=perImgCorr.device).unsqueeze(1)
+    batch_arange = torch.arange(b, device=perImgCorr.device).unsqueeze(1)
 
     reshaped_perImgCorr = perImgCorr.reshape(b, -1)
     maxCorrs, maxIdxs = reshaped_perImgCorr.topk(return_top_k, largest=True, sorted=True)
     bestPixelShiftsXY = pixelShiftsXY.reshape(b, -1, 2)[batch_arange, maxIdxs]
     mean_corr = torch.mean(reshaped_perImgCorr, dim=-1, keepdim=True)
     std_corr = torch.std(reshaped_perImgCorr, dim=-1, keepdim=True)
-    comparedWeight = torch.distributions.Normal(mean_corr, std_corr+1e-6).cdf(maxCorrs)  # 1-P(I_i > All_images)
+    comparedWeight = torch.distributions.Normal(mean_corr, std_corr + 1e-6).cdf(maxCorrs)  # 1-P(I_i > All_images)
     predShiftsAngsXY = -(bestPixelShiftsXY - half_particle_size) * vol_voxel_size
 
     topk_input_indices = maxIdxs // nrots
     predRotMatsIdxs = maxIdxs % nrots
     predRotMats = grid_rotmats[batch_arange, topk_input_indices, predRotMatsIdxs]
     return maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight
+
 
 @lru_cache(1)
 def _get_begin_end_from_max_shift(image_shape, max_shift):
@@ -517,6 +524,7 @@ def _get_begin_end_from_max_shift(image_shape, max_shift):
     w1 = w - delta_w
 
     return h0, h1, w0, w1
+
 
 def _extract_ccor_max(corrs, max_shift_fraction):
     pixelShiftsXY = torch.empty(corrs.shape[:-2] + (2,), device=corrs.device, dtype=torch.int64)
@@ -535,23 +543,23 @@ def _extract_ccor_max(corrs, max_shift_fraction):
 
 
 def align_star(
-    reference_vol: str,
-    star_fname: str,
-    out_fname: str,
-    particles_dir: Optional[str],
-    particle_radius_angs: Optional[float] = None,
-    grid_distance_degs: float = 8.0,
-    grid_step_degs: float = 2.0,
-    return_top_k_poses: int = 1,
-    filter_resolution_angst: Optional[float] = None,
-    n_cpus_per_job: int = 1,
-    batch_size: int = 1024,
-    use_cuda: bool = True,
-    verbose: bool = True,
-    torch_matmul_precision: Literal["highest", "high", "medium"] = "high",
-    gpu_id: Optional[int] = None,
-    n_first_particles: Optional[int] = None,
-    correct_ctf: bool = True,
+        reference_vol: str,
+        star_fname: str,
+        out_fname: str,
+        particles_dir: Optional[str],
+        particle_radius_angs: Optional[float] = None,
+        grid_distance_degs: float = 8.0,
+        grid_step_degs: float = 2.0,
+        return_top_k_poses: int = 1,
+        filter_resolution_angst: Optional[float] = None,
+        n_cpus_per_job: int = 1,
+        batch_size: int = 1024,
+        use_cuda: bool = True,
+        verbose: bool = True,
+        torch_matmul_precision: Literal["highest", "high", "medium"] = "high",
+        gpu_id: Optional[int] = None,
+        n_first_particles: Optional[int] = None,
+        correct_ctf: bool = True,
 ):
     """
 
@@ -574,7 +582,6 @@ def align_star(
     :param correct_ctf:
     :return:
     """
-
 
     import torch.multiprocessing as mp
 
@@ -604,7 +611,6 @@ def align_star(
             star_in_limited = os.path.join(tmpdir, f"input_particles_{os.path.basename(star_fname)}")
             starfile.write({"optics": optics_df, "particles": particles_df}, star_in_limited)
             star_fname = star_in_limited
-
 
         # Optional low-pass filter of the reference volume
         if filter_resolution_angst is not None:
@@ -640,20 +646,23 @@ def align_star(
 # CLI entry
 if __name__ == "__main__":
     import sys, shlex
+
     print(' '.join(shlex.quote(arg) for arg in sys.argv[1:]))
     from argParseFromDoc import parse_function_and_call
+
     parse_function_and_call(align_star)
 
 """
 
---reference_vol /home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles_reconstruct.mrc 
---star_fname ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles.star 
---particles_dir ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/
---out_fname /tmp/pruebaCryoparesProjMatch.star
---n_first_particles 100
---grid_distance_degs 15
---grid_step_degs 5
---filter_resolution_angst 6
+python -m cryoPARES.projmatching.projMatching \
+--reference_vol ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/donwsampled/output_volume.mrc \
+--star_fname ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/donwsampled/down1000particles.star \
+--particles_dir ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/donwsampled/ \
+--out_fname /tmp/pruebaCryoparesProjMatch.star \
+--n_first_particles 100 \
+--grid_distance_degs 15 \
+--grid_step_degs 5 \
+--filter_resolution_angst 9 \
 --batch_size 2
 
 # --grid_distance_degs 15 --grid_step_degs 5 ==> Grid goes from -15 to + 15

@@ -56,6 +56,28 @@ def extract_central_slices_rfft_3d_multichannel(
                                                         valid_coords,
                                                         freq_grid_mask,
                                                         zyx_matrices)
+
+def compiled_extract_central_slices_rfft_3d_multichannel(
+    volume_rfft: torch.Tensor,  # (c, d, d, d//2+1)
+    image_shape: tuple[int, int, int],
+    rotation_matrices: torch.Tensor,  # (..., 3, 3)
+    fftfreq_max: float | None = None,
+    zyx_matrices: bool = False,
+) -> torch.Tensor:  # (..., c, h, w)
+    """Extract central slice from an fftshifted rfft."""
+    rotation_matrices = rotation_matrices.to(torch.float32)
+
+
+    rfft_shape, valid_coords, freq_grid_mask = _get_freq_grid_valid_coords_and_freq_grid_mask(image_shape, volume_rfft.device, fftfreq_max)
+    return _compiled_extract_central_slices_rfft_3d_multichannel(
+                                                        volume_rfft,
+                                                        image_shape,
+                                                        rotation_matrices,  # (..., 3, 3)
+                                                        rfft_shape,
+                                                        valid_coords,
+                                                        freq_grid_mask,
+                                                        zyx_matrices)
+
 def _extract_central_slices_rfft_3d_multichannel(
     volume_rfft: torch.Tensor,  # (c, d, d, d)
     image_shape: tuple[int, int, int],
@@ -132,6 +154,11 @@ def _extract_central_slices_rfft_3d_multichannel(
     projection_image_dfts[..., freq_grid_mask] = samples
 
     return projection_image_dfts
+
+_compiled_extract_central_slices_rfft_3d_multichannel = torch.compile(
+    _extract_central_slices_rfft_3d_multichannel,
+    mode=main_config.projmatching.compile_projectVol_mode
+)
 
 def sample_image_3d_compiled(
         image: torch.Tensor,

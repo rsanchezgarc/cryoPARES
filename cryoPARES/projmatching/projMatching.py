@@ -79,15 +79,15 @@ class ProjectionMatcher(nn.Module):
         self.verbose = verbose
         self.correct_ctf = correct_ctf
         self.mainLogger = getWorkerLogger(self.verbose)
-
         if USE_TWO_FLOAT32_FOR_COMPLEX:
-            if not main_config.projmatching.disable_compile_projectVol:
+            if main_config.projmatching.disable_compile_projectVol:
                 self.extract_central_slices_rfft_3d_multichannel = extract_central_slices_rfft_3d_multichannel
             else:
+                print("Compiling extract_central_slices_rfft_3d_multichannel")
                 self.extract_central_slices_rfft_3d_multichannel = torch.compile(
                             extract_central_slices_rfft_3d_multichannel, fullgraph=True,
                             disable=main_config.projmatching.disable_compile_projectVol,
-                            mode=main_config.projmatching.compile_projectVol_mode)
+                            mode=main_config.projmatching.compile_projectVol_mode, dynamic=True)
             self.projectF = self._projectF_USE_TWO_FLOAT32_FOR_COMPLEX
 
         else:
@@ -108,9 +108,10 @@ class ProjectionMatcher(nn.Module):
         if main_config.projmatching.disable_compile_correlate_dft_2d:
             self.correlate_dft_2d = correlate_dft_2d
         else:
+            print("Compiling correlate_dft_2d")
             self.correlate_dft_2d = torch.compile(correlate_dft_2d, fullgraph=True,
-                                              mode=main_config.projmatching.compile_correlate_dft_2d_mode,
-                                              dynamic=True)
+                                              mode=main_config.projmatching.compile_correlate_dft_2d_mode
+                                                  )
 
     # ----------------------- Basic props/helpers -----------------------
 
@@ -165,8 +166,9 @@ class ProjectionMatcher(nn.Module):
         )
         self.pad_length = pad_length
 
-        #We are storing the volumes as real and imaginary float32
-        reference_vol = torch.view_as_real(reference_vol).permute([-1, 0, 1, 2]).contiguous()
+        if USE_TWO_FLOAT32_FOR_COMPLEX:
+            #We are storing the volumes as real and imaginary float32
+            reference_vol = torch.view_as_real(reference_vol).permute([-1, 0, 1, 2]).contiguous()
 
         self.register_buffer("reference_vol", reference_vol)
 
@@ -202,6 +204,7 @@ class ProjectionMatcher(nn.Module):
         projs = self.extract_central_slices_rfft_3d_multichannel(self.reference_vol,
                                                                  self.vol_shape,
                                                                  rotation_matrices=rotMats,
+                                                                 fftfreq_max=self.fftfreq_max,
                                                                  zyx_matrices=False)
         projs = projs.permute([0, 2, 3, 1]).contiguous()
         return projs

@@ -14,10 +14,10 @@ class Projmatching_config:
     keep_top_k_values: int = 1
 
     disable_compile_projectVol: bool = True
-    compile_projectVol_mode: Optional[str] = None #"max-autotune"
+    compile_projectVol_mode: Optional[str] = "max-autotune"
 
     disable_compile_correlate_dft_2d: bool = True
     compile_correlate_dft_2d_mode: Optional[str] = "max-autotune"
 
     disable_compile_analyze_cc: bool = True #You need to use torch.compiler.cudagraph_mark_step_begin() before the execution of the alinging step
-    compile_analyze_cc_mode: Optional[str] = None #"max-autotune" #None #"reduce-overhead" #"max-autotune"
+    compile_analyze_cc_mode: Optional[str] = "max-autotune" #None #"reduce-overhead" #"max-autotune"

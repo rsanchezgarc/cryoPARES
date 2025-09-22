@@ -337,7 +337,7 @@ class SingleInferencer:
         euler_degs = torch.rad2deg(matrix_to_euler_angles(pred_rotmats, RELION_EULER_CONVENTION))
         if gpu_offload:
             euler_degs = euler_degs.cpu()
-            pred_shiftsXYangs = pred_shiftsXYangs.cpu()
+            pred_shiftsXYangs = pred_shiftsXYangs.cpu() if pred_shiftsXYangs is not None else None
             score = score.cpu()
             norm_nn_score = norm_nn_score.cpu()
         return ids, euler_degs, pred_shiftsXYangs, score, norm_nn_score

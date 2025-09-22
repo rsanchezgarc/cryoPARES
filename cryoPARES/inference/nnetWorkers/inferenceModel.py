@@ -144,7 +144,8 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
 
         if self.reconstructor is not None:
             self.reconstructor._backproject_batch(kwargs['imgs'], kwargs['ctfs'],
-                           rotMats=predRotMats, hwShiftAngs=predShiftsAngsXY.flip(-1), zyx_matrices=False)
+                           rotMats=predRotMats, hwShiftAngs=predShiftsAngsXY.flip(-1),
+                                                  confidence=None, zyx_matrices=False)
 
         return kwargs['ids'], predRotMats, predShiftsAngsXY, score, kwargs['norm_nn_score']
 

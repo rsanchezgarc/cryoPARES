@@ -35,7 +35,9 @@ class TrainerPartition:
                  continue_checkpoint_fname: Optional[str] = None, finetune_checkpoint_fname: Optional[str] = None,
                  find_lr: bool = False, compile_model: bool = False, val_check_interval: Optional[float] = None,
                  num_data_workers: int = CONFIG_PARAM(config=main_config.datamanager),
-                 overfit_batches: Optional[int] = None):
+                 mask_radius_angs: Optional[float] = CONFIG_PARAM(config=main_config.datamanager.particlesdataset),
+                 overfit_batches: Optional[int] = None,
+                 float32_matmul_precision: str= constants.float32_matmul_precision):
         """Initialize trainer for a single partition.
 
         Args:
@@ -51,7 +53,9 @@ class TrainerPartition:
             compile_model: Use torch 2.0 compilation
             val_check_interval: Fraction of epoch between validations
             num_data_workers: The number of workers (one CPU process each, to be used to load data)
+            mask_radius_angs: The radius of the particle in Angstroms. Used to create a circular mask arround it.
             overfit_batches: Number of batches to use if overfitting
+            float32_matmul_precision:
         """
         self.symmetry = symmetry
         self.particles_star_fname = particles_star_fname
@@ -65,13 +69,14 @@ class TrainerPartition:
         self.val_check_interval = val_check_interval
         self.n_epochs = n_epochs
         self.overfit_batches = overfit_batches
+        self.float32_matmul_precision = float32_matmul_precision
 
         self.train_config = main_config.train
         if self.n_epochs is not None:
             assert self.n_epochs >= 0
             self.train_config.n_epochs = self.n_epochs
 
-        torch.set_float32_matmul_precision(constants.float32_matmul_precision)
+        torch.set_float32_matmul_precision(self.float32_matmul_precision)
         # Uncomment the next line to reduce fragmentation
         if main_config.train.expandable_segments_GPU_mem:
             os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"

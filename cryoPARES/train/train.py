@@ -21,11 +21,14 @@ class Trainer:
                  particles_dir: Optional[List[str]] = None, n_epochs: int = CONFIG_PARAM(),
                  batch_size: int = CONFIG_PARAM(), #CONFIG_PARAM status with update_config_with_args gets updated in config directly
                  num_data_workers: int = CONFIG_PARAM(config=main_config.datamanager), #CONFIG_PARAM status with update_config_with_args gets updated in config directly
+                 mask_radius_angs: Optional[float] = CONFIG_PARAM(config=main_config.datamanager.particlesdataset),
                  split_halfs: bool = True,
                  continue_checkpoint_dir: Optional[str] = None, finetune_checkpoint_dir: Optional[str] = None,
                  compile_model: bool = False, val_check_interval: Optional[float] = None,
                  overfit_batches: Optional[int] = None,
-                 map_fname_for_simulated_pretraining: Optional[List[str]] = None):
+                 map_fname_for_simulated_pretraining: Optional[List[str]] = None,
+                 float32_matmul_precision: str = constants.float32_matmul_precision,
+                 ):
         """
         Trainer a model on particle data.
 
@@ -37,6 +40,7 @@ class Trainer:
             n_epochs: The number of epochs
             batch_size: The batch size
             num_data_workers: Number of parallel data loading workers. One CPU each. Set it to 0 to read and process the data in the same thread
+            mask_radius_angs: The radius of the particle in Angstroms. Used to create a circular mask arround it.
             split_halfs: If True, it trains a model for each half of the data
             continue_checkpoint_dir: The path of a pre-trained model to continue training.
             finetune_checkpoint_dir: The path of a pre-trained model to do finetunning
@@ -44,6 +48,7 @@ class Trainer:
             val_check_interval: The fraction of an epoch after which the validation set will be evaluated
             overfit_batches: If provided, number of train and validation batches to use
             map_fname_for_simulated_pretraining: If provided, it will run a warmup training on simulations using this maps. They need to match the particlesStarFname order
+            float32_matmul_precision: The precision used for matmul. Accuracy/speed tradeoff
         """
         self.symmetry = symmetry
         self.particles_star_fname = [osp.expanduser(fname) for fname in particles_star_fname]
@@ -56,6 +61,7 @@ class Trainer:
         self.val_check_interval = val_check_interval
         self.overfit_batches = overfit_batches
         self.map_fname_for_simulated_pretraining = map_fname_for_simulated_pretraining
+        self.float32_matmul_precision = float32_matmul_precision
 
         self._validate_inputs()
         self._setup_training_dir(train_save_dir)
@@ -175,7 +181,7 @@ class Trainer:
         :return:
         """
         from cryoPARES.train.runTrainOnePartition import execute_trainOnePartition, check_if_training_partion_done
-        torch.set_float32_matmul_precision(constants.float32_matmul_precision)
+        torch.set_float32_matmul_precision(self.float32_matmul_precision)
 
         if self.finetune_checkpoint_dir is not None:
             self._save_finetune_checkpoint_info()

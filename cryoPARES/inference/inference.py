@@ -54,6 +54,7 @@ class SingleInferencer:
                  subset_idxs: Optional[List[int]] = None,
                  n_first_particles: Optional[int] = None,
                  show_debug_stats: bool = False,
+                 float32_matmul_precision: str = constants.float32_matmul_precision,
                  ):
         """
         Initializes the SingleInferencer for running inference on a set of particles.
@@ -78,8 +79,10 @@ class SingleInferencer:
         :param subset_idxs: A list of indices to process a subset of particles.
         :param n_first_particles: The number of first particles to process. Cannot be used with `subset_idxs`.
         :param show_debug_stats: Whether to print debug statistics, such as rotation errors.
+        :param float32_matmul_precision: The precision used in multiplications. Speed/accuracy tradeoff
         """
 
+        self.float32_matmul_precision = float32_matmul_precision
         self.particles_star_fname = particles_star_fname
         self.particles_dir = particles_dir
 
@@ -342,6 +345,9 @@ class SingleInferencer:
 
         :return: A list of tuples, where each tuple contains the particle metadata and the reconstructed volume for each inference run.
         """
+
+        torch.set_float32_matmul_precision(self.float32_matmul_precision)
+
         if self.model_halfset == "allCombinations":
             model_halfset_list = ["half1", "half2"]
         elif self.model_halfset == "matchingHalf":
@@ -618,7 +624,6 @@ if __name__ == "__main__":
     print(" ".join(sys.argv))
     print("---------------------------------------")
     from cryoPARES.configManager.configParser import ConfigArgumentParser
-    torch.set_float32_matmul_precision(constants.float32_matmul_precision)
 
     parser = ConfigArgumentParser(prog="infer_cryoPARES", description="Run inference with cryoPARES model",
                                   config_obj=main_config)
@@ -627,7 +632,7 @@ if __name__ == "__main__":
     assert os.path.isdir(args.checkpoint_dir), f"Error, checkpoint_dir {args.checkpoint_dir} not found"
     config_fname = get_most_recent_file(args.checkpoint_dir, "configs_*.yml")
     ConfigOverrideSystem.update_config_from_file(main_config, config_fname, drop_paths=["inference", "projmatching"])
-
+    ConfigOverrideSystem.update_config_from_configstrings(main_config, config_args, verbose=True)
 
     with SingleInferencer(**vars(args)) as inferencer:
         inferencer.run()

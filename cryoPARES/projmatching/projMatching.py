@@ -83,11 +83,13 @@ class ProjectionMatcher(nn.Module):
         self.correct_ctf = correct_ctf
         self.mainLogger = getWorkerLogger(self.verbose)
         if USE_TWO_FLOAT32_FOR_COMPLEX:
-            from cryoPARES.projmatching.extract_central_slices_as_real import \
-                extract_central_slices_rfft_3d_multichannel, compiled_extract_central_slices_rfft_3d_multichannel
             if main_config.projmatching.disable_compile_projectVol:
+                from cryoPARES.projmatching.extract_central_slices_as_real import \
+                                extract_central_slices_rfft_3d_multichannel
                 self.extract_central_slices_rfft_3d_multichannel = extract_central_slices_rfft_3d_multichannel
             else:
+                from cryoPARES.projmatching.extract_central_slices_as_real import \
+                                compiled_extract_central_slices_rfft_3d_multichannel
                 print("Compiling extract_central_slices_rfft_3d_multichannel")
                 self.extract_central_slices_rfft_3d_multichannel = compiled_extract_central_slices_rfft_3d_multichannel
             self.projectF = self._projectF_USE_TWO_FLOAT32_FOR_COMPLEX

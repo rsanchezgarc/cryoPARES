@@ -14,12 +14,13 @@ from typing import List, Optional, Tuple, Union
 import torch
 import tqdm
 from starstack import ParticlesStarSet
-from starstack.constants import (
+from cryoPARES.constants import (
     RELION_ANGLES_NAMES,
     RELION_SHIFTS_NAMES,
     RELION_EULER_CONVENTION,
     RELION_IMAGE_FNAME,
-    RELION_PRED_POSE_CONFIDENCE_NAME
+    RELION_PRED_POSE_CONFIDENCE_NAME,
+    float32_matmul_precision
 )
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
@@ -336,10 +337,10 @@ class Reconstructor(nn.Module):
 
         if self.correct_ctf:
             ctf = ctf.to(imgs.device)
-            imgs = imgs * ctf  # incorporate CTF phase/amp
+            imgs = imgs * ctf
 
             # Prepare channels: [real, imag, ctf^2]
-            # NOTE: we only build alpha if confidence is provided (to avoid overhead).
+            # we only build alpha if confidence is provided (to avoid overhead).
             if confidence is not None:
                 alpha = confidence.view(-1, 1, 1, 1).to(ctf.device)  # broadcast over channels and pixels
                 stacked = torch.stack([imgs.real, imgs.imag, ctf**2], dim=1) * alpha
@@ -475,7 +476,7 @@ def reconstruct_starfile(
     eps: float = CONFIG_PARAM(),
     min_denominator_value: Optional[float] = None,
     use_only_n_first_batches: Optional[int] = None,
-    float32_matmul_precision: Optional[str] = "high",
+    float32_matmul_precision: Optional[str] = float32_matmul_precision,
     weight_with_confidence: bool = CONFIG_PARAM(),
 ):
     """

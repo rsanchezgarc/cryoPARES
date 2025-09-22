@@ -112,9 +112,7 @@ def _extract_central_slices_rfft_3d_multichannel_precomputed(
         frequencies=rotated_coords, image_shape=image_shape, rfft=True
     )
 
-    samples = sample_image_3d_compiled(
-        image=volume_rfft, coordinates=rotated_coords
-    )
+    samples = sample_image_3d(image=volume_rfft, coordinates=rotated_coords)
 
     real_part = samples[..., 0]
     imag_part = samples[..., 1]
@@ -132,10 +130,10 @@ def _extract_central_slices_rfft_3d_multichannel_precomputed(
 
 _compiled_extract_central_slices_rfft_3d_multichannel = torch.compile(
     _extract_central_slices_rfft_3d_multichannel_precomputed,
-    mode=main_config.projmatching.compile_projectVol_mode)
+    mode=main_config.projmatching.compile_projectVol_mode, fullgraph=True)
 
 
-def sample_image_3d_compiled(
+def sample_image_3d(
         image: torch.Tensor,
         coordinates: torch.Tensor,
 ) -> torch.Tensor:

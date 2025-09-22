@@ -500,6 +500,9 @@ class ConfigArgumentParser(AutoArgumentParser):
             print("Or use a YAML file: --config my_config.yaml")
             sys.exit(0)
 
+        if args_list.count("--config") > 1:
+            print("Only one --config allowed! Review your command line argument!")
+            sys.exit(1)
         # Now do normal parsing
         # Parse once to get all arguments, including config and direct ones.
         # This will populate the `parsed_args` namespace.

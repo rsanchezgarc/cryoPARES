@@ -77,7 +77,6 @@ class SingleInferencer:
         :param directional_zscore_thr: The threshold for the directional Z-score to filter particles.
         :param perform_localrefinement: Whether to perform local refinement of the particle poses.
         :param perform_reconstruction: Whether to perform 3D reconstruction from the inferred poses.
-        :param update_progessbar_n_batches: The number of batches after which the progress bar is updated.
         :param subset_idxs: A list of indices to process a subset of particles.
         :param n_first_particles: The number of first particles to process. Cannot be used with `subset_idxs`.
         :param show_debug_stats: Whether to print debug statistics, such as rotation errors.

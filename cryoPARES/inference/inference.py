@@ -52,7 +52,6 @@ class SingleInferencer:
                  directional_zscore_thr: Optional[float] = CONFIG_PARAM(),
                  perform_localrefinement: bool = CONFIG_PARAM(),
                  perform_reconstruction: bool = CONFIG_PARAM(),
-                 update_progessbar_n_batches: int = CONFIG_PARAM(),
                  subset_idxs: Optional[List[int]] = None,
                  n_first_particles: Optional[int] = None,
                  show_debug_stats: bool = False,
@@ -111,7 +110,7 @@ class SingleInferencer:
         self.directional_zscore_thr = directional_zscore_thr
         self.perform_localrefinement = perform_localrefinement
         self.perform_reconstruction = perform_reconstruction
-        self.update_progessbar_n_batches = update_progessbar_n_batches
+        self.update_progessbar_n_batches = main_config.inference.update_progessbar_n_batches
         self.show_debug_stats = show_debug_stats
 
         if results_dir is not None:
@@ -376,6 +375,7 @@ class SingleInferencer:
                 out = self._run()
                 if self._model and hasattr(self._model, "reconstructor"):
                     sampling_rate = self._model.reconstructor.sampling_rate
+                    self._model.reconstructor.zero_buffers() # Clean the reconstructor after each half is processed
                 out_list.append(out)
                 all_out_list.append(out_list)
 

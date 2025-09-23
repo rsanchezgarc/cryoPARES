@@ -255,13 +255,14 @@ class ProjectionMatcher(nn.Module):
             #TODO: particle_radius_angs is not used. Would need to be in the builder? That is where we create the rmask
             batch_size,
             n_cpus,
+            halfset=None,
     ):
 
         from cryoPARES.datamanager.datamanager import DataManager
         dm = DataManager(particles,
                          symmetry="C1",
                          particles_dir=data_rootdir,
-                         halfset=None,
+                         halfset=halfset,
                          batch_size=batch_size,
                          save_train_val_partition_dir=None,
                          is_global_zero=True,
@@ -325,7 +326,8 @@ class ProjectionMatcher(nn.Module):
             particle_radius_angs=None,
             batch_size=256,
             device="cuda",
-            n_cpus=1
+            n_cpus=1,
+            halfset: Optional[Literal[1,2]] = None,
     ) -> ParticlesStarSet:
         """
         Align particles (input STAR file) to the reference.
@@ -342,9 +344,10 @@ class ProjectionMatcher(nn.Module):
             data_rootdir,
             particle_radius_angs,
             batch_size,
-            n_cpus
+            n_cpus,
+            halfset=halfset
         )
-
+        assert len(particlesDataSet) > 0, "Error, the starfile contains no particles"
         try:
             pixel_size = particlesDataSet.sampling_rate
         except AttributeError:
@@ -534,6 +537,7 @@ def align_star(
         gpu_id: Optional[int] = None,
         n_first_particles: Optional[int] = None,
         correct_ctf: bool = True,
+        halfmap_subset: Optional[Literal["1", "2"]]= None,
 ):
     """
 
@@ -554,6 +558,7 @@ def align_star(
     :param gpu_id:
     :param n_first_particles:
     :param correct_ctf:
+    :param halfmap_subset:
     :return:
     """
 
@@ -569,6 +574,8 @@ def align_star(
     torch.set_num_interop_threads(_n_cpus_per_job)
     torch.set_num_threads(_n_cpus_per_job)
 
+    if halfmap_subset is not None:
+        halfmap_subset = int(halfmap_subset)
     # Paths
     reference_vol = os.path.expanduser(reference_vol)
     star_fname = os.path.expanduser(star_fname)
@@ -614,6 +621,7 @@ def align_star(
             batch_size=batch_size,
             particle_radius_angs=particle_radius_angs,
             device=device,
+            halfset=halfmap_subset
         )
 
 

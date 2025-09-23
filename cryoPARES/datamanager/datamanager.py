@@ -59,7 +59,7 @@ class DataManager(pl.LightningDataModule):
                  ):
 
         super().__init__()
-
+        assert halfset in [None, 1, 2]
         self.star_fnames = self._expand_fname(star_fnames)
         self.symmetry = symmetry.upper()
         self.particles_dir = self._expand_fname(particles_dir)

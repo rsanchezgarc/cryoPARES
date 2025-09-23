@@ -472,10 +472,10 @@ class SingleInferencer:
                 result = self._process_batch(model, batch, batch_idx, gpu_offload=gpu_offload)
                 if result:
                     all_results.append(result)
-                if pbar is not None: pbar.update(1) #TODO: Implement gpu offloading
+                if pbar is not None: pbar.update(1)
             result = self._process_batch(model, batch=None, batch_idx=-1, gpu_offload=gpu_offload)  # batch=None flushes the model buffer
             if result is not None:
-                all_results.append(result) #TODO: We might want to call .cpu() to save GPU memory during inference.
+                all_results.append(result)
         return all_results
 
     def _save_reconstruction(self, save_to_file: bool = True, materialize: bool = True):

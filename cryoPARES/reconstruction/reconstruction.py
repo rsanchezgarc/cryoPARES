@@ -95,6 +95,11 @@ class Reconstructor(nn.Module):
     def get_buffers(self):
         return dict(numerator=self.numerator, weights=self.weights, ctfsq=self.ctfsq)
 
+    def zero_buffers(self):
+        if self.numerator is not None: self.numerator.zero_()
+        if self.weights is not None: self.weights.zero_()
+        if self.ctfsq is not None: self.ctfsq.zero_()
+
     def set_metadata_from_particles(self, particlesDataset: "ReconstructionParticlesDataset"):
         box_size: int = particlesDataset.particle_shape[-1]
         sampling_rate = particlesDataset.sampling_rate

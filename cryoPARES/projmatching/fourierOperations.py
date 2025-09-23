@@ -68,7 +68,7 @@ def _mask_for_dft_2d(img_shape, max_freq_pixels, rfft, fftshifted, device):
     mask = circle(radius=max_freq_pixels,
         smoothing_radius=3,
         image_shape=(img_size, img_size),
-        device="cpu" #TODO: At the moment device is broken, thus we set it to "cpu" and then we use .to(img)
+        device=device,
     ).unsqueeze(0).to(device)
 
     # filer_digital_freq = max_freq_pixels/img_size

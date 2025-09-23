@@ -20,7 +20,7 @@ def compute_fsc(vol1, vol2, voxel_size, mask=None, allow_resize=False, resolutio
         voxel_size (float): The voxel size of the maps in Angstroms (Å).
         mask (numpy.ndarray, optional): A 3D mask to apply to the volumes. Defaults to None.
         allow_resize (bool, optional): If True, resizes vol2 to match vol1's shape if they differ. Defaults to False.
-        resolution_from_A (int, optional): Ignore resolution oscilations at resolution worse than resolution_from_A
+        resolution_from_A (int, optional): Report only resolutions better than resolution_from_A
 
     Returns:
         tuple: A tuple containing three 1D numpy arrays:
@@ -48,6 +48,7 @@ def compute_fsc(vol1, vol2, voxel_size, mask=None, allow_resize=False, resolutio
         assert vol1.shape == mask.shape, "Mask must have the same shape as the maps."
         vol1 = np.multiply(vol1, mask)
         vol2 = np.multiply(vol2, mask)
+        print("Volumes were masked!")
 
     # --- 1. Compute Fourier Transforms and shift origin to center ---
     ft1 = fft.fftshift(fft.fftn(vol1))
@@ -131,7 +132,8 @@ def cli():
     parser.add_argument("--save_csv", default=None,
                         help="Path to save the FSC data as a CSV file (e.g., fsc_data.csv).")
     parser.add_argument("--resolution_from_A", type=float, default=15.0,
-                        help="Ignore resolution oscillations at resolution worse than this value (in Angstroms).")
+                        help="Report only resolutions better than this number. It is intended to use to avoid "
+                             "oscillations at resolution worse than this value (in Angstroms).")
 
     args = parser.parse_args()
 
@@ -160,7 +162,7 @@ def cli():
     voxel_size = voxel_size1
     if not np.isclose(voxel_size1, voxel_size2):
         print(
-            f"⚠️ Warning: Voxel sizes differ ({voxel_size1:.3f} Å vs {voxel_size2:.3f} Å). Using map 1's voxel size as reference.")
+            f" Warning: Voxel sizes differ ({voxel_size1:.3f} Å vs {voxel_size2:.3f} Å). Using map 1's voxel size as reference.")
 
     mask_data = None
     if args.mask:

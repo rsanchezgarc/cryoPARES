@@ -1,16 +1,9 @@
-"""
-Cryo-EM 3-D reconstruction
-====================================================
-A pipeline that reconstructs a Coulomb potential
-volume from a RELION-style particle STAR file using open-source
-libraries.
-"""
-
 import os
 import sys
 from functools import lru_cache
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union, Literal
 
+import numpy as np
 import torch
 import tqdm
 from starstack import ParticlesStarSet
@@ -25,16 +18,13 @@ from cryoPARES.constants import (
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
 from torch_fourier_shift import fourier_shift_dft_2d
-from torch_grid_utils import fftfreq_grid
 
 from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.datamanager.ctf.rfft_ctf import compute_ctf_rfft
 from cryoPARES.geometry.convert_angles import euler_angles_to_matrix
 from cryoPARES.geometry.symmetry import getSymmetryGroup
-from cryoPARES.reconstruction.insert_central_slices_rfft_3d import (
-    insert_central_slices_rfft_3d_multichannel,
-)
+
 from cryoPARES.utils.paths import FNAME_TYPE
 from cryoPARES.utils.reconstructionUtils import write_vol
 
@@ -82,11 +72,12 @@ class Reconstructor(nn.Module):
 
         self._initialized = False
 
+        from cryoPARES.reconstruction.insert_central_slices_rfft_3d import \
+            insert_central_slices_rfft_3d_multichannel, compiled_insert_central_slices_rfft_3d_multichannel
+
         if not main_config.reconstruct.disable_compile_insert_central_slices_rfft_3d_multichannel:
-            self.insert_central_slices_rfft_3d_multichannel = torch.compile(
-                insert_central_slices_rfft_3d_multichannel,
-                mode=main_config.reconstruct.compile_insert_central_slices_rfft_3d_multichanne_mode
-            )
+            print("Compiling insert_central_slices_rfft_3d_multichannel")
+            self.insert_central_slices_rfft_3d_multichannel = compiled_insert_central_slices_rfft_3d_multichannel
         else:
             self.insert_central_slices_rfft_3d_multichannel = insert_central_slices_rfft_3d_multichannel
 
@@ -197,12 +188,14 @@ class Reconstructor(nn.Module):
         particles_star_fname,
         particles_dir,
         subset_idxs=None,
+        halfmap_subset=None
     ):
         particlesDataset = ReconstructionParticlesDataset(
             particles_star_fname,
             particles_dir,
             correct_ctf=self.correct_ctf,
             subset_idxs=subset_idxs,
+            halfmap_subset=halfmap_subset,
             return_confidence=self.weight_with_confidence,
         )
         self.set_metadata_from_particles(particlesDataset)
@@ -216,6 +209,7 @@ class Reconstructor(nn.Module):
         num_dataworkers=0,
         use_only_n_first_batches=None,
         subset_idxs=None,
+        halfmap_subset=None
     ):
         for _ in self._backproject_particles(
             particles_star_fname,
@@ -224,6 +218,7 @@ class Reconstructor(nn.Module):
             num_dataworkers,
             use_only_n_first_batches,
             subset_idxs,
+            halfmap_subset
         ):
             pass
 
@@ -235,10 +230,12 @@ class Reconstructor(nn.Module):
         num_dataworkers=0,
         use_only_n_first_batches=None,
         subset_idxs=None,
+        halfmap_subset=None,
         verbose=True,
     ):
         particlesDataset = self._get_reconstructionParticlesDataset(particles_star_fname, particles_dir,
-                                                                    subset_idxs=subset_idxs )
+                                                                    subset_idxs=subset_idxs,
+                                                                    halfmap_subset=halfmap_subset)
         dl = DataLoader(
             particlesDataset,
             batch_size=batch_size,
@@ -364,9 +361,26 @@ class Reconstructor(nn.Module):
 
     @staticmethod
     @lru_cache(maxsize=1)
-    def get_sincsq(shape, device):
-        grid = fftfreq_grid(image_shape=shape, rfft=False, fftshift=True, norm=True, device=device)
-        return torch.sinc(grid) ** 2
+    def get_sincsq(shape, device, eps=1e-3):
+        """
+        Separable de-apodization for trilinear gridding:
+        PSF(z,y,x) = sinc^2(z) * sinc^2(y) * sinc^2(x), evaluated on the voxel grid.
+
+        torch.sinc(x) = sin(pi*x)/(pi*x).
+        We use centered voxel coordinates normalized by the length in each axis so the
+        arguments live roughly in [-0.5, 0.5]; add a floor to avoid division blow-ups.
+        """
+        D, H, W = shape
+        z = torch.linspace(-(D - 1) / 2, (D - 1) / 2, D, device=device) / D  # (D,)
+        y = torch.linspace(-(H - 1) / 2, (H - 1) / 2, H, device=device) / H  # (H,)
+        x = torch.linspace(-(W - 1) / 2, (W - 1) / 2, W, device=device) / W  # (W,)
+
+        sz = torch.sinc(z).pow(2)  # (D,)
+        sy = torch.sinc(y).pow(2)  # (H,)
+        sx = torch.sinc(x).pow(2)  # (W,)
+
+        S = sz[:, None, None] * sy[None, :, None] * sx[None, None, :]  # (D,H,W)
+        return S.clamp_min(eps)
 
     def generate_volume(
         self,
@@ -388,8 +402,8 @@ class Reconstructor(nn.Module):
         dft = torch.fft.ifftshift(dft, dim=(-3, -2))
         dft = torch.fft.irfftn(dft, dim=(-3, -2, -1))
         dft = torch.fft.ifftshift(dft, dim=(-3, -2, -1))
-
-        vol = dft.to(device) / self.get_sincsq(dft.shape, device)
+        sincsq = self.get_sincsq(dft.shape, device, self.eps)
+        vol = dft.to(device) / sincsq
 
         if fname is not None:
             write_vol(vol.detach().cpu(), fname, self.sampling_rate, overwrite=overwrite_fname)
@@ -403,15 +417,48 @@ class ReconstructionParticlesDataset(Dataset):
         particles_dir: Optional[FNAME_TYPE] = None,
         correct_ctf: bool = True,
         subset_idxs=None,
+        halfmap_subset=None,
         return_confidence: bool = False,
     ):
-        self.particles = ParticlesStarSet(starFname=particles_star_fname, particlesDir=particles_dir)
-        if subset_idxs is not None:
-            self.particles = self.particles.createSubset(idxs=subset_idxs)
-        self.sampling_rate = self.particles.sampling_rate
-        self.particle_shape = self.particles.particle_shape
+
+        self.particles_star_fname = particles_star_fname
+        self.particles_dir = particles_dir
+        self.subset_idxs = subset_idxs
+        self.halfmap_subset = halfmap_subset
+
+
         self.correct_ctf = correct_ctf
         self.return_confidence = return_confidence
+
+        self._particles = None
+        self._sampling_rate = None
+        self._particle_shape = None
+
+    @property
+    def sampling_rate(self):
+        if self._sampling_rate is None:
+            self._sampling_rate = self.particles.sampling_rate
+        return self._sampling_rate
+
+    @property
+    def particle_shape(self):
+        if self._particle_shape is None:
+            self._particle_shape = self.particles.particle_shape
+        return self._particle_shape
+
+    @property
+    def particles(self):
+        if self._particles is None:
+            self._particles = ParticlesStarSet(starFname=self.particles_star_fname,
+                                              particlesDir=self.particles_dir)
+            if self.subset_idxs is not None:
+                self._particles = self.particles.createSubset(idxs=self.subset_idxs)
+            if self.halfmap_subset:
+                halfsets = self.particles.particles_md["rlnRandomSubset"]
+                assert halfsets is not None, "Error, no halfset found"
+                idxs = np.where(halfsets == self.halfmap_subset)[0].tolist()
+                self._particles = self.particles.createSubset(idxs=idxs)
+        return self._particles
 
     def __len__(self):
         return len(self.particles)
@@ -470,14 +517,15 @@ def reconstruct_starfile(
     output_fname: str,
     particles_dir: Optional[str] = None,
     num_dataworkers: int = 1,
-    batch_size: int = 64,
+    batch_size: int = 128,
     use_cuda: bool = True,
-    correct_ctf: bool = True,
+    correct_ctf: bool = CONFIG_PARAM(),
     eps: float = CONFIG_PARAM(),
     min_denominator_value: Optional[float] = None,
     use_only_n_first_batches: Optional[int] = None,
     float32_matmul_precision: Optional[str] = float32_matmul_precision,
     weight_with_confidence: bool = CONFIG_PARAM(),
+    halfmap_subset: Optional[Literal["1", "2"]] = None
 ):
     """
     :param particles_star_fname: The particles to reconstruct
@@ -494,10 +542,12 @@ def reconstruct_starfile(
     :param float32_matmul_precision: Set it to high or medium for speed up at a precision cost
     :param weight_with_confidence: If True, read and apply per-particle confidence. If False (default),
                            do NOT fetch/pass confidence (zero overhead).
+    :param halfmap_subset: The random subset to use
     """
     if float32_matmul_precision is not None:
         torch.set_float32_matmul_precision(float32_matmul_precision)
-
+    if halfmap_subset is not None:
+        halfmap_subset = int(halfmap_subset)
     device = "cpu" if not use_cuda else "cuda"
     reconstructor = Reconstructor(
         symmetry=symmetry, correct_ctf=correct_ctf, eps=eps, min_denominator_value=min_denominator_value,
@@ -510,6 +560,7 @@ def reconstruct_starfile(
         batch_size,
         num_dataworkers,
         use_only_n_first_batches=use_only_n_first_batches,
+        halfmap_subset=halfmap_subset
     )
     print(f"Saving map at {output_fname}")
     reconstructor.generate_volume(output_fname)

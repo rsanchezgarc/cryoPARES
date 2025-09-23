@@ -34,6 +34,11 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
         self.buffer_size = before_refiner_buffer_size
         self.return_top_k = return_top_k
 
+        if reconstructor is not None:
+            self.weight_with_confidence = reconstructor.weight_with_confidence
+        else:
+            self.weight_with_confidence = False
+
         if self.normalizedScore_thr is not None:
             self.buffer = StreamingBuffer(
                 buffer_size=before_refiner_buffer_size,
@@ -143,9 +148,13 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
         score = torch.where(torch.isnan(comparedWeight), kwargs['maxprobs']*0.5, kwargs['maxprobs'] * comparedWeight)
 
         if self.reconstructor is not None:
+            if self.weight_with_confidence:
+                confidence = score
+            else:
+                confidence = None
             self.reconstructor._backproject_batch(kwargs['imgs'], kwargs['ctfs'],
                            rotMats=predRotMats, hwShiftAngs=predShiftsAngsXY.flip(-1),
-                                                  confidence=None, zyx_matrices=False)
+                                                  confidence=confidence, zyx_matrices=False)
 
         return kwargs['ids'], predRotMats, predShiftsAngsXY, score, kwargs['norm_nn_score']
 

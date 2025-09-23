@@ -344,6 +344,8 @@ class Reconstructor(nn.Module):
             # Prepare channels: [real, imag, ctf^2]
             # we only build alpha if confidence is provided (to avoid overhead).
             if confidence is not None:
+                confidence = torch.nan_to_num(confidence, nan=0.0,
+                                              posinf=1.0, neginf=0.0).clamp(0.0, 1.5)
                 alpha = confidence.view(-1, 1, 1, 1).to(ctf.device)  # broadcast over channels and pixels
                 stacked = torch.stack([imgs.real, imgs.imag, ctf**2], dim=1) * alpha
             else:

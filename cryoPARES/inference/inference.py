@@ -388,7 +388,7 @@ class SingleInferencer:
                 if vol1 is not None and vol2 is not None and sampling_rate is not None:
                     print("Computing FSC...")
                     if self.reference_mask is not None:
-                        reference_mask = get_vol(self.reference_mask, pixel_size=None)
+                        reference_mask = get_vol(self.reference_mask, pixel_size=None)[0]
                     else:
                         reference_mask = None
                     fsc, spatial_freq, resolution_A, (res_05, res_0143) = compute_fsc(vol1.cpu().numpy(),
@@ -643,7 +643,6 @@ if __name__ == "__main__":
     config_fname = get_most_recent_file(args.checkpoint_dir, "configs_*.yml")
     ConfigOverrideSystem.update_config_from_file(main_config, config_fname, drop_paths=["inference", "projmatching"])
     ConfigOverrideSystem.update_config_from_configstrings(main_config, config_args, verbose=True)
-
     with SingleInferencer(**vars(args)) as inferencer:
         inferencer.run()
 

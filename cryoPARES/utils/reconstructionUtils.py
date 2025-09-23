@@ -9,7 +9,7 @@ from cryoPARES.constants import DEFAULT_DTYPE_PROJMATCHING, RELION_EULER_CONVENT
 from cryoPARES.geometry.convert_angles import euler_angles_to_matrix
 from cryoPARES.utils.paths import MAP_AS_ARRAY_OR_FNAME_TYPE, FNAME_TYPE
 
-
+#TODO: This code is used in other places, so move to a common place
 def get_vol(vol: MAP_AS_ARRAY_OR_FNAME_TYPE, pixel_size: float | None,
             device: torch.device|str="cpu") -> Tuple[torch.Tensor, float]:
     if isinstance(vol, FNAME_TYPE):

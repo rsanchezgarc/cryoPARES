@@ -149,10 +149,8 @@ class SingleInferencer:
         """
         if symmetry is None:
             symmetry = self.symmetry
-        reconstructor = Reconstructor(symmetry=symmetry, correct_ctf=True)
-        reconstructor._get_reconstructionParticlesDataset(self.particles_star_fname, self.particles_dir)
         self._reconstructor = self._get_reconstructor(self.particles_star_fname, self.particles_dir, symmetry)
-        return reconstructor
+        return self._reconstructor
 
     @staticmethod
     def _get_reconstructor(particles_star_fname, particles_dir, symmetry: str):
@@ -392,7 +390,7 @@ class SingleInferencer:
                     else:
                         reference_mask = None
                     fsc, spatial_freq, resolution_A, (res_05, res_0143) = compute_fsc(vol1.cpu().numpy(),
-                                                                                     vol2.cpu().numpy(),
+                                                                                      vol2.cpu().numpy(),
                                                                                       sampling_rate,
                                                                                       mask=reference_mask)
                     print(f"Resolution at FSC=0.143 ('gold-standard'): {res_0143:.3f} Å")
@@ -597,8 +595,8 @@ class SingleInferencer:
 
                     s2 = particles_md.loc[ids_to_update_in_df, shiftsXYangs_names].values
                     shift_error = np.sqrt(((shiftsXYangs - s2)**2).sum(-1))
-                    print(f"Median Ang   Error degs (top-{k+1}):", np.median(ang_err))
-                    print(f"Median Shift Error Angs (top-{k+1}):", np.median(shift_error))
+                    print(f"Median Ang   Displacement (degs) (top-{k+1}):", np.median(ang_err))
+                    print(f"Median Shift Displacement (Angs) (top-{k+1}):", np.median(shift_error))
                     ######## END of Debug code
 
                 particles_md.loc[ids_to_update_in_df, angles_names] = eulerdegs

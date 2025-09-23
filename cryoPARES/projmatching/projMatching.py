@@ -277,8 +277,8 @@ class ProjectionMatcher(nn.Module):
 
     def forward(self, imgs, ctfs, rotmats):
 
-        imgs = imgs * self.rmask
-        fparts = _real_to_fourier_2d(imgs * self.rmask, view_complex_as_two_float32=USE_TWO_FLOAT32_FOR_COMPLEX)
+        fparts = _real_to_fourier_2d(imgs * self.rmask,
+                                     view_complex_as_two_float32=USE_TWO_FLOAT32_FOR_COMPLEX)
 
         eulerDegs = get_eulers(rotmats)
         expanded_eulerDegs = self._get_so3_delta(eulerDegs.device).unsqueeze(0) + eulerDegs.unsqueeze(1)

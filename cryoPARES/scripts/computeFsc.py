@@ -204,7 +204,8 @@ def compute_fsc(
             vol2 = zoom(vol2, zoom_factors, order=3, prefilter=True)
             print(f"Resizing complete. New map 2 shape: {vol2.shape}")
         else:
-            raise ValueError( "Input maps must have the same shape. Use the --resize_maps flag to enable automatic resizing.") assert vol1.shape == vol2.shape, "Map resizing failed. Shapes still do not match." D = vol1.shape[0] if mask is not None: assert vol1.shape == mask.shape, "Mask must have the same shape as the maps."
+            raise ValueError( "Input maps must have the same shape. Use the --resize_maps flag to enable automatic resizing.")
+        assert vol1.shape == vol2.shape, "Map resizing failed. Shapes still do not match."
 
     if mask is not None:
         assert vol1.shape == mask.shape, "Mask must have the same shape as the maps."
@@ -267,7 +268,7 @@ def compute_fsc(
 
 def cli():
     parser = argparse.ArgumentParser(
-        description="Calculate Fourier Shell Correlation (FSC) between two MRC maps. ⚛️",
+        description="Calculate Fourier Shell Correlation (FSC) between two MRC maps.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     parser.add_argument("map1", help="Path to the first input .mrc file (reference map for shape & sampling).")

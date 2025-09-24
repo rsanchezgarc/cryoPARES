@@ -28,6 +28,9 @@ dynamic = ["dependencies", "version"]
 "Homepage" = "https://github.com/rsanchezgarc/cryoPARES"
 "Bug Tracker" = "https://github.com/rsanchezgarc/cryoPARES/issues"
 
+[project.scripts]
+cryopares_reconstruct = "cryoPARES.reconstruction.reconstruct:main"
+
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
 version = {attr = "cryoPARES.__version__"}

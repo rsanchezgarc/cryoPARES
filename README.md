@@ -215,6 +215,14 @@ The daemon workflow consists of three main components:
     python -m cryoPARES.inference.daemonWorkers.materializeVolume --input_files "/path/to/results_*/mapcomponents_*.npz" --output_mrc /path/to/final_map.mrc
     ```
 
+### Reconstruction
+
+If you have a set of particles with known poses (e.g., from a previous RELION run) and you simply want to reconstruct the 3D map, you can use the `cryopares_reconstruct` command.
+
+This provides a quick way to generate a volume without going through the training or inference steps.
+
+For detailed instructions, see the [Command-Line Interface documentation](./docs/cli.md).
+
 ### Configuration System
 
 CryoPARES uses a flexible configuration system that allows you to manage settings from multiple sources.

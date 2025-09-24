@@ -236,9 +236,13 @@ def reconstruct_starfile(particles_star_fname: str,
 
 
 
-if __name__ == "__main__":
+def main():
     from argParseFromDoc import parse_function_and_call
     parse_function_and_call(reconstruct_starfile)
+
+
+if __name__ == "__main__":
+    main()
     """
 python -m cryoPARES.reconstruction.reconstruct  --symmetry C1 --particles_star_fname /home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles.star --output_fname /tmp/reconstruction.mrc --use_only_n_first_batches 100    
     """

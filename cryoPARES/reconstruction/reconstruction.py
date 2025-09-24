@@ -81,6 +81,9 @@ class Reconstructor(nn.Module):
         else:
             self.insert_central_slices_rfft_3d_multichannel = insert_central_slices_rfft_3d_multichannel
 
+        # TODO(RING-CALIBRATION):
+        # Add ring-wise EMA scaling to stabilize on-the-fly recon by keeping the
+        # running mean of (alpha * CTF^2) per frequency ring near ~1.0.
     def get_device(self):
         return self.dummy_buffer.device
 

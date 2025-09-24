@@ -260,6 +260,7 @@ class ProjectionMatcher(nn.Module):
             batch_size,
             n_cpus,
             halfset=None,
+            subset_idxs=None
     ):
 
         from cryoPARES.datamanager.datamanager import DataManager
@@ -273,7 +274,7 @@ class ProjectionMatcher(nn.Module):
                          num_augmented_copies_per_batch=1,
                          num_data_workers=n_cpus,
                          return_ori_imagen=True,
-                         subset_idxs=None
+                         subset_idxs=subset_idxs
                          )
 
         ds = dm.create_dataset(None)
@@ -370,7 +371,7 @@ class ProjectionMatcher(nn.Module):
         self.mainLogger.info(f"Total number of particles: {n_particles}")
 
         try:
-            particlesStar = particlesDataSet.get_particles_starstack(drop_rlnImageId=True)
+            particlesStar = particlesDataSet.particles.copy()
             confidence = particlesDataSet.dataDict["confidences"].sum(-1)
         except AttributeError:
             particlesStar = particlesDataSet.datasets[0].particles.copy()
@@ -380,7 +381,7 @@ class ProjectionMatcher(nn.Module):
             except KeyError:
                 confidence = torch.ones(len(particlesStar.particles_md))
         if "rlnImageId" in particlesStar.particles_md.columns:
-            particlesStar.particles_md.drop("rlnImageId", axis=1)
+            particlesStar.particles_md.drop("rlnImageId", axis=1, inplace=True)
 
         dl = DataLoader(
             particlesDataSet,
@@ -432,19 +433,27 @@ class ProjectionMatcher(nn.Module):
             eulerdegs = predEulerDegs[:, k, :].numpy()
             shiftsXYangs = predShiftsAngs[:, k, :].numpy()
             if REPORT_ALIGNMENT_DISPLACEMENT:
-                ######## Debug code
-                r1 = torch.FloatTensor(Rotation.from_euler(RELION_EULER_CONVENTION,
-                                                           eulerdegs,
-                                                           degrees=True).as_matrix())
-                r2 = torch.FloatTensor(Rotation.from_euler(RELION_EULER_CONVENTION,
-                                                           particles_md.loc[idds_list, angles_names],
-                                                           degrees=True).as_matrix())
-                ang_err = torch.rad2deg(rotation_error_with_sym(r1, r2,
-                                                                symmetry="C1"))  # C1 since we do not use symemtry in local refinement. Ideally we would like to use the proper symmetry for eval purposes
+                try:
+                    _ref_angles_df = particles_md.loc[:, RELION_ANGLES_NAMES].copy()
+                    _ref_shifts_df = particles_md.loc[:, RELION_SHIFTS_NAMES].copy()
+                except KeyError:
+                    _ref_angles_df = None
+                    _ref_shifts_df = None
 
-                s2 = particles_md.loc[idds_list, shiftsXYangs_names].values
-                shift_error = np.sqrt(((shiftsXYangs - s2) ** 2).sum(-1))
-                print(f"Median Ang   Error degs (top-{k + 1}):", np.median(ang_err))
+                base_angles = _ref_angles_df.loc[idds_list, RELION_ANGLES_NAMES].values
+                base_shifts = _ref_shifts_df.loc[idds_list, RELION_SHIFTS_NAMES].values
+
+                r1 = torch.from_numpy(
+                    Rotation.from_euler(RELION_EULER_CONVENTION, eulerdegs, degrees=True).as_matrix()
+                ).float()
+                r2 = torch.from_numpy(
+                    Rotation.from_euler(RELION_EULER_CONVENTION, base_angles, degrees=True).as_matrix()
+                ).float()
+
+                ang_err = torch.rad2deg(rotation_error_with_sym(r1, r2, symmetry="C1"))
+                shift_error = np.sqrt(((shiftsXYangs - base_shifts) ** 2).sum(-1))
+
+                print(f"Median Ang   Error degs (top-{k + 1}):", np.median(ang_err.numpy()))
                 print(f"Median Shift Error Angs (top-{k + 1}):", np.median(shift_error))
                 ######## END of Debug code
 
@@ -531,7 +540,7 @@ def align_star(
         grid_step_degs: float = 2.0,
         return_top_k_poses: int = 1,
         filter_resolution_angst: Optional[float] = None,
-        n_cpus_per_job: int = 1,
+        num_dataworkers: int = 1,
         batch_size: int = 1024,
         use_cuda: bool = True,
         verbose: bool = True,
@@ -543,25 +552,25 @@ def align_star(
 ):
     """
 
-    :param reference_vol:
-    :param particles_star_fname:
-    :param out_fname:
-    :param particles_dir:
-    :param mask_radius_angs:
-    :param grid_distance_degs:
-    :param grid_step_degs:
-    :param return_top_k_poses:
-    :param filter_resolution_angst:
-    :param n_cpus_per_job:
-    :param batch_size:
-    :param use_cuda:
-    :param verbose:
-    :param torch_matmul_precision:
-    :param gpu_id:
-    :param n_first_particles:
-    :param correct_ctf:
-    :param halfmap_subset:
-    :return:
+    :param reference_vol: Path to the reference volume file (e.g., .mrc).
+    :param particles_star_fname: Input STAR file containing particle metadata.
+    :param out_fname: Path for the output STAR file with aligned particle poses.
+    :param particles_dir: Root directory for particle image paths if they are relative in the STAR file.
+    :param mask_radius_angs: Radius of the circular mask to apply to particles, in Angstroms.
+    :param grid_distance_degs: Angular search range around the initial orientation, in degrees.
+    :param grid_step_degs: Step size for the angular search grid, in degrees.
+    :param return_top_k_poses: Number of top-scoring poses to save for each particle.
+    :param filter_resolution_angst: Low-pass filter the reference volume to this resolution (Angstroms) before matching.
+    :param num_dataworkers: Number of CPU workers for data loading
+    :param batch_size: Number of particles to process in each batch on each job.
+    :param use_cuda: If True, use a CUDA-enabled GPU for processing.
+    :param verbose: If True, print progress and informational messages.
+    :param torch_matmul_precision: Precision for torch.set_float32_matmul_precision ('highest', 'high', 'medium').
+    :param gpu_id: Specific GPU ID to use when use_cuda is True.
+    :param n_first_particles: Process only the first N particles from the input STAR file.
+    :param correct_ctf: If True, apply CTF correction during matching.
+    :param halfmap_subset: Process only a specific random subset ('1' or '2') of particles for half-map validation.
+    :return: particles: ParticlesStarSet
     """
 
     import torch.multiprocessing as mp
@@ -572,9 +581,9 @@ def align_star(
     except RuntimeError:
         pass
     torch.set_float32_matmul_precision(torch_matmul_precision)
-    _n_cpus_per_job = 1 if n_cpus_per_job == 0 else n_cpus_per_job
-    torch.set_num_interop_threads(_n_cpus_per_job)
-    torch.set_num_threads(_n_cpus_per_job)
+    _num_dataworkers = 1 if num_dataworkers == 0 else num_dataworkers
+    torch.set_num_interop_threads(_num_dataworkers)
+    torch.set_num_threads(_num_dataworkers)
 
     if halfmap_subset is not None:
         halfmap_subset = int(halfmap_subset)
@@ -617,15 +626,15 @@ def align_star(
         if gpu_id is not None and use_cuda:
             device = f"cuda:{gpu_id}"
 
-        aligner.align_star(
-            particles_star_fname,
-            out_fname,
-            data_rootdir=data_rootdir,
-            batch_size=batch_size,
-            device=device,
-            halfset=halfmap_subset
-        )
-
+        particles = aligner.align_star(
+                particles_star_fname,
+                out_fname,
+                data_rootdir=data_rootdir,
+                batch_size=batch_size,
+                device=device,
+                halfset=halfmap_subset
+            )
+        return particles
 
 # CLI entry
 if __name__ == "__main__":
@@ -638,7 +647,7 @@ if __name__ == "__main__":
 
 """
 
-python -m cryoPARES.projmatching.projMatching \
+python -m cryoPARES.projmatching.projMatcher \
 --reference_vol ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/donwsampled/output_volume.mrc \
 --particles_star_fname ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/donwsampled/down1000particles.star \
 --particles_dir ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/donwsampled/ \

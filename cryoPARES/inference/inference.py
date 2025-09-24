@@ -24,7 +24,7 @@ from cryoPARES.geometry.metrics_angles import rotation_error_with_sym
 from cryoPARES.inference.nnetWorkers.inferenceModel import InferenceModel
 from cryoPARES.models.model import PlModel
 from cryoPARES.datamanager.datamanager import DataManager
-from cryoPARES.projmatching.projMatching import ProjectionMatcher
+from cryoPARES.projmatching.projMatcher import ProjectionMatcher
 from cryoPARES.reconstruction.reconstructor import Reconstructor
 from cryoPARES.utils.paths import get_most_recent_file
 from cryoPARES.scripts.computeFsc import compute_fsc

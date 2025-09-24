@@ -5,7 +5,7 @@ from torch import nn, ScriptModule
 
 from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
-from cryoPARES.projmatching.projMatching import ProjectionMatcher
+from cryoPARES.projmatching.projMatcher import ProjectionMatcher
 from cryoPARES.reconstruction.reconstructor import Reconstructor
 from cryoPARES.inference.nnetWorkers.tensorDataBuffer import StreamingBuffer
 from cryoPARES.models.model import RotationPredictionMixin
@@ -182,7 +182,7 @@ def _test():
     _update_config_for_test()
     from cryoPARES.models.directionalNormalizer.directionalNormalizer import DirectionalPercentileNormalizer
     from cryoPARES.models.image2sphere.image2sphere import Image2Sphere
-    from cryoPARES.projmatching.projMatching import ProjectionMatcher
+    from cryoPARES.projmatching.projMatcher import ProjectionMatcher
     from cryoPARES.datamanager.datamanager import get_example_random_batch
     from cryoPARES.constants import BATCH_PARTICLES_NAME, BATCH_IDS_NAME
     from cryoPARES.datamanager.ctf.rfft_ctf import compute_ctf_rfft

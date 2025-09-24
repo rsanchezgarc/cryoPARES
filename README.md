@@ -215,6 +215,14 @@ The daemon workflow consists of three main components:
     python -m cryoPARES.inference.daemonWorkers.materializeVolume --input_files "/path/to/results_*/mapcomponents_*.npz" --output_mrc /path/to/final_map.mrc
     ```
 
+### Projection Matching
+
+If you have a set of particles and a reference volume, and you want to align the particles to the volume without running the full training/inference pipeline, you can use the `cryopares_projmatching` command.
+
+This tool performs a local search around the existing particle orientations (or from an initial grid if no orientations are present) to find the best match against projections of the reference volume. It's a useful utility for refining poses or performing a quick alignment.
+
+For detailed instructions, see the [Command-Line Interface documentation](./docs/cli.md).
+
 ### Reconstruction
 
 If you have a set of particles with known poses (e.g., from a previous RELION run) and you simply want to reconstruct the 3D map, you can use the `cryopares_reconstruct` command.

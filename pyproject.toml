@@ -30,6 +30,7 @@ dynamic = ["dependencies", "version"]
 
 [project.scripts]
 cryopares_reconstruct = "cryoPARES.reconstruction.reconstruct:main"
+cryopares_projmatching = "cryoPARES.projmatching.projmatching:main"
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}

@@ -29,6 +29,7 @@ dynamic = ["dependencies", "version"]
 "Bug Tracker" = "https://github.com/rsanchezgarc/cryoPARES/issues"
 
 [project.scripts]
+cryopares_infer = "cryoPARES.projmatching.infer:main"
 cryopares_reconstruct = "cryoPARES.reconstruction.reconstruct:main"
 cryopares_projmatching = "cryoPARES.projmatching.projmatching:main"
 

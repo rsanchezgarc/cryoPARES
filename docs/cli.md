@@ -76,3 +76,85 @@ cryopares_reconstruct \
     --symmetry C1 \
     --output_fname /path/to/your/reconstruction.mrc
 ```
+
+## `cryopares_projmatching`
+
+This tool aligns particles from a STAR file to a reference volume using projection matching.
+
+### Usage
+
+```
+cryopares_projmatching [options]
+```
+
+### Options
+
+```
+usage: projmatching_starfile [-h] --reference_vol REFERENCE_VOL
+                             --particles_star_fname PARTICLES_STAR_FNAME
+                             --out_fname OUT_FNAME
+                             [--particles_dir PARTICLES_DIR]
+                             [--mask_radius_angs MASK_RADIUS_ANGS]
+                             [--grid_distance_degs GRID_DISTANCE_DEGS]
+                             [--grid_step_degs GRID_STEP_DEGS]
+                             [--return_top_k_poses RETURN_TOP_K_POSES]
+                             [--filter_resolution_angst FILTER_RESOLUTION_ANGST]
+                             [--n_jobs N_JOBS]
+                             [--num_dataworkers NUM_DATAWORKERS]
+                             [--batch_size BATCH_SIZE] [--NOT_use_cuda]
+                             [--NOT_verbose]
+                             [--torch_matmul_precision {highest,high,medium}]
+                             [--gpu_id GPU_ID]
+                             [--n_first_particles N_FIRST_PARTICLES]
+                             [--NOT_correct_ctf]
+                             [--halfmap_subset {1,2}]
+
+options:
+  -h, --help            show this help message and exit
+  --reference_vol REFERENCE_VOL
+                        Path to the reference volume file (.mrc).
+  --particles_star_fname PARTICLES_STAR_FNAME
+                        Input STAR file with particle metadata.
+  --out_fname OUT_FNAME
+                        Output STAR file with aligned particle poses.
+  --particles_dir PARTICLES_DIR
+                        Root directory for particle image paths.
+  --mask_radius_angs MASK_RADIUS_ANGS
+                        Mask radius in Angstroms.
+  --grid_distance_degs GRID_DISTANCE_DEGS
+                        Angular search range (degrees). Default=8.0
+  --grid_step_degs GRID_STEP_DEGS
+                        Angular step size (degrees). Default=2.0
+  --return_top_k_poses RETURN_TOP_K_POSES
+                        Number of top poses to save per particle. Default=1
+  --filter_resolution_angst FILTER_RESOLUTION_ANGST
+                        Low-pass filter the reference before matching.
+  --n_jobs N_JOBS       Number of parallel jobs. Default=1
+  --num_dataworkers NUM_DATAWORKERS
+                        Number of CPU workers per DataLoader. Default=1
+  --batch_size BATCH_SIZE
+                        Batch size per job. Default=1024
+  --NOT_use_cuda        if NOT, it will not use cuda devices Action:
+                        store_false for variable use_cuda
+  --NOT_verbose         if NOT, it will not log progress Action: store_false
+                        for variable verbose
+  --torch_matmul_precision {highest,high,medium}
+                        Precision mode for matmul. Default=high
+  --gpu_id GPU_ID       Specific GPU ID (if any).
+  --n_first_particles N_FIRST_PARTICLES
+                        Limit processing to first N particles.
+  --NOT_correct_ctf     if NOT, it will not apply CTF correction Action:
+                        store_false for variable correct_ctf
+  --halfmap_subset {1,2}
+                        Select subset '1' or '2' for half-map validation.
+```
+
+### Example
+
+```bash
+cryopares_projmatching \
+    --reference_vol /path/to/your/reference.mrc \
+    --particles_star_fname /path/to/your/particles.star \
+    --out_fname /path/to/your/aligned_particles.star \
+    --grid_distance_degs 10
+```

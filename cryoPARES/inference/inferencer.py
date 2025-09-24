@@ -50,8 +50,8 @@ class SingleInferencer:
                  reference_map: Optional[str] = None,
                  reference_mask: Optional[str] = None, #Only used for FSC estimation
                  directional_zscore_thr: Optional[float] = CONFIG_PARAM(),
-                 perform_localrefinement: bool = CONFIG_PARAM(),
-                 perform_reconstruction: bool = CONFIG_PARAM(),
+                 skip_localrefinement: bool = CONFIG_PARAM(),
+                 skip_reconstruction: bool = CONFIG_PARAM(),
                  subset_idxs: Optional[List[int]] = None,
                  n_first_particles: Optional[int] = None,
                  show_debug_stats: bool = False,
@@ -75,11 +75,11 @@ class SingleInferencer:
         :param reference_map: Path to the reference map for local refinement. If not provided, it will be loaded from the checkpoint.
         :param reference_mask: Path to the mask of the reference map. Used only for FSC calculation.
         :param directional_zscore_thr: The threshold for the directional Z-score to filter particles.
-        :param perform_localrefinement: Whether to perform local refinement of the particle poses.
-        :param perform_reconstruction: Whether to perform 3D reconstruction from the inferred poses.
+        :param skip_localrefinement: Whether to skip local refinement of the particle poses.
+        :param skip_reconstruction: Whether to skip 3D reconstruction from the inferred poses.
         :param subset_idxs: A list of indices to process a subset of particles.
         :param n_first_particles: The number of first particles to process. Cannot be used with `subset_idxs`.
-        :param show_debug_stats: Whether to print debug statistics, such as rotation errors.
+        :param show_debug_stats: Whether to print debug statistics, such as rotation errors if ground truth in the starfile.
         :param float32_matmul_precision: The precision used in multiplications. Speed/accuracy tradeoff
         """
 
@@ -107,9 +107,9 @@ class SingleInferencer:
         self.reference_map = reference_map
         self.reference_mask = reference_mask
         self.directional_zscore_thr = directional_zscore_thr
-        self.perform_localrefinement = perform_localrefinement
-        self.perform_reconstruction = perform_reconstruction
-        self.update_progessbar_n_batches = main_config.inference.update_progessbar_n_batches
+        self.skip_localrefinement = skip_localrefinement
+        self.skip_reconstruction = skip_reconstruction
+        self.update_progressbar_n_batches = main_config.inference.update_progressbar_n_batches
         self.show_debug_stats = show_debug_stats
 
         if results_dir is not None:
@@ -198,12 +198,12 @@ class SingleInferencer:
         else:
             reference_map = self.reference_map
 
-        if self.perform_localrefinement:
+        if not self.skip_localrefinement:
             localRefiner = ProjectionMatcher(reference_vol=reference_map, keep_top_k_values=self.top_k)
         else:
             localRefiner = None
 
-        if self.perform_reconstruction:
+        if not self.skip_reconstruction:
             reconstructor = self._setup_reconstructor(so3Model.symmetry)
         else:
             reconstructor = None
@@ -378,7 +378,7 @@ class SingleInferencer:
                 out_list.append(out)
                 all_out_list.append(out_list)
 
-            if len(out_list) == 2 and self.perform_reconstruction:
+            if len(out_list) == 2 and not self.skip_reconstruction:
                 vol1 = out_list[0][1]
                 vol2 = out_list[1][1]
 
@@ -449,8 +449,8 @@ class SingleInferencer:
             all_results = self._process_all_batches(model, dataloader, pbar=pbar)
             print("Aggregating results and saving to STAR files...")
             particles_md = self._save_particles_results(all_results, dataset)
-            if self.perform_reconstruction: print("Materializing reconstruction...")
-            vol = self._save_reconstruction(self.perform_reconstruction)
+            if not self.skip_reconstruction: print("Materializing reconstruction...")
+            vol = self._save_reconstruction(not self.skip_reconstruction)
             return particles_md, vol
         finally:
             pbar.close()
@@ -626,7 +626,7 @@ class SingleInferencer:
 if __name__ == "__main__":
     # from lightning import seed_everything
     # seed_everything(111)
-    os.environ[constants.SCRIPT_ENTRY_POINT] = "inference.py"
+    os.environ[constants.SCRIPT_ENTRY_POINT] = "inferencer.py"
     print("---------------------------------------")
     print(" ".join(sys.argv))
     print("---------------------------------------")
@@ -644,7 +644,7 @@ if __name__ == "__main__":
         inferencer.run()
 
     """
-python -m cryoPARES.inference.inference \
+python -m cryoPARES.inference.inferencer \
 --particles_star_fname /home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/1000particles.star  --results_dir /tmp/cryoPARES_train/cryoPARES_inference/ --particles_dir /home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data --checkpoint_dir /tmp/cryoPARES_train/version_0/ --NOT_use_cuda --config inference.before_refiner_buffer_size=4 --batch_size 8     
     
     """

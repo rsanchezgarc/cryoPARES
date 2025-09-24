@@ -367,7 +367,27 @@ class Reconstructor(nn.Module):
             # Geometric sampling weights remain unscaled by confidence (standard practice)
             self.weights += weights
         else:
-            raise NotImplementedError("Backprojection without CTF correction is not implemented.")
+            # Build [2, ...] channels (real, imag). If confidence is provided,
+            # scale only the data contribution, not the geometric weights.
+            if confidence is not None:
+                confidence = torch.nan_to_num(confidence, nan=0.0, posinf=1.0, neginf=0.0).clamp(0.0, 1.5)
+                alpha = confidence.view(-1, 1, 1, 1).to(imgs.device)  # broadcast
+                stacked = torch.stack([imgs.real, imgs.imag], dim=1) * alpha
+            else:
+                stacked = torch.stack([imgs.real, imgs.imag], dim=1)
+
+            dft_ri, weights = self.insert_central_slices_rfft_3d_multichannel(
+                image_rfft=stacked,
+                volume_shape=(self.box_size,) * 3,
+                rotation_matrices=rotMats,
+                fftfreq_max=None,
+                zyx_matrices=zyx_matrices,
+            )
+
+            # Accumulate numerator (real/imag) and geometric sampling weights.
+            # Note: ctfsq is unused in this branch.
+            self.numerator += dft_ri[:2, ...]
+            self.weights += weights
 
     @staticmethod
     @lru_cache(maxsize=1)

@@ -15,9 +15,9 @@ class Inference_config:
     pl_plugin: Literal["LightningEnvironment", "none"] = "LightningEnvironment"  #Try none to submit to slurm
     num_computer_nodes: int = 1 #It has not been tried with values different from 1
 
-    perform_localrefinement: bool = True
-    perform_reconstruction: bool = True
-    update_progessbar_n_batches: int = 20
+    skip_localrefinement: bool = False
+    skip_reconstruction: bool = False
+    update_progressbar_n_batches: int = 20
     directional_zscore_thr: Optional[float] = None
 
     before_refiner_buffer_size: int = 16

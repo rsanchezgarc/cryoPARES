@@ -128,7 +128,7 @@ In static mode, the inference is run on a fixed set of particles, that again, ne
 
 **Usage:**
 ```bash
-python -m cryoPARES.inference.inference [ARGUMENTS] --config [CONFIG_OVERRIDES]
+cryopares_infer [ARGUMENTS] --config [CONFIG_OVERRIDES]
 ```
 
 **Key Arguments:**
@@ -139,10 +139,7 @@ python -m cryoPARES.inference.inference [ARGUMENTS] --config [CONFIG_OVERRIDES]
 *   `--results_dir`: Directory where the output `.star` file and reconstruction will be saved.
 *   `--batch_size`: Number of particles per batch.
 *   `--num_data_workers`: Number of parallel data loading workers. One CPU each. Set it to 0 to read and process the data in the main thread
-*   `--NOT_perform_localrefinement`: If set, disables pose refinement using projection matching. 
-*   `--NOT_perform_reconstruction`: If set, disables the reconstruction of a 3D map from the final poses.
 *   `--reference_map`: Path to a reference `.mrc` used for local refinement and reconstruction. If not provided, it will use half-maps reconstructed from the training set.
-*   `--top_k`: Predict the top K poses for each particle. Poses beyond top-1 are added to the output starfile as additonal columns with a suffix of "_top%d" 
 
 **Half-Set Selection (`--data_halfset` and `--model_halfset`)**
 
@@ -182,7 +179,7 @@ The daemon workflow consists of three main components:
     This script creates the central queue. It should be run once and kept running in the background.
 
     ```bash
-    python -m cryoPARES.inference.daemonWorkers.queueManager
+    python -m cryoPARES.inference.daemon.queueManager
     ```
 
 2.  **Start the Spooling Filler:**
@@ -190,7 +187,7 @@ The daemon workflow consists of three main components:
     This script watches a directory for new `.star` files and adds them to the queue.
 
     ```bash
-    python -m cryoPARES.inference.daemonWorkers.spoolingFiller --directory /path/to/watch
+    python -m cryoPARES.inference.daemon.spoolingFiller --directory /path/to/watch
     ```
 
     You can also use other mechanisms to add jobs to the queue.
@@ -201,10 +198,10 @@ The daemon workflow consists of three main components:
 
     ```bash
     # Worker 1
-    python -m cryoPARES.inference.daemonInference --checkpoint_dir /path/to/checkpoint --results_dir /path/to/results_worker1 --particles_dir /path/to/particles
+    python -m cryoPARES.inference.daemon.daemonInference --checkpoint_dir /path/to/checkpoint --results_dir /path/to/results_worker1 --particles_dir /path/to/particles
 
     # Worker 2
-    python -m cryoPARES.inference.daemonInference --checkpoint_dir /path/to/checkpoint --results_dir /path/to/results_worker2 --particles_dir /path/to/particles
+    python -m cryoPARES.inference.daemon.daemonInference --checkpoint_dir /path/to/checkpoint --results_dir /path/to/results_worker2 --particles_dir /path/to/particles
     ```
 
 4.  **Materialize the Volume:**
@@ -212,7 +209,7 @@ The daemon workflow consists of three main components:
     You can materialize the final 3D volume from the partial results at any time, even while the inferencers are still running. The script will combine all the available partial results.
 
     ```bash
-    python -m cryoPARES.inference.daemonWorkers.materializeVolume --input_files "/path/to/results_*/mapcomponents_*.npz" --output_mrc /path/to/final_map.mrc
+    python -m cryoPARES.inference.daemon.materializeVolume --input_files "/path/to/results_*/mapcomponents_*.npz" --output_mrc /path/to/final_map.mrc
     ```
 
 ### Projection Matching
@@ -262,13 +259,11 @@ CryoPARES uses a flexible configuration system that allows you to manage setting
 
 2.  **Run inference on a new dataset, with local refinement and reconstruction:**
     ```bash
-    python -m cryoPARES.inference.inference \
+    cryopares_infer \
         --particles_star_fname /path/to/new_particles.star \
         --particles_dir /path/to/particles \
         --checkpoint_dir /path/to/training_output/version_0 \
         --results_dir /path/to/inference_results \
-        --perform_localrefinement True \
-        --perform_reconstruction True \
         --reference_map /path/to/initial_model.mrc \
         --config projmatching.grid_distance_degs=15 inference.directional_zscore_thr=2.0
     ```

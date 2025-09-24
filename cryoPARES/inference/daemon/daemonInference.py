@@ -20,9 +20,9 @@ from cryoPARES.configManager.inject_defaults import inject_defaults_from_config,
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.constants import BEST_DIRECTIONAL_NORMALIZER, BEST_CHECKPOINT_BASENAME, BEST_MODEL_SCRIPT_BASENAME
 from cryoPARES.geometry.convert_angles import matrix_to_euler_angles
-from cryoPARES.inference.daemonWorkers.queueManager import queue_connection, get_all_available_items, DEFAULT_IP, \
+from cryoPARES.inference.daemon.queueManager import queue_connection, get_all_available_items, DEFAULT_IP, \
     DEFAULT_PORT, DEFAULT_AUTHKEY
-from cryoPARES.inference.inference import SingleInferencer
+from cryoPARES.inference.inferencer import SingleInferencer
 from cryoPARES.utils.paths import get_most_recent_file
 
 class DaemonInferencer(SingleInferencer):
@@ -44,9 +44,9 @@ class DaemonInferencer(SingleInferencer):
                  top_k: int = CONFIG_PARAM(),
                  reference_map: Optional[str] = None,
                  directional_zscore_thr: Optional[float] = CONFIG_PARAM(),
-                 perform_localrefinement: bool = CONFIG_PARAM(),
-                 perform_reconstruction: bool = CONFIG_PARAM(),
-                 update_progessbar_n_batches: int = CONFIG_PARAM(),
+                 skip_localrefinement: bool = CONFIG_PARAM(),
+                 skip_reconstruction: bool = CONFIG_PARAM(),
+                 update_progressbar_n_batches: int = CONFIG_PARAM(),
                  secs_between_partial_results_written: int = 5,
                  ):
         """
@@ -66,9 +66,9 @@ class DaemonInferencer(SingleInferencer):
         :param top_k:
         :param reference_map: If not provided, it will be tried to load from the checkpointç
         :param directional_zscore_thr:
-        :param perform_localrefinement:
-        :param perform_reconstruction:
-        :param update_progessbar_n_batches:
+        :param skip_localrefinement:
+        :param skip_reconstruction:
+        :param update_progressbar_n_batches:
         :param secs_between_partial_results_written:
         """
 
@@ -86,9 +86,9 @@ class DaemonInferencer(SingleInferencer):
                          top_k = top_k,
                          reference_map = reference_map,
                          directional_zscore_thr = directional_zscore_thr,
-                         perform_localrefinement = perform_localrefinement,
-                         perform_reconstruction = perform_reconstruction,
-                         update_progessbar_n_batches=update_progessbar_n_batches,
+                         skip_localrefinement = skip_localrefinement,
+                         skip_reconstruction = skip_reconstruction,
+                         update_progressbar_n_batches=update_progressbar_n_batches,
                          subset_idxs=None)
 
         self.net_address = net_address
@@ -157,7 +157,7 @@ class DaemonInferencer(SingleInferencer):
                         particles_md_list += self._save_particles_results(all_results, dataset)
                     all_results_list = []
                     datasets = []
-                    if self.perform_reconstruction:
+                    if not self.skip_reconstruction:
                         self._save_reconstruction(materialize=False)
                     last_save_timestamp = time()  # Reset the timer
 

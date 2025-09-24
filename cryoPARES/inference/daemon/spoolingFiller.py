@@ -9,7 +9,7 @@ import glob
 from queue import Empty
 from contextlib import contextmanager
 from multiprocessing.managers import BaseManager
-from cryoPARES.inference.daemonWorkers.queueManager import DEFAULT_IP, DEFAULT_PORT, DEFAULT_AUTHKEY, queue_connection
+from cryoPARES.inference.daemon.queueManager import DEFAULT_IP, DEFAULT_PORT, DEFAULT_AUTHKEY, queue_connection
 
 
 
@@ -102,6 +102,6 @@ if __name__ == "__main__":
 
     """
     
-PYTHONPATH=. python cryoPARES/inference/daemonWorkers/spoolingFiller.py  ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/projections/ --pattern "1000*star"
+PYTHONPATH=. python cryoPARES/inference/daemon/spoolingFiller.py  ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/projections/ --pattern "1000*star"
     
     """

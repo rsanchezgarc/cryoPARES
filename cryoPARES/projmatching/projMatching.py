@@ -69,6 +69,7 @@ class ProjectionMatcher(nn.Module):
             keep_top_k_values: int = CONFIG_PARAM(),
             verbose: bool = CONFIG_PARAM(),
             correct_ctf: bool = CONFIG_PARAM(),
+            mask_radius_angs: Optional[float] = CONFIG_PARAM(config=main_config.datamanager.particlesdataset)
     ):
         super().__init__()
         self.grid_distance_degs = grid_distance_degs
@@ -77,6 +78,7 @@ class ProjectionMatcher(nn.Module):
         self.padding_factor = 0  # We do not support padding yet
         self.keep_top_k_values = keep_top_k_values
         self.max_shift_fraction = main_config.projmatching.max_shift_fraction
+        self.mask_radius_angs = mask_radius_angs
 
         self._store_reference_vol(reference_vol, pixel_size)
         self.verbose = verbose
@@ -182,6 +184,10 @@ class ProjectionMatcher(nn.Module):
 
         # Prepare mask
         radius_px = self.image_shape[-2] // 2
+        if self.mask_radius_angs is not None:
+            assert 1 < self.mask_radius_angs <= radius_px, \
+                "Error, the mask redius is larger than the box size"
+            radius_px = self.mask_radius_angs
         rmask = circle(radius_px, image_shape=self.image_shape, smoothing_radius=radius_px * .05)
         self.register_buffer("rmask", rmask)
 
@@ -251,8 +257,6 @@ class ProjectionMatcher(nn.Module):
             self,
             particles: FNAME_TYPE,
             data_rootdir,
-            particle_radius_angs,
-            #TODO: particle_radius_angs is not used. Would need to be in the builder? That is where we create the rmask
             batch_size,
             n_cpus,
             halfset=None,
@@ -323,7 +327,6 @@ class ProjectionMatcher(nn.Module):
             particles: FNAME_TYPE,
             starFnameOut: FNAME_TYPE,
             data_rootdir: str | None = None,
-            particle_radius_angs=None,
             batch_size=256,
             device="cuda",
             n_cpus=1,
@@ -342,7 +345,6 @@ class ProjectionMatcher(nn.Module):
         particlesDataSet = self.preprocess_particles(
             particles,
             data_rootdir,
-            particle_radius_angs,
             batch_size,
             n_cpus,
             halfset=halfset
@@ -521,10 +523,10 @@ def _extract_ccor_max(corrs, max_shift_fraction):
 
 def align_star(
         reference_vol: str,
-        star_fname: str,
+        particles_star_fname: str,
         out_fname: str,
         particles_dir: Optional[str],
-        particle_radius_angs: Optional[float] = None,
+        mask_radius_angs: Optional[float] = None,
         grid_distance_degs: float = 8.0,
         grid_step_degs: float = 2.0,
         return_top_k_poses: int = 1,
@@ -537,15 +539,15 @@ def align_star(
         gpu_id: Optional[int] = None,
         n_first_particles: Optional[int] = None,
         correct_ctf: bool = True,
-        halfmap_subset: Optional[Literal["1", "2"]]= None,
+        halfmap_subset: Optional[Literal["1", "2"]] = None,
 ):
     """
 
     :param reference_vol:
-    :param star_fname:
+    :param particles_star_fname:
     :param out_fname:
     :param particles_dir:
-    :param particle_radius_angs:
+    :param mask_radius_angs:
     :param grid_distance_degs:
     :param grid_step_degs:
     :param return_top_k_poses:
@@ -578,20 +580,20 @@ def align_star(
         halfmap_subset = int(halfmap_subset)
     # Paths
     reference_vol = os.path.expanduser(reference_vol)
-    star_fname = os.path.expanduser(star_fname)
+    particles_star_fname = os.path.expanduser(particles_star_fname)
     out_fname = os.path.expanduser(out_fname)
     data_rootdir = os.path.expanduser(particles_dir) if particles_dir else None
 
     with tempfile.TemporaryDirectory() as tmpdir:
         # Optional limit subset
         if n_first_particles is not None:
-            star_data = starfile.read(star_fname)
+            star_data = starfile.read(particles_star_fname)
             particles_df = star_data["particles"]
             optics_df = star_data["optics"]
             particles_df = particles_df[:n_first_particles]
-            star_in_limited = os.path.join(tmpdir, f"input_particles_{os.path.basename(star_fname)}")
+            star_in_limited = os.path.join(tmpdir, f"input_particles_{os.path.basename(particles_star_fname)}")
             starfile.write({"optics": optics_df, "particles": particles_df}, star_in_limited)
-            star_fname = star_in_limited
+            particles_star_fname = star_in_limited
 
         # Optional low-pass filter of the reference volume
         if filter_resolution_angst is not None:
@@ -608,6 +610,7 @@ def align_star(
             max_resolution_A=filter_resolution_angst,
             verbose=verbose,
             correct_ctf=correct_ctf,
+            mask_radius_angs=mask_radius_angs
         )
 
         device = "cuda" if use_cuda else "cpu"
@@ -615,11 +618,10 @@ def align_star(
             device = f"cuda:{gpu_id}"
 
         aligner.align_star(
-            star_fname,
+            particles_star_fname,
             out_fname,
             data_rootdir=data_rootdir,
             batch_size=batch_size,
-            particle_radius_angs=particle_radius_angs,
             device=device,
             halfset=halfmap_subset
         )
@@ -638,7 +640,7 @@ if __name__ == "__main__":
 
 python -m cryoPARES.projmatching.projMatching \
 --reference_vol ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/donwsampled/output_volume.mrc \
---star_fname ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/donwsampled/down1000particles.star \
+--particles_star_fname ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/donwsampled/down1000particles.star \
 --particles_dir ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/donwsampled/ \
 --out_fname /tmp/pruebaCryoparesProjMatch.star \
 --n_first_particles 100 \

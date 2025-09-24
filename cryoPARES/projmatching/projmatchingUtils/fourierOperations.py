@@ -8,7 +8,7 @@ import numpy as np
 from torch_grid_utils import fftfreq_grid
 from torch_grid_utils.shapes_2d import circle
 
-from ..configs.mainConfig import main_config
+from cryoPARES.configs.mainConfig import main_config
 
 
 def compute_dft_3d(

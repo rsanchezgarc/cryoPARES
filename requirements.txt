@@ -11,7 +11,7 @@ numpy>=2.3.3,<3.0.0
 omegaconf>=2.3.0,<3.0.0
 pandas>=2.3.2,<3.0.0
 pdoc3>=0.11.6,<1.0.0
-progressBarDistributed @ git+https://github.com/rsanchezgarc/progressBarDistributed@v2025.09.01
+progressBarDistributed @ git+https://github.com/rsanchezgarc/progressBarDistributed@v2025.09.02
 psutil>=7.1.0,<8.0.0
 pytest>=8.4.2,<9.0.0
 lightning[pytorch-extra]>=2.5.5,<3.0.0

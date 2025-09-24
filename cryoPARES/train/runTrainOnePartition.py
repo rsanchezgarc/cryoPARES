@@ -22,7 +22,7 @@ from cryoPARES import constants
 from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.constants import DATA_SPLITS_BASENAME, TRAINING_DONE_TEMPLATE
 from cryoPARES.configs.mainConfig import main_config
-from cryoPARES.reconstruction.reconstruction import reconstruct_starfile
+from cryoPARES.reconstruction.reconstructor import reconstruct_starfile
 from cryoPARES.utils.paths import get_most_recent_file
 from cryoPARES.configManager.configParser import ConfigArgumentParser, ConfigOverrideSystem
 

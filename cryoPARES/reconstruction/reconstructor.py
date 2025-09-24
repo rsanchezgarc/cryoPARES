@@ -540,19 +540,19 @@ def reconstruct_starfile(
     """
     :param particles_star_fname: The particles to reconstruct
     :param symmetry: The symmetry of the volume (e.g. C1, D2, ...)
-    :param output_fname: The name of the output filename
+    :param output_fname: The name of the output filename (star)
     :param particles_dir: The particles directory (root of the starfile fnames)
     :param num_dataworkers: Num workers for data loading
     :param batch_size: The number of particles to be simultaneously backprojected
-    :param use_cuda:
-    :param correct_ctf:
+    :param use_cuda: if NOT, it will not use cuda devices
+    :param correct_ctf: if NOT, it will not correct CTF
     :param eps: The regularization constant (ideally, this is 1/SNR)
     :param min_denominator_value: Used to prevent division by 0. By default is 0.1*eps
     :param use_only_n_first_batches: Use only the n first batches to reconstruct
     :param float32_matmul_precision: Set it to high or medium for speed up at a precision cost
     :param weight_with_confidence: If True, read and apply per-particle confidence. If False (default),
                            do NOT fetch/pass confidence (zero overhead).
-    :param halfmap_subset: The random subset to use
+    :param halfmap_subset: The random subset of particles to use
     """
     if float32_matmul_precision is not None:
         torch.set_float32_matmul_precision(float32_matmul_precision)
@@ -580,4 +580,7 @@ if __name__ == "__main__":
     from argParseFromDoc import parse_function_and_call
     parse_function_and_call(reconstruct_starfile)
     """
-python -m cryoPARES.reconstruction.reconstruction --symmetry C1  --particles_star_fname ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/donwsampled/down1000particles.star  --particles_dir  ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/donwsampled/ --output_fname /tmp/reconstruction.mrc  --weight_with_confidence    """
+    
+python -m cryoPARES.reconstruction.reconstructor --symmetry C1  --particles_star_fname ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/donwsampled/down1000particles.star  --particles_dir  ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/donwsampled/ --output_fname /tmp/reconstruction.mrc  --weight_with_confidence    
+
+    """

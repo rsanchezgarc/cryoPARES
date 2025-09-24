@@ -27,11 +27,11 @@ from cryoPARES.geometry.convert_angles import euler_angles_to_matrix, matrix_to_
 from cryoPARES.geometry.grids import so3_near_identity_grid_cartesianprod
 from cryoPARES.geometry.metrics_angles import rotation_error_with_sym
 from cryoPARES.utils.reconstructionUtils import get_vol
-from .loggers import getWorkerLogger
-from .myProgressBar import myTqdm as tqdm
+from cryoPARES.projmatching.projmatchingUtils.loggers import getWorkerLogger
+from cryoPARES.projmatching.projmatchingUtils.myProgressBar import myTqdm as tqdm
 
-from cryoPARES.projmatching.filterToResolution import low_pass_filter_fname
-from cryoPARES.projmatching.fourierOperations import correlate_dft_2d, compute_dft_3d, _real_to_fourier_2d
+from cryoPARES.projmatching.projmatchingUtils.filterToResolution import low_pass_filter_fname
+from cryoPARES.projmatching.projmatchingUtils.fourierOperations import correlate_dft_2d, compute_dft_3d, _real_to_fourier_2d
 
 REPORT_ALIGNMENT_DISPLACEMENT = True
 USE_TWO_FLOAT32_FOR_COMPLEX = True
@@ -86,11 +86,11 @@ class ProjectionMatcher(nn.Module):
         self.mainLogger = getWorkerLogger(self.verbose)
         if USE_TWO_FLOAT32_FOR_COMPLEX:
             if main_config.projmatching.disable_compile_projectVol:
-                from cryoPARES.projmatching.extract_central_slices_as_real import \
+                from cryoPARES.projmatching.projmatchingUtils.extract_central_slices_as_real import \
                                 extract_central_slices_rfft_3d_multichannel
                 self.extract_central_slices_rfft_3d_multichannel = extract_central_slices_rfft_3d_multichannel
             else:
-                from cryoPARES.projmatching.extract_central_slices_as_real import \
+                from cryoPARES.projmatching.projmatchingUtils.extract_central_slices_as_real import \
                                 compiled_extract_central_slices_rfft_3d_multichannel
                 print("Compiling extract_central_slices_rfft_3d_multichannel")
                 self.extract_central_slices_rfft_3d_multichannel = compiled_extract_central_slices_rfft_3d_multichannel

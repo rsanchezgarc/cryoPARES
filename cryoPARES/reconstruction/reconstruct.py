@@ -2,14 +2,17 @@ import os
 import sys
 import traceback
 import time
-from typing import Optional
+from typing import Optional, Literal
 
 import numpy as np
 from torch import multiprocessing
 import torch
 from progressBarDistributed import SharedMemoryProgressBar, SharedMemoryProgressBarWorker
 
-from cryoPARES.reconstruction.reconstruction import Reconstructor
+from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
+from cryoPARES.configs.mainConfig import main_config
+from cryoPARES.reconstruction.reconstructor import Reconstructor
+from cryoPARES.constants import float32_matmul_precision
 
 _RECONSTRUCTOR = None
 
@@ -75,12 +78,23 @@ def create_shared_tensor(shape, dtype=torch.float32, ctx=None):
     shared_array = ctx.Array(typecode, size)
     return shared_array, shape
 
-def reconstruct_starfile(particles_star_fname: str, symmetry: str, output_fname: str,
+@inject_defaults_from_config(main_config.reconstruct, update_config_with_args=True)
+def reconstruct_starfile(particles_star_fname: str,
+                         symmetry: str,
+                         output_fname: str,
                          particles_dir:Optional[str]=None,
                          n_jobs: int  = 1,
-                         num_dataworkers: int = 1, batch_size: int = 64, use_cuda: bool = True,
-                         correct_ctf: bool = True, eps: float = 1e-3, min_denominator_value: float = 1e-4,
-                         use_only_n_first_batches: Optional[int] = None):
+                         num_dataworkers: int = 1,
+                         batch_size: int = 128,
+                         use_cuda: bool = True,
+                         correct_ctf: bool = CONFIG_PARAM(),
+                         eps: float = CONFIG_PARAM(),
+                         min_denominator_value: Optional[float] = None,
+                         use_only_n_first_batches: Optional[int] = None,
+                         float32_matmul_precision: Optional[str] = float32_matmul_precision,
+                         weight_with_confidence: bool = CONFIG_PARAM(),
+                         halfmap_subset: Optional[Literal["1", "2"]] = None
+                         ):
     """
 
     :param particles_star_fname: The particles to reconstruct
@@ -90,13 +104,31 @@ def reconstruct_starfile(particles_star_fname: str, symmetry: str, output_fname:
     :param n_jobs: The number of workers to split the reconstruction process
     :param num_dataworkers: Num workers for data loading
     :param batch_size: The number of particles to be simultaneusly backprojected
-    :param use_cuda:
-    :param correct_ctf:
+    :param use_cuda: if NOT, it will not use cuda devices
+    :param correct_ctf: if NOT, it will not correct CTF
     :param eps: The regularization constant (ideally, this is 1/SNR)
     :param min_denominator_value: Used to prevent division by 0
     :param use_only_n_first_batches: Use only the n first batches to reconstruct
-    :return:
+    :param float32_matmul_precision: Set it to high or medium for speed up at a precision cost
+    :param weight_with_confidence: If True, read and apply per-particle confidence. If False (default),
+                           do NOT fetch/pass confidence (zero overhead).
+    :param halfmap_subset: The random subset of particles to use
     """
+
+    if n_jobs == 1:
+        from .reconstructor import reconstruct_starfile as single_job_reconstruct_starfile
+        single_job_reconstruct_starfile(particles_star_fname, symmetry, output_fname,
+                                        particles_dir=particles_dir, num_dataworkers=num_dataworkers,
+                                        batch_size=batch_size, use_cuda=use_cuda, correct_ctf=correct_ctf,
+                                        eps=eps, min_denominator_value=min_denominator_value,
+                                        use_only_n_first_batches=use_only_n_first_batches,
+                                        float32_matmul_precision=float32_matmul_precision,
+                                        weight_with_confidence=weight_with_confidence,
+                                        halfmap_subset=halfmap_subset)
+        return 0
+    elif n_jobs <1:
+        raise RuntimeError("Error, n_jobs>=1 required")
+
     ctx = multiprocessing.get_context('spawn')
 
     reconstructor_init_kwargs = dict(
@@ -200,7 +232,7 @@ def reconstruct_starfile(particles_star_fname: str, symmetry: str, output_fname:
     reconstructor.ctfsq = final_ctfsq
 
     reconstructor.generate_volume(output_fname)
-    print("Reconstruction done.")
+    print(f"Volume saved at {output_fname}")
 
 
 
@@ -208,5 +240,5 @@ if __name__ == "__main__":
     from argParseFromDoc import parse_function_and_call
     parse_function_and_call(reconstruct_starfile)
     """
-python -m cryoPARES.reconstruction.distributedReconstruct  --symmetry C1 --particles_star_fname /home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles.star --output_fname /tmp/reconstruction.mrc --use_only_n_first_batches 100    
+python -m cryoPARES.reconstruction.reconstruct  --symmetry C1 --particles_star_fname /home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles.star --output_fname /tmp/reconstruction.mrc --use_only_n_first_batches 100    
     """

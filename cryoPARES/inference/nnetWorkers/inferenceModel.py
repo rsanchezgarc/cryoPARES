@@ -6,7 +6,7 @@ from torch import nn, ScriptModule
 from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.projmatching.projMatching import ProjectionMatcher
-from cryoPARES.reconstruction.reconstruction import Reconstructor
+from cryoPARES.reconstruction.reconstructor import Reconstructor
 from cryoPARES.inference.nnetWorkers.tensorDataBuffer import StreamingBuffer
 from cryoPARES.models.model import RotationPredictionMixin
 from cryoPARES.constants import (BATCH_IDS_NAME, BATCH_PARTICLES_NAME, BATCH_ORI_IMAGE_NAME,

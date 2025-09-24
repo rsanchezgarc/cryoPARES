@@ -15,7 +15,7 @@ from torch.utils.data import ConcatDataset
 from cryoPARES import constants
 from cryoPARES.configManager.inject_defaults import CONFIG_PARAM, inject_defaults_from_config
 from cryoPARES.configs.mainConfig import main_config
-from cryoPARES.reconstruction.distributedReconstruct import create_shared_tensor
+from cryoPARES.reconstruction.reconstruct import create_shared_tensor
 from cryoPARES.inference.inference import SingleInferencer
 from cryoPARES.utils.paths import get_most_recent_file
 from cryoPARES.configManager.configParser import ConfigArgumentParser, ConfigOverrideSystem

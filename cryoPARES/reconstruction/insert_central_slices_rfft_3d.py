@@ -1,11 +1,11 @@
 from functools import lru_cache
-from typing import Literal, Tuple
+from typing import Tuple
 
 import torch
 import einops
 
 from cryoPARES.configs.mainConfig import main_config
-from cryoPARES.projmatching.extract_central_slices_as_real import (
+from cryoPARES.projmatching.projmatchingUtils.extract_central_slices_as_real import (
     _fftfreq_to_dft_coordinates,
     _rfft_shape_tuple,
 )

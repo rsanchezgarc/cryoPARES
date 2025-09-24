@@ -31,8 +31,7 @@ from __future__ import annotations
 
 import math
 import os
-import warnings
-from typing import Optional, Tuple
+from typing import Optional
 
 import numpy as np
 import torch
@@ -46,7 +45,7 @@ from cryoPARES.constants import (
 )
 from cryoPARES.geometry.convert_angles import euler_angles_to_matrix
 from cryoPARES.datamanager.ctf.rfft_ctf import corrupt_with_ctf
-from cryoPARES.projmatching.fourierOperations import compute_dft_3d, _fourier_proj_to_real_2d
+from cryoPARES.projmatching.projmatchingUtils.fourierOperations import compute_dft_3d, _fourier_proj_to_real_2d
 from torch_fourier_slice.slice_extraction import extract_central_slices_rfft_3d
 from torch_fourier_shift import fourier_shift_image_2d
 
@@ -102,7 +101,6 @@ def _apply_randomizations(
     - Shifts: add independent uniform noise in [-shifts_max_A, +shifts_max_A]
       to rlnOriginXAngst, rlnOriginYAngst on a random subset of size ~shifts_frac * N.
     """
-    import pandas as pd
     rng = np.random.default_rng(seed)
 
     N = len(parts_df)
@@ -164,7 +162,6 @@ class CryoEMFourierSimulator:
         apply_ctf: bool,
         snr: Optional[float],
     ) -> list[str]:
-        import pandas as pd
         sim = CryoEMFourierSimulator(volume_mrc=volume_path, device=device)
         parts_df = star_csv.iloc[start:end]
 
@@ -264,7 +261,6 @@ class CryoEMFourierSimulator:
         randomize_shifts_max_A: float = 0.0,
         random_seed: Optional[int] = None,
     ) -> str:
-        import pandas as pd
         import multiprocessing as mp
 
         parts_df, optics_df = load_star_with_optics(star_in)

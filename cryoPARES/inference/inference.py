@@ -25,7 +25,7 @@ from cryoPARES.inference.nnetWorkers.inferenceModel import InferenceModel
 from cryoPARES.models.model import PlModel
 from cryoPARES.datamanager.datamanager import DataManager
 from cryoPARES.projmatching.projMatching import ProjectionMatcher
-from cryoPARES.reconstruction.reconstruction import Reconstructor
+from cryoPARES.reconstruction.reconstructor import Reconstructor
 from cryoPARES.utils.paths import get_most_recent_file
 from cryoPARES.scripts.computeFsc import compute_fsc
 from cryoPARES.utils.reconstructionUtils import get_vol

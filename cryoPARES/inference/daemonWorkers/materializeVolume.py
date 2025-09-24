@@ -14,7 +14,7 @@ from argParseFromDoc import parse_function_and_call
 # Ensure the cryoPARES package is in the Python path
 # You might need to adjust this depending on your project structure
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from cryoPARES.reconstruction.reconstruction import Reconstructor
+from cryoPARES.reconstruction.reconstructor import Reconstructor
 
 def materialize_volume(
     input_files: List[str],

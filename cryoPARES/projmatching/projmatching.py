@@ -137,7 +137,7 @@ def _worker(worker_id, pbar_fname, particles_idxs, matcher_init_kwargs,
                                                    shared_results["eulers"][1], torch.float32)
     stats_corr_matrix = _tensor_from_shared(shared_results["stats"][0],
                                             shared_results["stats"][1], torch.float32)
-
+    n_cpus = run_kwargs["n_cpus"]
     dataset = _MATCHER.preprocess_particles(
         particles=run_kwargs["particles_star_fname"],
         data_rootdir=run_kwargs["data_rootdir"],
@@ -151,10 +151,10 @@ def _worker(worker_id, pbar_fname, particles_idxs, matcher_init_kwargs,
     dl = torch.utils.data.DataLoader(
         dataset,
         batch_size=run_kwargs["batch_size"],
-        num_workers=run_kwargs["n_cpus"],
+        num_workers=n_cpus,
         shuffle=False,
         pin_memory=using_cuda,
-        multiprocessing_context='spawn'
+        multiprocessing_context='spawn' if n_cpus>0 else None
     )
 
     with SharedMemoryProgressBarWorker(worker_id, pbar_fname) as pbar:
@@ -242,6 +242,7 @@ def projmatching_starfile(
             out_fname
         ), f"Error, the starFnameOut {out_fname} already exists"
 
+    ctx = multiprocessing.get_context('spawn')
 
     if n_jobs == 1:
         single_job_align_star(
@@ -266,7 +267,6 @@ def projmatching_starfile(
         )
         return
 
-    ctx = multiprocessing.get_context('spawn')
     torch.set_float32_matmul_precision(torch_matmul_precision)
 
     mainLogger = getWorkerLogger(verbose)

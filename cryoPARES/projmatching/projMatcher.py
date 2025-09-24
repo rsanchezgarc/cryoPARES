@@ -113,7 +113,6 @@ class ProjectionMatcher(nn.Module):
             self.correlate_dft_2d = torch.compile(correlate_dft_2d, fullgraph=True,
                                                   mode=main_config.projmatching.compile_correlate_dft_2d_mode
                                                   )
-
     # ----------------------- Basic props/helpers -----------------------
 
     @property
@@ -190,11 +189,12 @@ class ProjectionMatcher(nn.Module):
             radius_px = self.mask_radius_angs
         rmask = circle(radius_px, image_shape=self.image_shape, smoothing_radius=radius_px * .05)
         self.register_buffer("rmask", rmask)
-
         if self.max_resolution_A is not None:
             nyquist_freq = 1 / (2 * self.vol_voxel_size)  # Nyquist freq in cycles/Å
             cutoff_freq = 1 / self.max_resolution_A  # cutoff freq in cycles/Å
             self.fftfreq_max = min(cutoff_freq / nyquist_freq, 1.0)  # normalize to Nyquist (0..1)
+        else:
+            self.fftfreq_max = None
 
     def _projectF(self, rotMats: torch.Tensor) -> torch.Tensor:
 
@@ -206,7 +206,6 @@ class ProjectionMatcher(nn.Module):
             zyx_matrices=False, )
 
     def _projectF_USE_TWO_FLOAT32_FOR_COMPLEX(self, rotMats: torch.Tensor) -> torch.Tensor:
-
         projs = self.extract_central_slices_rfft_3d_multichannel(self.reference_vol,
                                                                  self.vol_shape,
                                                                  rotation_matrices=rotMats,
@@ -387,7 +386,8 @@ class ProjectionMatcher(nn.Module):
             particlesDataSet,
             batch_size=batch_size,
             num_workers=n_cpus, shuffle=False, pin_memory=True,
-            multiprocessing_context='fork')  #get_context('loky')
+            multiprocessing_context='spawn' if n_cpus > 0 else None
+        )  #get_context('loky')
         non_blocking = True
         _partIdx = 0
         for batch in tqdm(dl, desc="Aligning particles", disable=not self.verbose):

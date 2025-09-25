@@ -155,7 +155,8 @@ class DataManager(pl.LightningDataModule):
             sampler = DistributedSampler(dataset, num_replicas=distributed_world_size, rank=rank) \
                                         if distributed_world_size > 1 else None
             return DataLoader(dataset, batch_size=self.batch_size, shuffle=False,
-                              num_workers=self.num_data_workers, sampler=sampler, pin_memory=True)
+                              num_workers=self.num_data_workers, sampler=sampler,
+                              pin_memory=True if self.num_data_workers > 0 else False)
 
         if partitionName == "train":
             print(f"Train dataset {len(dataset)}")

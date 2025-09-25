@@ -7,21 +7,15 @@ from pathlib import Path
 import torch
 import yaml
 from lightning import seed_everything
-from tqdm import tqdm
-from torch import  multiprocessing as mp
-from typing import Optional, List, Literal, Dict, Any, Tuple
-
-from cryoPARES.constants import RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES, RELION_PRED_POSE_CONFIDENCE_NAME, \
-    RELION_EULER_CONVENTION, DIRECTIONAL_ZSCORE_NAME
+from typing import Optional, List, Literal
 
 from cryoPARES import constants
 from cryoPARES.configManager.configParser import ConfigOverrideSystem
 from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
-from cryoPARES.constants import BEST_DIRECTIONAL_NORMALIZER, BEST_CHECKPOINT_BASENAME, BEST_MODEL_SCRIPT_BASENAME
-from cryoPARES.geometry.convert_angles import matrix_to_euler_angles
 from cryoPARES.inference.daemon.queueManager import queue_connection, get_all_available_items, DEFAULT_IP, \
     DEFAULT_PORT, DEFAULT_AUTHKEY
+from cryoPARES.inference.daemon.spoolingFiller import POISON_PILL
 from cryoPARES.inference.inferencer import SingleInferencer
 from cryoPARES.utils.paths import get_most_recent_file
 
@@ -46,8 +40,8 @@ class DaemonInferencer(SingleInferencer):
                  directional_zscore_thr: Optional[float] = CONFIG_PARAM(),
                  skip_localrefinement: bool = CONFIG_PARAM(),
                  skip_reconstruction: bool = CONFIG_PARAM(),
-                 update_progressbar_n_batches: int = CONFIG_PARAM(),
                  secs_between_partial_results_written: int = 5,
+                 resubmit_poison_pill: bool = True
                  ):
         """
 
@@ -64,12 +58,12 @@ class DaemonInferencer(SingleInferencer):
         :param n_cpus_if_no_cuda:
         :param compile_model:
         :param top_k_poses_nnet:
-        :param reference_map: If not provided, it will be tried to load from the checkpointç
+        :param reference_map: If not provided, it will be tried to load from the checkpoint
         :param directional_zscore_thr:
         :param skip_localrefinement:
         :param skip_reconstruction:
-        :param update_progressbar_n_batches:
-        :param secs_between_partial_results_written:
+        :param secs_between_partial_results_written: Partial results are saved from RAM to disk every few seconds
+        :param: resubmit_poison_pill: If True, posion pills are re-submitted, to ensure that all workers will die
         """
 
         super().__init__(particles_star_fname=None,
@@ -88,16 +82,17 @@ class DaemonInferencer(SingleInferencer):
                          directional_zscore_thr = directional_zscore_thr,
                          skip_localrefinement = skip_localrefinement,
                          skip_reconstruction = skip_reconstruction,
-                         update_progressbar_n_batches=update_progressbar_n_batches,
                          subset_idxs=None)
 
         self.net_address = net_address
         self.net_port = net_port
         self.net_authkey = net_authkey
         self.secs_between_partial_results_written = secs_between_partial_results_written
+        self.resubmit_poison_pill = resubmit_poison_pill
         self.particles_star_fname_list = []
 
     def _setup_reconstructor(self, symmetry: Optional[str]= None):
+        print("Setting-up the reconstructor")
         self.particles_star_fname = self.particles_star_fname_list[0]
         reconstructor = super()._setup_reconstructor(symmetry)
         self.particles_star_fname = self.particles_star_fname_list
@@ -107,7 +102,7 @@ class DaemonInferencer(SingleInferencer):
         self._run()
 
     def resolve_data(self, starfname:Optional[str]):
-        if starfname is None:
+        if starfname is POISON_PILL:
             return True
         self.particles_star_fname_list.append(starfname)
         return False
@@ -123,36 +118,47 @@ class DaemonInferencer(SingleInferencer):
 
         all_results_list = []
         datasets = []
-
         particles_md_list = []
+
         with queue_connection(ip=self.net_address, port=self.net_port, authkey=self.net_authkey) as q:
             # The first batch needs to be treated differently to set up the reconstructor
             data = q.get()
             print("First data item arrived")
             terminateJob = self.resolve_data(data)
-            if terminateJob: return
+            if terminateJob:
+                if self.resubmit_poison_pill:
+                    q.put(POISON_PILL)
+                return
             model = self._setup_model()
             terminateJob = False
             last_save_timestamp = time()
+
             while not terminateJob:
-                print("wating for new data")
-                data_list = get_all_available_items(q)
-                for elem in data_list:
-                    _terminateJob = self.resolve_data(elem)
-                    terminateJob = _terminateJob or terminateJob
+                # 1) If we already have files pending, process them first
                 if self.particles_star_fname_list:
                     print("processing:")
                     print("\n".join(self.particles_star_fname_list))
-                dataloader = self._setup_dataloader()
-                if not dataloader:
-                    continue
-                all_results_list += [self._process_all_batches(model, dataloader, pbar=None)]
-                datasets += [dataloader.dataset]
-                self.particles_star_fname_list = []
+                    dataloader = self._setup_dataloader()
+                    if dataloader:
+                        all_results_list.append(
+                            self._process_all_batches(model, dataloader, pbar=None)
+                        )
+                        datasets.append(dataloader.dataset)
+                        self.particles_star_fname_list = []
+                else:
+                    # 2) Only block for new data when idle
+                    print("waiting for new data")
+                    data_list = get_all_available_items(q)
+                    for elem in data_list:
+                        _terminateJob = self.resolve_data(elem)
+                        terminateJob = _terminateJob or terminateJob
 
+                # Periodically save partial results
                 current_time = time()
-                if all_results_list and \
-                   current_time - last_save_timestamp >= self.secs_between_partial_results_written:
+                if (
+                    all_results_list
+                    and current_time - last_save_timestamp >= self.secs_between_partial_results_written
+                ):
                     for all_results, dataset in zip(all_results_list, datasets):
                         particles_md_list += self._save_particles_results(all_results, dataset)
                     all_results_list = []
@@ -161,6 +167,15 @@ class DaemonInferencer(SingleInferencer):
                         self._save_reconstruction(materialize=False)
                     last_save_timestamp = time()  # Reset the timer
 
+        # Final save for any remaining results
+        if all_results_list:
+            for all_results, dataset in zip(all_results_list, datasets):
+                particles_md_list += self._save_particles_results(all_results, dataset)
+            if not self.skip_reconstruction:
+                self._save_reconstruction(materialize=False)
+
+        if self.resubmit_poison_pill:
+            q.put(POISON_PILL)
 
 
 if __name__ == "__main__":

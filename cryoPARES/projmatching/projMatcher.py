@@ -132,7 +132,7 @@ class ProjectionMatcher(nn.Module):
             self._so3_delta = so3_near_identity_grid_cartesianprod(self.grid_distance_degs, n_angles,
                                                                    transposed=False, degrees=True,
                                                                    remove_duplicates=False).to(device)
-            #TODO: remove_duplicates=True makes the whole things broken. Probably due to euler angles singularities
+            #TODO: remove_duplicates=True makes the whole things less accurate. Probably due to euler angles singularities
             if as_rotmats:
                 # Using rotmats seems a bad idea as well. Not giving good results. Is it perhaps because we
                 # convert the grid from euler to rots, and near identity the numerical errors are important?

@@ -12,6 +12,7 @@ from multiprocessing.managers import BaseManager
 from cryoPARES.inference.daemon.queueManager import DEFAULT_IP, DEFAULT_PORT, DEFAULT_AUTHKEY, queue_connection
 
 
+POISON_PILL = None
 
 def monitor_directory(directory: str, pattern: str = "*.star", interval: int = 10):
     """
@@ -39,7 +40,7 @@ def main(
         directory: str,
         ip: str = DEFAULT_IP,
         port: int = DEFAULT_PORT,
-        authkey: bytes = DEFAULT_AUTHKEY,
+        authkey: str = DEFAULT_AUTHKEY,
         pattern: str = "*.star",
         check_interval: int = 10
 ):
@@ -67,7 +68,7 @@ def main(
                     print(f"Error adding {star_file} to queue: {e}")
                 print(f"Qsize: {queue.qsize()}")
     except KeyboardInterrupt:
-        queue.put(None)
+        queue.put(POISON_PILL)
         print("Poison pill added")
     except Exception as e:
         print(f"Spooler error: {e}")
@@ -77,28 +78,9 @@ def main(
 
 
 if __name__ == "__main__":
-    import argparse
+    from argParseFromDoc import parse_function_and_call
+    exit(parse_function_and_call(main))
 
-    parser = argparse.ArgumentParser(
-        description="Spooler to monitor directory and feed .star files to DaemonInferencer queue")
-    parser.add_argument("directory", help="Directory to monitor for .star files")
-    parser.add_argument("--ip", default=DEFAULT_IP, help="Queue manager IP address")
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="Queue manager port")
-    parser.add_argument("--authkey", default=DEFAULT_AUTHKEY, help="Queue manager authentication key")
-    parser.add_argument("--pattern", default="*.star", help="File pattern to match")
-    parser.add_argument("--interval", type=int, default=10, help="Seconds between directory checks")
-
-    args = parser.parse_args()
-
-    exit_code = main(
-        directory=args.directory,
-        ip=args.ip,
-        port=args.port,
-        authkey=args.authkey.encode(),
-        pattern=args.pattern,
-        check_interval=args.interval
-    )
-    exit(exit_code)
 
     """
     

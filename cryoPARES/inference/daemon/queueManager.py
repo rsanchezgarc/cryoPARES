@@ -13,7 +13,7 @@ import signal
 import sys
 from queue import Queue
 from contextlib import contextmanager
-
+from typing import Optional
 
 DEFAULT_IP = "localhost"
 DEFAULT_PORT = 50000
@@ -94,8 +94,10 @@ def queue_manager_server(ip, port, authkey, queue_maxsize):
                     break
             print("Queue cleared")
 
-            # Shut down the manager
-            manager.shutdown()
+            # The manager server is shut down by the signal handler
+            # and the serve_forever() method's finally block.
+            # manager.shutdown() is only for managers started with
+            # manager.start() and is not needed here.
             print("Manager server shut down")
         except Exception as e:
             print(f"Error during server cleanup: {e}")
@@ -150,8 +152,16 @@ def get_all_available_items(q: mp.Queue):
     return items
 
 
-def main(ip=DEFAULT_IP, port=DEFAULT_PORT, authkey=DEFAULT_AUTHKEY, queue_maxsize=None):
-    """Main function that starts the Manager server using a context manager."""
+def main(ip:str=DEFAULT_IP, port:int=DEFAULT_PORT, authkey:str=DEFAULT_AUTHKEY,
+         queue_maxsize: Optional[int]=None):
+    """
+
+    :param ip:
+    :param port:
+    :param authkey: a password to use the queue
+    :param queue_maxsize:
+    :return:
+    """
     try:
         # Set up signal handlers to allow context manager cleanup
         signal.signal(signal.SIGINT, signal_handler)
@@ -169,5 +179,5 @@ def main(ip=DEFAULT_IP, port=DEFAULT_PORT, authkey=DEFAULT_AUTHKEY, queue_maxsiz
 
 
 if __name__ == "__main__":
-    exit_code = main()
-    sys.exit(exit_code)
+    from argParseFromDoc import parse_function_and_call
+    exit(parse_function_and_call(main))

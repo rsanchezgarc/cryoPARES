@@ -93,7 +93,7 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
             out = (batch_to_add['ids'], batch_to_add['rotmats'], None, batch_to_add['maxprobs'],
                     batch_to_add['norm_nn_score'])
             if self.reconstructor is not None:
-                raise NotImplementedError("Error, at the moment, local refinement is needed before"
+                raise NotImplementedError("Error, at the moment, local refinement is needed before "
                                           "reconstruction")
         return out
 

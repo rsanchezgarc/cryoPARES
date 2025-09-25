@@ -173,6 +173,7 @@ def _worker(worker_id, pbar_fname, particles_idxs, matcher_init_kwargs,
             ctfs = batch[BATCH_ORI_CTF_NAME].to(device, non_blocking=non_blocking) \
                 if using_cuda else batch[BATCH_ORI_CTF_NAME]
 
+            rotmats = rotmats.unsqueeze(1) #We expect K poses per particle
             maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight = _MATCHER.forward(parts, ctfs, rotmats)
 
             results_corr_matrix[partIdx, :] = maxCorrs.detach().cpu()

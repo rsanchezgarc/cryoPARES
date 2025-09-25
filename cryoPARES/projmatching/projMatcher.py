@@ -47,7 +47,7 @@ def get_eulers(rotmats, convention: str = RELION_EULER_CONVENTION, device=None):
     if device is None:
         device = rotmats.device
     ori_shape = rotmats.shape
-    eulerDegs = torch.rad2deg(matrix_to_euler_angles(rotmats.view(-1, 3, 3), convention=convention)).to(device)
+    eulerDegs = torch.rad2deg(matrix_to_euler_angles(rotmats.reshape(-1, 3, 3), convention=convention)).to(device)
     eulerDegs = eulerDegs.view(*ori_shape[:-2], 3)
     return eulerDegs
 
@@ -285,8 +285,10 @@ class ProjectionMatcher(nn.Module):
                                      view_complex_as_two_float32=USE_TWO_FLOAT32_FOR_COMPLEX)
 
         eulerDegs = get_eulers(rotmats)
-        expanded_eulerDegs = self._get_so3_delta(eulerDegs.device).unsqueeze(0) + eulerDegs.unsqueeze(1)
+        expanded_eulerDegs = (self._get_so3_delta(eulerDegs.device).unsqueeze(0).unsqueeze(0) +
+                              eulerDegs.unsqueeze(2)) #BxTopKxRotsx3
         bsize = expanded_eulerDegs.size(0)
+        n_input_angles = expanded_eulerDegs.size(2)
         expanded_eulerDegs = expanded_eulerDegs.reshape(bsize, -1, 3)  # unrolling all the input angles into one dim
         # TODO: Remove duplicate angles if n_input_angles > 1. Duplicates may happen if several topK poses were provided as input
         # Also, for large batches, there could be redundant angles (to a certain precision)
@@ -400,10 +402,7 @@ class ProjectionMatcher(nn.Module):
             parts = batch[BATCH_ORI_IMAGE_NAME].to(device, non_blocking=non_blocking)
             ctfs = batch[BATCH_ORI_CTF_NAME].to(device, non_blocking=non_blocking)
 
-            # fparts = _real_to_fourier_2d(parts * self.rmask, view_complex_as_two_float32=USE_TWO_FLOAT32_FOR_COMPLEX)
-            # eulerDegs = torch.rad2deg(matrix_to_euler_angles(rotmats, RELION_EULER_CONVENTION)).unsqueeze(1)
-            # maxCorrs, predEulerDegs, pixelShiftsXY, comparedWeight = self._fourier_forward(fparts, ctfs, eulerDegs)
-
+            rotmats = rotmats.unsqueeze(1) #This is used becase the code expect k poses per particle
             maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight = self.forward(parts, ctfs, rotmats)
             results_corr_matrix[partIdx, :] = maxCorrs.detach().cpu()
             # results_shifts_matrix[partIdx, :] = pixelShiftsXY.detach().cpu()

@@ -146,7 +146,6 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
         (maxCorrs, predRotMats, predShiftsAngsXY,
          comparedWeight) = self.localRefiner.forward(kwargs['imgs'], kwargs['ctfs'], kwargs['rotmats'])
         score = torch.where(torch.isnan(comparedWeight), kwargs['maxprobs']*0.5, kwargs['maxprobs'] * comparedWeight)
-
         if self.reconstructor is not None:
             if self.weight_with_confidence:
                 confidence = score

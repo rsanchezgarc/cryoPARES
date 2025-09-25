@@ -315,7 +315,7 @@ class Reconstructor(nn.Module):
             rotMats = rotMats.reshape(-1, 3, 3)
             hwShiftAngs = hwShiftAngs.reshape(-1, 2)
             if confidence is not None:
-                confidence = confidence.unsqueeze(1).expand(-1, M).reshape(-1)
+                confidence = confidence.expand(-1, M).reshape(-1)
 
         # Symmetry expansion (replicates confidence if present)
         if self.has_symmetry:
@@ -535,7 +535,7 @@ class ReconstructionParticlesDataset(Dataset):
         if self.return_confidence:
             # Use 1.0 default if key missing
             conf = float(md_row.get(RELION_PRED_POSE_CONFIDENCE_NAME, 1.0))
-            confidence = torch.tensor(conf, dtype=torch.float32)
+            confidence = torch.tensor(conf, dtype=torch.float32).unsqueeze(-1)
             return iid, img, ctf, rotMat, hwShiftAngs, confidence
         else:
             return iid, img, ctf, rotMat, hwShiftAngs
@@ -601,6 +601,7 @@ if __name__ == "__main__":
     parse_function_and_call(reconstruct_starfile)
     """
     
-python -m cryoPARES.reconstruction.reconstructor --symmetry C1  --particles_star_fname ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/donwsampled/down1000particles.star  --particles_dir  ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/donwsampled/ --output_fname /tmp/reconstruction.mrc  --weight_with_confidence    
+python -m cryoPARES.reconstruction.reconstructor \
+--symmetry C1  --particles_star_fname ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/donwsampled/down1000particles.star  --particles_dir  ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/donwsampled/ --output_fname /tmp/reconstruction.mrc  --weight_with_confidence    
 
     """

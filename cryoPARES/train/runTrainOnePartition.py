@@ -155,7 +155,7 @@ class TrainerPartition:
             "lr": self.train_config.learning_rate,
             "symmetry": self.symmetry,
             "num_augmented_copies_per_batch": main_config.datamanager.num_augmented_copies_per_batch,
-            "top_k": main_config.inference.top_k
+            "top_k_poses_nnet": main_config.inference.top_k_poses_nnet
         }
 
     def _setup_model(self, trainer):

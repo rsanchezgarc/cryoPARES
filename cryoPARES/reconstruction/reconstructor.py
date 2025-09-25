@@ -2,7 +2,7 @@ import os
 import sys
 from functools import lru_cache
 from typing import List, Optional, Tuple, Union, Literal
-
+# TODO: Reconstruct with confidence seems to make things worse
 import numpy as np
 import torch
 import tqdm

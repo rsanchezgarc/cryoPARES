@@ -21,7 +21,7 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
                  localRefiner: ProjectionMatcher | None,
                  reconstructor: Reconstructor | None = None,
                  before_refiner_buffer_size: int = CONFIG_PARAM(),
-                 return_top_k: int = 1
+                 top_k_poses_nnet: int = CONFIG_PARAM()
                  ):
         super().__init__()
         self.__init_mixin__()
@@ -32,7 +32,7 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
         self.localRefiner = localRefiner
         self.reconstructor = reconstructor
         self.buffer_size = before_refiner_buffer_size
-        self.return_top_k = return_top_k
+        self.top_k_poses_nnet = top_k_poses_nnet
 
         if reconstructor is not None:
             self.weight_with_confidence = reconstructor.weight_with_confidence
@@ -47,20 +47,20 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
         else:
             self.buffer = None
 
-    def _firstforward(self, imgs, top_k):
-        _top_k = 10 if top_k < 10 else top_k
+    def _firstforward(self, imgs, top_k_poses_nnet):
+        _top_k = 10 if top_k_poses_nnet < 10 else top_k_poses_nnet
         _, _, _, pred_rotmats, maxprobs = self.so3model(imgs, _top_k)
         if self.scoreNormalizer:
             norm_nn_score = self.scoreNormalizer(pred_rotmats[:, 0, ...], maxprobs[:,:10].sum(1))
         else:
             norm_nn_score = torch.nan * torch.ones_like(maxprobs[:,0])
-        pred_rotmats = pred_rotmats[:,:top_k]
-        maxprobs = maxprobs[:,:top_k]
+        pred_rotmats = pred_rotmats[:,:top_k_poses_nnet]
+        maxprobs = maxprobs[:,:top_k_poses_nnet]
         return pred_rotmats, maxprobs, norm_nn_score
 
-    def forward(self, ids, imgs, fullSizeImg, fullSizeCtfs, top_k):
+    def forward(self, ids, imgs, fullSizeImg, fullSizeCtfs, top_k_poses_nnet):
 
-        pred_rotmats, maxprobs, norm_nn_score = self._firstforward(imgs, top_k)
+        pred_rotmats, maxprobs, norm_nn_score = self._firstforward(imgs, top_k_poses_nnet)
         if self.normalizedScore_thr is not None:
             passing_mask = (norm_nn_score > self.normalizedScore_thr).squeeze()
             if not passing_mask.any():
@@ -97,13 +97,13 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
                                           "reconstruction")
         return out
 
-    def forward_without_buffer(self, ids, imgs, fullSizeImg, fullSizeCtfs, top_k):
+    def forward_without_buffer(self, ids, imgs, fullSizeImg, fullSizeCtfs, top_k_poses_nnet):
         """
         A more efficient forward pass that bypasses the streaming buffer.
         This is useful when no z-score filtering is applied and we want to process
         batches directly without buffering.
         """
-        pred_rotmats, maxprobs, norm_nn_score = self._firstforward(imgs, top_k)
+        pred_rotmats, maxprobs, norm_nn_score = self._firstforward(imgs, top_k_poses_nnet)
         if self.localRefiner is not None:
             kwargs = {
                 'imgs': fullSizeImg,
@@ -127,10 +127,11 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
         fullSizeCtfs = batch[BATCH_ORI_CTF_NAME]
         # metadata = batch[BATCH_MD_NAME]
         if self.normalizedScore_thr is not None:
-            results = self.forward(ids, imgs, fullSizeImg, fullSizeCtfs, top_k=self.return_top_k)
+            results = self.forward(ids, imgs, fullSizeImg, fullSizeCtfs, top_k_poses_nnet=self.top_k_poses_nnet)
         else:
 
-            results = self.forward_without_buffer(ids, imgs, fullSizeImg, fullSizeCtfs, top_k=self.return_top_k)
+            results = self.forward_without_buffer(ids, imgs, fullSizeImg, fullSizeCtfs,
+                                                  top_k_poses_nnet=self.top_k_poses_nnet)
         ## return ids, pred_rotmats, pred_shifts, maxprobs, norm_nn_score
         # from scipy.spatial.transform import Rotation
         # from cryoPARES.constants import  BATCH_MD_NAME, RELION_IMAGE_FNAME,RELION_ANGLES_NAMES
@@ -145,7 +146,11 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
         #tensors.keys() -> imgs, ctfs, rotmats, maxprobs, norm_nn_score
         (maxCorrs, predRotMats, predShiftsAngsXY,
          comparedWeight) = self.localRefiner.forward(kwargs['imgs'], kwargs['ctfs'], kwargs['rotmats'])
-        score = torch.where(torch.isnan(comparedWeight), kwargs['maxprobs']*0.5, kwargs['maxprobs'] * comparedWeight)
+        #TODO: score does not get correclty computed when topk_nn and topk_local are not the same.
+        n_final_poses = comparedWeight.shape[-1]
+        score = torch.where(torch.isnan(comparedWeight),
+                            0.5 * kwargs['maxprobs'][..., :n_final_poses],
+                            kwargs['maxprobs'][..., :n_final_poses] * comparedWeight)
         if self.reconstructor is not None:
             if self.weight_with_confidence:
                 confidence = score
@@ -198,7 +203,7 @@ def _test():
                              device="cpu").unsqueeze(0).expand(b,-1,-1)
 
     symmetry = "C1"
-    top_k = 1
+    top_k_poses_nnet = 1
 
     so3Model = Image2Sphere(symmetry=symmetry, num_augmented_copies_per_batch=1)
     percentilemodel = DirectionalPercentileNormalizer(symmetry=symmetry)
@@ -209,7 +214,7 @@ def _test():
         reference_vol="/home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles_reconstruct.mrc",
         grid_distance_degs=10, grid_step_degs=5)
     model = InferenceModel(so3Model, percentilemodel, normalizedScore_thr, localRefiner, before_refiner_buffer_size=1)
-    out = model.forward(ids, imgs, imgs[:, 0, ...], ctfs, top_k)
+    out = model.forward(ids, imgs, imgs[:, 0, ...], ctfs, top_k_poses_nnet)
     print(out)
     print("First was out")
     out = model.flush()

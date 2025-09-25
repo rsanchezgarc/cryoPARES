@@ -66,7 +66,7 @@ class ProjectionMatcher(nn.Module):
             grid_distance_degs: float | Tuple[float, float, float] = CONFIG_PARAM(),
             grid_step_degs: float | Tuple[float, float, float] = CONFIG_PARAM(),
             max_resolution_A: Optional[float] = CONFIG_PARAM(),
-            keep_top_k_values: int = CONFIG_PARAM(),
+            top_k_poses_localref: int = CONFIG_PARAM(),
             verbose: bool = CONFIG_PARAM(),
             correct_ctf: bool = CONFIG_PARAM(),
             mask_radius_angs: Optional[float] = CONFIG_PARAM(config=main_config.datamanager.particlesdataset)
@@ -76,7 +76,7 @@ class ProjectionMatcher(nn.Module):
         self.grid_step_degs = grid_step_degs
         self.max_resolution_A = max_resolution_A
         self.padding_factor = 0  # We do not support padding yet
-        self.keep_top_k_values = keep_top_k_values
+        self.top_k_poses_localref = top_k_poses_localref
         self.max_shift_fraction = main_config.projmatching.max_shift_fraction
         self.mask_radius_angs = mask_radius_angs
 
@@ -310,7 +310,7 @@ class ProjectionMatcher(nn.Module):
             projs = self._apply_ctfF(projs.reshape(bsize, -1, *projs.shape[_shapeIdx:]), ctfs)
         del ctfs
         perImgCorr, pixelShiftsXY = self.correlateF(fparts.unsqueeze(1), projs)
-        maxCorrs, maxCorrsIdxs = perImgCorr.topk(self.keep_top_k_values, sorted=True, largest=True, dim=-1)
+        maxCorrs, maxCorrsIdxs = perImgCorr.topk(self.top_k_poses_localref, sorted=True, largest=True, dim=-1)
 
         batch_idxs_range = torch.arange(pixelShiftsXY.size(0)).unsqueeze(1)
         pixelShiftsXY = pixelShiftsXY[batch_idxs_range, maxCorrsIdxs]
@@ -361,11 +361,11 @@ class ProjectionMatcher(nn.Module):
         assert half_particle_size == self.half_particle_size
         n_particles = len(particlesDataSet)
 
-        results_corr_matrix = torch.zeros(n_particles, self.keep_top_k_values)
-        # results_shifts_matrix = torch.zeros(n_particles, self.keep_top_k_values, 2, dtype=torch.int64)
-        results_shiftsAngs_matrix = torch.zeros(n_particles, self.keep_top_k_values, 2)
-        results_eulerDegs_matrix = torch.zeros(n_particles, self.keep_top_k_values, 3)
-        stats_corr_matrix = torch.zeros(n_particles, self.keep_top_k_values)
+        results_corr_matrix = torch.zeros(n_particles, self.top_k_poses_localref)
+        # results_shifts_matrix = torch.zeros(n_particles, self.top_k_poses_localref, 2, dtype=torch.int64)
+        results_shiftsAngs_matrix = torch.zeros(n_particles, self.top_k_poses_localref, 2)
+        results_eulerDegs_matrix = torch.zeros(n_particles, self.top_k_poses_localref, 3)
+        stats_corr_matrix = torch.zeros(n_particles, self.top_k_poses_localref)
         idds_list = [None] * n_particles
 
         self.to(device)
@@ -614,7 +614,7 @@ def align_star(
             reference_vol=reference_vol,
             grid_distance_degs=grid_distance_degs,
             grid_step_degs=grid_step_degs,
-            keep_top_k_values=return_top_k_poses,
+            top_k_poses_localref=return_top_k_poses,
             max_resolution_A=filter_resolution_angst,
             verbose=verbose,
             correct_ctf=correct_ctf,

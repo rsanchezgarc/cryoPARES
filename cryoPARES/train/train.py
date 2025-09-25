@@ -139,6 +139,7 @@ class Trainer:
             extension="yml"
         )
         fname = osp.join(self.experiment_root, basename)
+        from cryoPARES.configManager.configParser import export_config_to_yaml
         export_config_to_yaml(main_config, fname)
 
 
@@ -228,8 +229,7 @@ class Trainer:
         with open(osp.join(self.experiment_root, finetune_checkpoint_base), "w") as f:
             f.write(f"finetuneCheckpoint: {self.finetune_checkpoint_dir}")
 
-
-if __name__ == "__main__":
+def main():
     os.environ[constants.PROJECT_NAME + "__ENTRY_POINT"] = "train.py"
     print("---------------------------------------")
     print(" ".join(sys.argv))
@@ -240,6 +240,9 @@ if __name__ == "__main__":
     parser.add_args_from_function(Trainer.__init__)
     args, config_args = parser.parse_args()
     Trainer(**vars(args)).run(config_args)
+
+if __name__ == "__main__":
+    main()
 
     """
 

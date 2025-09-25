@@ -293,7 +293,7 @@ def projmatching_starfile(
             reference_vol=reference_vol,
             grid_distance_degs=grid_distance_degs,
             grid_step_degs=grid_step_degs,
-            keep_top_k_values=return_top_k_poses,
+            top_k_poses_localref=return_top_k_poses,
             max_resolution_A=filter_resolution_angst,
             verbose=verbose,
             correct_ctf=correct_ctf,

@@ -11,7 +11,7 @@ class Projmatching_config:
     max_shift_fraction: float = 0.2
     correct_ctf: bool = True
     verbose: bool = False
-    keep_top_k_values: int = 1
+    top_k_poses_localref: int = 1
 
     disable_compile_projectVol: bool = False
     compile_projectVol_mode: Optional[str] = "max-autotune"

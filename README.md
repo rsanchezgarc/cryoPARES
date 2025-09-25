@@ -85,13 +85,13 @@ CryoPARES has two main modes of operation: training and inference. Particles nee
 
 ### Training
 
-The `cryoPARES.train.train` module is used to train a new model for pose estimation. Training needs to be done first using 
+The `cryopares_train` module is used to train a new model for pose estimation. Training needs to be done first using 
 a pre-aligned dataset of particles. While not mandatory, we encourage using particles alignments estimated with RELION.
 
 
 **Usage:**
 ```bash
-python -m cryoPARES.train.train [ARGUMENTS] --config [CONFIG_OVERRIDES]
+python -m cryopares_train [ARGUMENTS] --config [CONFIG_OVERRIDES]
 ```
 
 **Key Arguments:**
@@ -235,7 +235,7 @@ CryoPARES uses a flexible configuration system that allows you to manage setting
 *   **`--show-config`:** To see all available options, run any main script with the `--show-config` flag. This will print a comprehensive list of all parameters, their current values, and their paths.
 
     ```bash
-    python -m cryoPARES.train.train --show-config
+    python -m cryopares_train --show-config
     ```
 
 *   **YAML Files:** Create a `.yaml` file with your desired parameters.
@@ -248,7 +248,7 @@ CryoPARES uses a flexible configuration system that allows you to manage setting
 
 1.  **Train a model on an existing, aligned dataset:**
     ```bash
-    python -m cryoPARES.train.train \
+    python -m cryopares_train \
         --symmetry C1 \
         --particles_star_fname /path/to/aligned_particles.star \
         --particles_dir /path/to/particles \

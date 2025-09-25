@@ -46,7 +46,8 @@ class SingleInferencer:
                  use_cuda: bool = CONFIG_PARAM(),
                  n_cpus_if_no_cuda: int = CONFIG_PARAM(),
                  compile_model: bool = False,
-                 top_k: int = CONFIG_PARAM(),
+                 top_k_poses_nnet: int = CONFIG_PARAM(),
+                 top_k_poses_localref: int = CONFIG_PARAM(config=main_config.projmatching),
                  reference_map: Optional[str] = None,
                  reference_mask: Optional[str] = None, #Only used for FSC estimation
                  directional_zscore_thr: Optional[float] = CONFIG_PARAM(),
@@ -71,7 +72,8 @@ class SingleInferencer:
         :param use_cuda: Whether to use a CUDA-enabled GPU for inference.
         :param n_cpus_if_no_cuda: The number of CPU cores to use if CUDA is not available.
         :param compile_model: Whether to compile the model using `torch.compile` for potential speed-up.
-        :param top_k: The number of top predictions to consider for each particle.
+        :param top_k_poses_nnet: The number of top predictions to predict with the nn for each particle.
+        :param top_k_poses_localref: The number of top predictions to return after local refinement.
         :param reference_map: Path to the reference map for local refinement. If not provided, it will be loaded from the checkpoint.
         :param reference_mask: Path to the mask of the reference map. Used only for FSC calculation.
         :param directional_zscore_thr: The threshold for the directional Z-score to filter particles.
@@ -86,7 +88,7 @@ class SingleInferencer:
         self.float32_matmul_precision = float32_matmul_precision
         self.particles_star_fname = particles_star_fname
         self.particles_dir = particles_dir
-
+        assert top_k_poses_nnet >= top_k_poses_localref, "Error, top_k_poses_nnet >= top_k_poses_localref required"
         self.checkpoint_dir = checkpoint_dir
         if n_first_particles is not None:
             assert subset_idxs is None, "Error, only n_first_particles or subset_idxs can be provided"
@@ -103,7 +105,8 @@ class SingleInferencer:
         self.model_halfset = model_halfset
 
         self.compile_model = compile_model
-        self.top_k = top_k
+        self.top_k_poses_nnet = top_k_poses_nnet
+        self.top_k_poses_localref = top_k_poses_localref
         self.reference_map = reference_map
         self.reference_mask = reference_mask
         self.directional_zscore_thr = directional_zscore_thr
@@ -199,7 +202,7 @@ class SingleInferencer:
             reference_map = self.reference_map
 
         if not self.skip_localrefinement:
-            localRefiner = ProjectionMatcher(reference_vol=reference_map, keep_top_k_values=self.top_k)
+            localRefiner = ProjectionMatcher(reference_vol=reference_map, top_k_poses_localref=self.top_k_poses_localref)
         else:
             localRefiner = None
 
@@ -210,7 +213,7 @@ class SingleInferencer:
 
         model = InferenceModel(so3Model, percentilemodel, self.directional_zscore_thr, localRefiner,
                                reconstructor=reconstructor,
-                               return_top_k=self.top_k)
+                               top_k_poses_nnet=self.top_k_poses_nnet)
 
         # Handle missing symmetry attribute
         if not hasattr(model, 'symmetry'):
@@ -516,10 +519,12 @@ class SingleInferencer:
             print("Warning: No particle results to save.")
             return []
 
+        assert all_results, "Error, no results were computed"
+        n_poses = all_results[0][1].shape[1]
         result_arrays = {
-            'eulerdegs': torch.zeros((n_particles, self.top_k, 3), dtype=torch.float32),
-            'score': torch.zeros((n_particles, self.top_k), dtype=torch.float32),
-            'shiftsXYangs': torch.zeros((n_particles, self.top_k, 2), dtype=torch.float32),
+            'eulerdegs': torch.zeros((n_particles, n_poses, 3), dtype=torch.float32),
+            'score': torch.zeros((n_particles, n_poses), dtype=torch.float32),
+            'shiftsXYangs': torch.zeros((n_particles, n_poses, 2), dtype=torch.float32),
             'top1_directional_zscore': torch.zeros((n_particles), dtype=torch.float32),
             'ids': [None] * n_particles
         }
@@ -570,8 +575,8 @@ class SingleInferencer:
             particles_md.loc[ids_to_update_in_df, DIRECTIONAL_ZSCORE_NAME] = result_arrays["top1_directional_zscore"][
                 result_indices].numpy()
 
-            for k in range(self.top_k):
-                suffix = "" if k == 0 else f"_top{k}"
+            for k in range(n_poses):
+                suffix = "" if k == 0 else f"_top{k+1}"
                 angles_names = [x + suffix for x in RELION_ANGLES_NAMES]
                 shiftsXYangs_names = [x + suffix for x in RELION_SHIFTS_NAMES]
                 confide_name = RELION_PRED_POSE_CONFIDENCE_NAME + suffix

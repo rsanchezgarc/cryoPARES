@@ -131,7 +131,6 @@ def worker(worker_id, output_q, *args, **kwargs):
 def _worker(worker_id,
             output_q,
             pbar_fname,
-            particles_row_idxs: np.ndarray,
             inferencer_init_kwargs,
             main_config_updated,
             shared_numerator,
@@ -145,9 +144,6 @@ def _worker(worker_id,
             torch.cuda.set_device(dev_index)
 
     ConfigOverrideSystem.update_config_from_dataclass(main_config, main_config_updated, verbose=False)
-
-    inferencer_init_kwargs = dict(inferencer_init_kwargs)
-    inferencer_init_kwargs["subset_idxs"] = list(map(int, particles_row_idxs))
 
     inferencer = SingleInferencer(**inferencer_init_kwargs)
 
@@ -196,13 +192,15 @@ def distributed_inference(
         use_cuda: bool = CONFIG_PARAM(),
         n_cpus_if_no_cuda: int = CONFIG_PARAM(),
         compile_model: bool = False,
-        top_k: int = CONFIG_PARAM(),
+        top_k_poses_nnet: int = CONFIG_PARAM(),
+        top_k_poses_localref: int = CONFIG_PARAM(config=main_config.projmatching),
         reference_map: Optional[str] = None,
         reference_mask: Optional[str] = None,
         directional_zscore_thr: Optional[float] = CONFIG_PARAM(),
         skip_localrefinement: bool = CONFIG_PARAM(),
         skip_reconstruction: bool = CONFIG_PARAM(),
         subset_idxs: Optional[List[int]] = None,
+        n_first_particles: Optional[int] = None,
         float32_matmul_precision: str = constants.float32_matmul_precision,
         check_interval_secs: float = 2.0
 ):
@@ -240,8 +238,10 @@ def distributed_inference(
         Max CPU threads per worker when CUDA is disabled.
     compile_model : bool
         Compile the model with `torch.compile` if True.
-    top_k : int
-        Number of poses to keep.
+    top_k_poses_nnet : int
+        Number of poses to predict witht the neural network.
+    top_k_poses_localref : int
+        The number of top predictions to return after local refinement.
     reference_map : str, optional
         Reference map (MRC) for FSC computation (if applicable).
     reference_mask : str, optional
@@ -254,6 +254,8 @@ def distributed_inference(
         If True, do not accumulate or write reconstructions.
     subset_idxs : list[int], optional
         Particle subset (applied inside SingleInferencer; for "allParticles" it’s interpreted per half).
+    n_first_particles: int, optional
+        The number of particles to process, if not all the particles want to be processed
     float32_matmul_precision : str
         Precision for `torch.set_float32_matmul_precision`.
     check_interval_secs : float
@@ -286,7 +288,7 @@ def distributed_inference(
     # FAST PATH: single process
     # -------------------------
     if n_jobs == 1:
-        print("Single-process mode: deferring to SingleInferencer (handles data/model halfsets internally).")
+        print("Single-process mode")
         inferencer = SingleInferencer(
             particles_star_fname=particles_star_fname,
             checkpoint_dir=checkpoint_dir,
@@ -299,13 +301,15 @@ def distributed_inference(
             use_cuda=use_cuda,
             n_cpus_if_no_cuda=n_cpus_if_no_cuda,
             compile_model=compile_model,
-            top_k=top_k,
+            top_k_poses_nnet=top_k_poses_nnet,
+            top_k_poses_localref=top_k_poses_localref,
             reference_map=reference_map,
             reference_mask=reference_mask,
             directional_zscore_thr=directional_zscore_thr,
             skip_localrefinement=skip_localrefinement,
             skip_reconstruction=skip_reconstruction,
             subset_idxs=subset_idxs,          # interpreted inside per half
+            n_first_particles=n_first_particles,
             show_debug_stats=False,
             float32_matmul_precision=float32_matmul_precision,
         )
@@ -363,13 +367,14 @@ def distributed_inference(
                     use_cuda=False,
                     n_cpus_if_no_cuda=1,
                     compile_model=False,
-                    top_k=top_k,
+                    top_k_poses_nnet=top_k_poses_nnet,
+                    top_k_poses_localref=top_k_poses_localref,
                     reference_map=reference_map,
                     reference_mask=reference_mask,
                     directional_zscore_thr=directional_zscore_thr,
                     skip_localrefinement=True,
                     skip_reconstruction=False,
-                    subset_idxs=[],
+                    subset_idxs=[], #We don't need particles. we just need to create the inferencer
                     show_debug_stats=False,
                     float32_matmul_precision=float32_matmul_precision,
                 )
@@ -395,7 +400,8 @@ def distributed_inference(
                         n_cuda = torch.cuda.device_count()
                         if n_cuda > 0:
                             worker_device = f"cuda:{worker_id % n_cuda}"
-
+                    if n_first_particles:
+                        part_idxs = part_idxs[:n_first_particles]
                     inferencer_init_kwargs = dict(
                         particles_star_fname=particles_star_fname,
                         checkpoint_dir=checkpoint_dir,
@@ -408,20 +414,21 @@ def distributed_inference(
                         use_cuda=use_cuda,
                         n_cpus_if_no_cuda=n_cpus_if_no_cuda if not use_cuda else n_cpus_if_no_cuda,
                         compile_model=compile_model,
-                        top_k=top_k,
+                        top_k_poses_nnet=top_k_poses_nnet,
+                        top_k_poses_localref=top_k_poses_localref,
                         reference_map=reference_map,
                         reference_mask=reference_mask,
                         directional_zscore_thr=directional_zscore_thr,
                         skip_localrefinement=skip_localrefinement,
                         skip_reconstruction=skip_reconstruction,
-                        subset_idxs=None,  # filled in worker with part_idxs
+                        subset_idxs=list(map(int, part_idxs)),
                         show_debug_stats=False,
                         float32_matmul_precision=float32_matmul_precision,
                     )
 
                     p = ctx.Process(
                         target=worker,
-                        args=(worker_id, output_q, pbar_fname, part_idxs,
+                        args=(worker_id, output_q, pbar_fname,
                               inferencer_init_kwargs, main_config,
                               shared_numerator, shared_weights, shared_ctfsq, worker_device)
                     )

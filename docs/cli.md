@@ -97,7 +97,7 @@ usage: projmatching_starfile [-h] --reference_vol REFERENCE_VOL
                              [--mask_radius_angs MASK_RADIUS_ANGS]
                              [--grid_distance_degs GRID_DISTANCE_DEGS]
                              [--grid_step_degs GRID_STEP_DEGS]
-                             [--return_top_k_poses RETURN_TOP_K_POSES]
+                             [--top_k_poses_nnet TOP_K_POSES_NNET]
                              [--filter_resolution_angst FILTER_RESOLUTION_ANGST]
                              [--n_jobs N_JOBS]
                              [--num_dataworkers NUM_DATAWORKERS]
@@ -125,8 +125,8 @@ options:
                         Angular search range (degrees). Default=8.0
   --grid_step_degs GRID_STEP_DEGS
                         Angular step size (degrees). Default=2.0
-  --return_top_k_poses RETURN_TOP_K_POSES
-                        Number of top poses to save per particle. Default=1
+  --top_k_poses_nnet TOP_K_POSES_NNET
+                        Number of top poses to predict by the neural network. Default=1
   --filter_resolution_angst FILTER_RESOLUTION_ANGST
                         Low-pass filter the reference before matching.
   --n_jobs N_JOBS       Number of parallel jobs. Default=1

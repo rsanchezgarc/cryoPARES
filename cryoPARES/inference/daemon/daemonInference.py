@@ -41,7 +41,7 @@ class DaemonInferencer(SingleInferencer):
                  use_cuda: bool = CONFIG_PARAM(),
                  n_cpus_if_no_cuda: int = CONFIG_PARAM(),
                  compile_model: bool = False,
-                 top_k: int = CONFIG_PARAM(),
+                 top_k_poses_nnet: int = CONFIG_PARAM(),
                  reference_map: Optional[str] = None,
                  directional_zscore_thr: Optional[float] = CONFIG_PARAM(),
                  skip_localrefinement: bool = CONFIG_PARAM(),
@@ -63,7 +63,7 @@ class DaemonInferencer(SingleInferencer):
         :param use_cuda:
         :param n_cpus_if_no_cuda:
         :param compile_model:
-        :param top_k:
+        :param top_k_poses_nnet:
         :param reference_map: If not provided, it will be tried to load from the checkpointç
         :param directional_zscore_thr:
         :param skip_localrefinement:
@@ -83,7 +83,7 @@ class DaemonInferencer(SingleInferencer):
                          use_cuda = use_cuda,
                          n_cpus_if_no_cuda = n_cpus_if_no_cuda,
                          compile_model = compile_model,
-                         top_k = top_k,
+                         top_k_poses_nnet = top_k_poses_nnet,
                          reference_map = reference_map,
                          directional_zscore_thr = directional_zscore_thr,
                          skip_localrefinement = skip_localrefinement,

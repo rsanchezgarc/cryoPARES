@@ -10,7 +10,7 @@ class Inference_config:
     n_cpus_if_no_cuda: int = 4
     random_seed: int = 12313
 
-    top_k: int = 1
+    top_k_poses_nnet: int = 1
 
     pl_plugin: Literal["LightningEnvironment", "none"] = "LightningEnvironment"  #Try none to submit to slurm
     num_computer_nodes: int = 1 #It has not been tried with values different from 1

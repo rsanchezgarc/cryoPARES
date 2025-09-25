@@ -266,7 +266,7 @@ class TrainerPartition:
                         kwargs["use_only_n_first_batches"] = self.overfit_batches
 
                     cmd = generate_command_for_argparseFromDoc(
-                        "cryoPARES.reconstruction.reconstruction",
+                        "cryoPARES.reconstruction.reconstruct",
                         fun=reconstruct_starfile,
                         use_module=True,
                         python_executable=sys.executable,

@@ -223,7 +223,7 @@ class SingleInferencer:
             else:
                 raise RuntimeError("Symmetry not found in model")
 
-        device = f'cuda:{rank}' if rank is not None else 'cuda:0'
+        device = f'cuda:{rank}' if rank is not None else 'cuda'
         if self.device == "cpu":
             device = "cpu"
 

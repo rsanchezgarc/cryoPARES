@@ -405,7 +405,7 @@ def _update_config_for_test():
     main_config.models.image2sphere.so3components.s2conv.f_out = 16
     main_config.models.image2sphere.so3components.so3outputgrid.hp_order = 3
 
-    main_config.datamanager.particlesdataset.desired_image_size_px = 224
+    main_config.datamanager.particlesdataset.image_size_px_for_nnet = 224
     main_config.models.image2sphere.so3components.i2sprojector.rand_fraction_points_to_project = 1
     main_config.models.image2sphere.label_smoothing = 0.1
 

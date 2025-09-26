@@ -129,7 +129,7 @@ def _extract_central_slices_rfft_3d_multichannel_precomputed(
     return projection_image_dfts
 
 _compiled_extract_central_slices_rfft_3d_multichannel = torch.compile(
-    _extract_central_slices_rfft_3d_multichannel_precomputed,
+    _extract_central_slices_rfft_3d_multichannel_precomputed, dynamic=True, #TODO: Move dynamic to config, as it might depend on inductor bug
     mode=main_config.projmatching.compile_projectVol_mode, fullgraph=True)
 
 

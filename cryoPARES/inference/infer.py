@@ -481,7 +481,7 @@ def distributed_inference(
                 out_mrc = os.path.join(results_dir, f"reconstruction_{d_half}_nnet.mrc")
                 reconstructor_parent.generate_volume(out_mrc)
                 print(f"Reconstruction saved for {d_half}: {out_mrc}")
-
+    #TODO: Compute FSC also when n_jobs > 0
     return aggregated_results
 
 

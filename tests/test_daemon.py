@@ -92,8 +92,8 @@ def dummy_checkpoint(tmp_path_factory):
                     "datamanager": {
                         "num_data_workers": 0,
                         "pin_memory": False,
-                        "particlesDataset": {                "desired_sampling_rate_angs": 4.0,
-                "desired_image_size_px": 64,
+                        "particlesDataset": {                "sampling_rate_angs_for_nnet": 4.0,
+                "image_size_px_for_nnet": 64,
             }
         },
         "models": {

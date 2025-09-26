@@ -37,7 +37,7 @@ class Augmenter(AugmenterBase):
                  prob_augment_each_image: float = CONFIG_PARAM()):
 
         augmentConfig = main_config.datamanager.augmenter
-        self.imageSize = main_config.datamanager.particlesdataset.desired_image_size_px
+        self.imageSize = main_config.datamanager.particlesdataset.image_size_px_for_nnet
         self._augmentationTypes = asdict(augmentConfig.operations)
 
         self.augmentationTypes = self._augmentationTypes.copy()  # We have self._augmentationTypes in case we want to reset probs

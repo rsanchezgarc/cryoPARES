@@ -26,12 +26,30 @@ python cryoem_simulator.py \
   --randomize_shifts_max_A 2.0 \
   --random_seed 123
 ```
+
+Programmatic example
+-------------------
+```python
+from cryoem_simulator import run_simulation
+
+run_simulation(
+    volume="/path/map.mrc",
+    in_star="/path/particles.star",
+    output_dir="/path/sim_out",
+    use_gpu=True,
+    gpus=[0, 1, 2],
+    num_workers=4,
+    apply_ctf=True,
+    snr=0.1
+)
+```
 """
 from __future__ import annotations
 
 import math
 import os
-from typing import Optional
+import warnings
+from typing import Optional, Union, List
 
 import numpy as np
 import torch
@@ -53,6 +71,7 @@ from torch_fourier_shift import fourier_shift_image_2d
 # ----------------------------- STAR I/O ----------------------------- #
 
 def load_star_with_optics(star_path: str):
+    """Load a RELION STAR file containing particle data and optional optics table."""
     data = starfile.read(star_path)
     if isinstance(data, dict):
         particles = data.get("particles")
@@ -74,6 +93,7 @@ def load_star_with_optics(star_path: str):
 
 
 def get_optics_pixel_size(row) -> float:
+    """Extract pixel size from a STAR file row containing optics information."""
     for k in ("rlnImagePixelSize", "rlnPixelSize", "rlnDetectorPixelSize"):
         if k in row and not (isinstance(row[k], float) and math.isnan(row[k])):
             return float(row[k])
@@ -82,8 +102,28 @@ def get_optics_pixel_size(row) -> float:
 # ----------------------------- Helpers ------------------------------ #
 
 def relion_eulers_to_rotmats_deg(eulers_deg: torch.Tensor) -> torch.Tensor:
-    """(B,3) Rot/Tilt/Psi degrees -> (B,3,3) rotation matrices using RELION convention."""
+    """Convert RELION Euler angles (in degrees) to rotation matrices."""
     return euler_angles_to_matrix(torch.deg2rad(eulers_deg), convention=RELION_EULER_CONVENTION)
+
+
+def _validate_gpu_setup(use_gpu: bool, gpus: Optional[List[int]]) -> List[str]:
+    """Validate GPU configuration and return list of device strings."""
+    if not use_gpu:
+        return ["cpu"]
+
+    if not torch.cuda.is_available():
+        raise RuntimeError("GPU requested but CUDA is not available")
+
+    if gpus is None or len(gpus) == 0:
+        return ["cuda:0"]
+
+    # Validate GPU indices
+    available_gpus = torch.cuda.device_count()
+    for gpu_idx in gpus:
+        if gpu_idx >= available_gpus or gpu_idx < 0:
+            raise ValueError(f"GPU index {gpu_idx} is invalid. Available GPUs: 0-{available_gpus-1}")
+
+    return [f"cuda:{gpu_idx}" for gpu_idx in gpus]
 
 
 def _apply_randomizations(
@@ -94,15 +134,8 @@ def _apply_randomizations(
     shifts_max_A: float,
     seed: Optional[int] = None,
 ):
-    """In-place randomization of a fraction of angles and/or shifts.
-
-    - Angles: add independent uniform noise in [-angles_max_deg, +angles_max_deg]
-      to each of (Rot,Tilt,Psi) on a random subset of size ~angles_frac * N.
-    - Shifts: add independent uniform noise in [-shifts_max_A, +shifts_max_A]
-      to rlnOriginXAngst, rlnOriginYAngst on a random subset of size ~shifts_frac * N.
-    """
+    """Apply randomizations to a fraction of particle angles and/or shifts in-place."""
     rng = np.random.default_rng(seed)
-
     N = len(parts_df)
 
     if angles_frac and angles_frac > 0:
@@ -128,10 +161,15 @@ def _apply_randomizations(
 
 # ------------------------------ Core -------------------------------- #
 
-class CryoEMFourierSimulator:
+class CryoEMSimulator:
+    """Cryo-EM particle stack simulator using Fourier central slice theorem."""
+
     def __init__(self, volume_mrc: str, device: str = "cpu", normalize_volume: bool = True):
+        """Initialize the simulator with a 3D volume."""
         self.volume_mrc = volume_mrc
         self.device = torch.device(device)
+
+        # Load and validate volume
         with mrcfile.open(volume_mrc, permissive=True) as mrc:
             vol_np = np.asarray(mrc.data.copy(), dtype=np.float32)
             if vol_np.ndim == 4:
@@ -139,6 +177,8 @@ class CryoEMFourierSimulator:
             assert vol_np.ndim == 3 and vol_np.shape[0] == vol_np.shape[1] == vol_np.shape[2], "Volume must be cubic"
             self.n = int(vol_np.shape[0])
             self.voxel_size_A = float(abs(mrc.voxel_size.x)) if mrc.voxel_size.x != 0 else None
+
+        # Prepare volume tensor
         vol = torch.as_tensor(vol_np, device=self.device, dtype=torch.float32)
         if normalize_volume:
             vol = (vol - vol.mean()) / (vol.std() + 1e-6)
@@ -152,19 +192,22 @@ class CryoEMFourierSimulator:
     def _process_shard(
         volume_path: str,
         device: str,
-        star_csv: "pandas.DataFrame",
+        star_csv,
         start: int,
         end: int,
-        optics_row: dict,
+        optics_row,
         px_A: float,
         out_path: str,
         batch_size: int,
         apply_ctf: bool,
         snr: Optional[float],
     ) -> list[str]:
-        sim = CryoEMFourierSimulator(volume_mrc=volume_path, device=device)
+        """Process a single shard of particles in a worker process."""
+        # Initialize simulator for this worker
+        sim = CryoEMSimulator(volume_mrc=volume_path, device=device)
         parts_df = star_csv.iloc[start:end]
 
+        # Extract CTF parameters
         voltage_kV = float(optics_row.get("rlnVoltage", 300.0))
         cs_mm = float(optics_row.get("rlnSphericalAberration", 2.7))
         amp_contrast = float(optics_row.get("rlnAmplitudeContrast", 0.07))
@@ -181,25 +224,32 @@ class CryoEMFourierSimulator:
             syA = float(row.get(RELION_SHIFTS_NAMES[1], 0.0))
             return (sxA / px_A, syA / px_A)
 
+        # Process particles in batches
         i_local = 0
         while i_local < N:
             j_local = min(i_local + batch_size, N)
             batch = parts_df.iloc[i_local:j_local]
 
+            # Extract Euler angles and convert to rotation matrices
             euls = torch.tensor([row_eulers(r) for _, r in batch.iterrows()], device=sim.device, dtype=torch.float32)
             R = relion_eulers_to_rotmats_deg(euls)
 
+            # Generate projections using Fourier slice theorem
             projs_rfft = extract_central_slices_rfft_3d(
                 sim.vol_rfft, image_shape=sim.vol_shape, rotation_matrices=R, fftfreq_max=None, zyx_matrices=False
             )
             projs_real = _fourier_proj_to_real_2d(projs_rfft, pad_length=None)
 
+            # Process each projection in the batch
             for b, ((_, row), img) in enumerate(zip(batch.iterrows(), projs_real)):
+                # Apply shifts
                 sx_px, sy_px = row_shifts_px(row)
                 img_shifted = (
                     fourier_shift_image_2d(image=img, shifts=torch.tensor([sx_px, sy_px], device=sim.device))
                     if (sx_px or sy_px) else img
                 )
+
+                # Apply CTF if requested
                 if apply_ctf:
                     dfU = float(row.get("rlnDefocusU", 15000.0))
                     dfV = float(row.get("rlnDefocusV", 15000.0))
@@ -223,6 +273,7 @@ class CryoEMFourierSimulator:
                 else:
                     out_img = img_shifted
 
+                # Add noise if requested
                 if snr is not None and snr > 0:
                     sig_var = float(torch.var(out_img).cpu())
                     noise_std = math.sqrt(sig_var / snr) if sig_var > 0 else 1.0
@@ -233,11 +284,13 @@ class CryoEMFourierSimulator:
 
             i_local = j_local
 
+        # Save stack to MRCS file
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         with mrcfile.new(out_path, overwrite=True) as m:
             m.set_data(stack)
             m.voxel_size = (px_A, px_A, px_A)
 
+        # Generate RELION-style image names
         base = os.path.basename(out_path)
         names = [f"{k+1}@{base}" for k in range(N)]
         return names
@@ -254,16 +307,21 @@ class CryoEMFourierSimulator:
         apply_ctf: bool = True,
         snr: Optional[float] = None,
         use_gpu: bool = False,
-        gpus: Optional[list[int]] = None,
+        gpus: Optional[List[int]] = None,
         randomize_angles_frac: float = 0.0,
         randomize_angles_max_deg: float = 0.0,
         randomize_shifts_frac: float = 0.0,
         randomize_shifts_max_A: float = 0.0,
         random_seed: Optional[int] = None,
     ) -> str:
+        """Simulate a complete particle stack from input parameters."""
         import multiprocessing as mp
 
+        # Load and validate input
         parts_df, optics_df = load_star_with_optics(star_in)
+
+        # Validate GPU setup
+        gpu_devices = _validate_gpu_setup(use_gpu, gpus)
 
         # Apply requested randomizations IN-PLACE before sharding
         _apply_randomizations(
@@ -275,24 +333,16 @@ class CryoEMFourierSimulator:
             seed=random_seed,
         )
 
+        # Extract optics parameters
         optics_row = (optics_df.iloc[0] if optics_df is not None else parts_df.iloc[0])
         px_A = get_optics_pixel_size(optics_row)
 
         N = len(parts_df)
         os.makedirs(output_dir, exist_ok=True)
 
-        # Build shard specs
+        # Build shard specifications for parallel processing
         shard_specs = []
         shard_idx = 0
-
-        gpu_devices: list[str] = []
-        if use_gpu:
-            if gpus is None or len(gpus) == 0:
-                gpu_devices = ["cuda:0"]
-            else:
-                gpu_devices = [f"cuda:{gi}" for gi in gpus]
-        else:
-            gpu_devices = ["cpu"]
 
         for start in range(0, N, images_per_file):
             end = min(start + images_per_file, N)
@@ -313,20 +363,31 @@ class CryoEMFourierSimulator:
             ))
             shard_idx += 1
 
+        # Process shards in parallel or sequentially
         if num_workers > 1 and len(shard_specs) > 1:
             try:
                 mp.set_start_method("spawn", force=False)
             except RuntimeError:
                 pass
-            with mp.Pool(processes=num_workers) as pool:
-                names_per_shard = pool.starmap(CryoEMFourierSimulator._process_shard, shard_specs)
-        else:
-            names_per_shard = [CryoEMFourierSimulator._process_shard(*spec) for spec in shard_specs]
 
+            # Adjust number of workers for multi-GPU setups
+            effective_workers = min(num_workers, len(shard_specs))
+            if len(gpu_devices) > 1 and effective_workers > len(gpu_devices):
+                warnings.warn(
+                    f"Using {effective_workers} workers with {len(gpu_devices)} GPUs. "
+                    f"Consider using {len(gpu_devices)} workers for optimal GPU utilization."
+                )
+
+            with mp.Pool(processes=effective_workers) as pool:
+                names_per_shard = pool.starmap(CryoEMSimulator._process_shard, shard_specs)
+        else:
+            names_per_shard = [CryoEMSimulator._process_shard(*spec) for spec in shard_specs]
+
+        # Write output STAR file
         out_star = os.path.join(output_dir, f"{basename}.star")
         particles_out = parts_df.copy()
         all_names = [name for names in names_per_shard for name in names]
-        assert len(all_names) == len(particles_out)
+        assert len(all_names) == len(particles_out), f"Mismatch: {len(all_names)} names vs {len(particles_out)} particles"
         particles_out["rlnImageName"] = all_names
 
         star_dict = {"particles": particles_out}
@@ -336,9 +397,71 @@ class CryoEMFourierSimulator:
 
         return out_star
 
+
+# -------------------------- Public API ---------------------------- #
+
+def run_simulation(
+    volume: str,
+    in_star: str,
+    output_dir: str,
+    basename: str = "stack",
+    images_per_file: int = 10000,
+    batch_size: int = 128,
+    num_workers: int = 1,
+    apply_ctf: bool = True,
+    snr: Optional[float] = None,
+    use_gpu: bool = False,
+    gpus: Optional[Union[List[int], str]] = None,
+    randomize_angles_frac: float = 0.0,
+    randomize_angles_max_deg: float = 0.0,
+    randomize_shifts_frac: float = 0.0,
+    randomize_shifts_max_A: float = 0.0,
+    random_seed: Optional[int] = None,
+) -> str:
+    """Run cryo-EM particle stack simulation from Python code."""
+    # Parse GPU specification if provided as string
+    gpu_list = None
+    if gpus is not None:
+        if isinstance(gpus, str):
+            try:
+                gpu_list = [int(x.strip()) for x in gpus.split(',') if x.strip()]
+            except ValueError:
+                raise ValueError(f"Invalid GPU specification: {gpus}. Use comma-separated integers.")
+        else:
+            gpu_list = list(gpus)
+
+    # Determine device for main simulator instance
+    device = "cpu"
+    if use_gpu:
+        if not torch.cuda.is_available():
+            raise RuntimeError("GPU requested but CUDA is not available")
+        device = "cuda:0" if not gpu_list else f"cuda:{gpu_list[0]}"
+
+    # Create simulator and run
+    sim = CryoEMSimulator(volume_mrc=volume, device=device)
+    return sim.simulate_to_dir(
+        star_in=in_star,
+        output_dir=output_dir,
+        basename=basename,
+        images_per_file=images_per_file,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        apply_ctf=apply_ctf,
+        snr=snr,
+        use_gpu=use_gpu,
+        gpus=gpu_list,
+        randomize_angles_frac=randomize_angles_frac,
+        randomize_angles_max_deg=randomize_angles_max_deg,
+        randomize_shifts_frac=randomize_shifts_frac,
+        randomize_shifts_max_A=randomize_shifts_max_A,
+        random_seed=random_seed,
+    )
+
+
 # -------------------------------- CLI ------------------------------- #
 
-if __name__ == "__main__":
+def main():
+    """Main entry point for command-line interface."""
     import argparse
 
     p = argparse.ArgumentParser(description="Simulate cryo-EM particle stack from volume+STAR (Fourier slices)")
@@ -365,17 +488,10 @@ if __name__ == "__main__":
 
     args = p.parse_args()
 
-    # Parse GPUs
-    gpu_list = None
-    if args.gpus:
-        try:
-            gpu_list = [int(x) for x in str(args.gpus).split(',') if x.strip() != '']
-        except ValueError:
-            raise SystemExit("--gpus must be a comma-separated list of integers, e.g., '0,1,2'")
-
-    sim = CryoEMFourierSimulator(volume_mrc=args.volume, device=("cuda:0" if args.use_gpu else "cpu"))
-    star_path = sim.simulate_to_dir(
-        star_in=getattr(args, "in_star"),
+    # Run simulation using the extracted function
+    star_path = run_simulation(
+        volume=args.volume,
+        in_star=getattr(args, "in_star"),
         output_dir=args.output_dir,
         basename=args.basename,
         images_per_file=args.images_per_file,
@@ -384,7 +500,7 @@ if __name__ == "__main__":
         apply_ctf=args.apply_ctf,
         snr=args.snr,
         use_gpu=args.use_gpu,
-        gpus=gpu_list,
+        gpus=args.gpus,
         randomize_angles_frac=args.randomize_angles_frac,
         randomize_angles_max_deg=args.randomize_angles_max_deg,
         randomize_shifts_frac=args.randomize_shifts_frac,
@@ -394,6 +510,5 @@ if __name__ == "__main__":
     print(f"Wrote STAR: {star_path}")
 
 
-"""
-python -m cryoPARES.simulation.simulateParticles --volume ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/donwsampled/output_volume.mrc  --in_star ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/donwsampled/down1000particles.star  --output_dir /tmp/simulate/  --snr 0.01
-"""
+if __name__ == "__main__":
+    main()

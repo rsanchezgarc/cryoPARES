@@ -15,8 +15,8 @@ class CtfCorrectionType(str, Enum):
 
 @dataclass
 class ParticlesDataset_config():
-    desired_sampling_rate_angs: float = 1.5
-    desired_image_size_px: int = 160
+    sampling_rate_angs_for_nnet: float = 1.5
+    image_size_px_for_nnet: int = 160
     store_data_in_memory: bool = True
     mask_radius_angs: Optional[float] = None #If None, use a circular mask of radius Box/2
     apply_mask_to_img: bool = True # If True, apply the mask to the the image, otherwise, use it only for computing normalization stats

@@ -36,8 +36,8 @@ class ParticlesDataset(Dataset, ABC):
     def __init__(self,
                  symmetry: str,
                  halfset: Optional[int],
-                 desired_sampling_rate_angs: float = CONFIG_PARAM(),
-                 desired_image_size_px: int = CONFIG_PARAM(),
+                 sampling_rate_angs_for_nnet: float = CONFIG_PARAM(),
+                 image_size_px_for_nnet: int = CONFIG_PARAM(),
                  store_data_in_memory: bool = CONFIG_PARAM(),
                  mask_radius_angs: Optional[float] = CONFIG_PARAM(),
                  apply_mask_to_img: bool = CONFIG_PARAM(),
@@ -52,8 +52,8 @@ class ParticlesDataset(Dataset, ABC):
 
         super().__init__()
 
-        self.desired_sampling_rate_angs = desired_sampling_rate_angs
-        self.desired_image_size_px = desired_image_size_px
+        self.sampling_rate_angs_for_nnet = sampling_rate_angs_for_nnet
+        self.image_size_px_for_nnet = image_size_px_for_nnet
         self.store_data_in_memory = store_data_in_memory
         self.mask_radius_angs = mask_radius_angs
         self.apply_mask_to_img = apply_mask_to_img
@@ -100,10 +100,10 @@ class ParticlesDataset(Dataset, ABC):
     @property
     def image_size_px(self) -> int:
         """The image size in pixels"""
-        if self.desired_image_size_px is None:
+        if self.image_size_px_for_nnet is None:
             return self.particles.particle_shape[-1]
         else:
-            return self.desired_image_size_px
+            return self.image_size_px_for_nnet
 
     @abstractmethod
     def load_ParticlesStarSet(self):
@@ -151,10 +151,10 @@ class ParticlesDataset(Dataset, ABC):
     @property
     def sampling_rate(self) -> float:
         """The particle image sampling rate in A/pixels"""
-        if self.desired_image_size_px is None:
+        if self.image_size_px_for_nnet is None:
             return self.particles.sampling_rate
         else:
-            return self.desired_sampling_rate_angs
+            return self.sampling_rate_angs_for_nnet
 
     def original_sampling_rate(self) -> float:
         return self.particles.sampling_rate
@@ -273,7 +273,7 @@ class ParticlesDataset(Dataset, ABC):
         ori_pixelSize = float(self.particles.optics_md["rlnImagePixelSize"].item())
         img, pad_info, crop_info = resize_and_padCrop_tensorBatch(img.unsqueeze(0),
                                                                   ori_pixelSize,
-                                                                  self.desired_sampling_rate_angs,
+                                                                  self.sampling_rate_angs_for_nnet,
                                                                   self.image_size_px,
                                                                   padding_mode="constant")
         img = img.squeeze(0)

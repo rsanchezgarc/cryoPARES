@@ -111,8 +111,8 @@ python -m cryopares_train [ARGUMENTS] --config [CONFIG_OVERRIDES]
 You can override these parameters from the command line using the `--config KEY=VALUE` syntax. The `--config` needs to be
 the last CLI argument provided. Several `KEY=VALUE` can be provided one after another
 
-*   **`datamanager.particlesDataset.desired_sampling_rate_angs`**: The desired sampling rate in Angstroms per pixel. Particle images are first rescaled (upsampled or downsampled) to match this value.
-*   **`datamanager.particlesDataset.desired_image_size_px`**: The final size of the particle images in pixels. After rescaling to the desired sampling rate, images are cropped or padded to this size. This should typically be set to the particle's box size after rescaling.
+*   **`datamanager.particlesDataset.sampling_rate_angs_for_nnet`**: The desired sampling rate in Angstroms per pixel. Particle images are first rescaled (upsampled or downsampled) to match this value.
+*   **`datamanager.particlesDataset.image_size_px_for_nnet`**: The final size of the particle images in pixels. After rescaling to the desired sampling rate, images are cropped or padded to this size. This should typically be set to the particle's box size after rescaling.
 *   **`datamanager.particlesDataset.mask_radius_angs`**: The radius of the circular mask to be applied to the particle images, in Angstroms. If not provided, a mask with a radius of half the box size will be used.
 *   **`train.learning_rate`**: The initial learning rate for the optimizer. (Default: `1e-3`)
 *   **`train.weight_decay`**: The weight decay for the optimizer. (Default: `1e-5`)

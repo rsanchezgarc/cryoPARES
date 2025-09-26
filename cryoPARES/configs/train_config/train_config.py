@@ -36,3 +36,6 @@ class Train_config:
     num_computer_nodes: int  = 1 #It has not been tried with values different from 1
 
     expandable_segments_GPU_mem: bool = False #Set it to true if there are fragmentation problems
+
+    snr_for_simulation: float = 0.1
+    n_epochs_simulation: int = 10

@@ -21,10 +21,13 @@ class Trainer:
                  particles_dir: Optional[List[str]] = None, n_epochs: int = CONFIG_PARAM(),
                  batch_size: int = CONFIG_PARAM(), #CONFIG_PARAM status with update_config_with_args gets updated in config directly
                  num_data_workers: int = CONFIG_PARAM(config=main_config.datamanager), #CONFIG_PARAM status with update_config_with_args gets updated in config directly
-                 mask_radius_angs: Optional[float] = CONFIG_PARAM(config=main_config.datamanager.particlesdataset),
+                 image_size_px_for_nnet: int = CONFIG_PARAM(config=main_config.datamanager.particlesdataset), #CONFIG_PARAM status with update_config_with_args gets updated in config directly
+                 sampling_rate_angs_for_nnet: int = CONFIG_PARAM(config=main_config.datamanager.particlesdataset), # CONFIG_PARAM status with update_config_with_args gets updated in config directly
+                 mask_radius_angs: Optional[float] = CONFIG_PARAM(config=main_config.datamanager.particlesdataset), # CONFIG_PARAM status with update_config_with_args gets updated in config directly
                  split_halfs: bool = True,
                  continue_checkpoint_dir: Optional[str] = None, finetune_checkpoint_dir: Optional[str] = None,
-                 compile_model: bool = False, val_check_interval: Optional[float] = None,
+                 compile_model: bool = False,
+                 val_check_interval: Optional[float] = None,
                  overfit_batches: Optional[int] = None,
                  map_fname_for_simulated_pretraining: Optional[List[str]] = None,
                  float32_matmul_precision: str = constants.float32_matmul_precision,
@@ -40,6 +43,8 @@ class Trainer:
             n_epochs: The number of epochs
             batch_size: The batch size
             num_data_workers: Number of parallel data loading workers. One CPU each. Set it to 0 to read and process the data in the same thread
+            image_size_px_for_nnet: The desired image size, in pixels, for the particles to be fed in the neural network. Local refinement uses the original image-size particles. Particles are first downsampled, and the padded/cropped to the desired image size.
+            sampling_rate_angs_for_nnet: The desired sampling rate, in pixels, for the particles to be fed in the neural network. Local refinement uses the original sampling-rate particles. Particles are first downsampled, and the padded/cropped to the desired image size.
             mask_radius_angs: The radius of the particle in Angstroms. Used to create a circular mask arround it.
             split_halfs: If True, it trains a model for each half of the data
             continue_checkpoint_dir: The path of a pre-trained model to continue training.
@@ -54,6 +59,8 @@ class Trainer:
         self.particles_star_fname = [osp.expanduser(fname) for fname in particles_star_fname]
         self.particles_dir = particles_dir
         self.n_epochs = n_epochs
+        self.batch_size = batch_size
+        self.num_data_workers = num_data_workers
         self.split_halfs = split_halfs
         self.continue_checkpoint_dir = continue_checkpoint_dir
         self.finetune_checkpoint_dir = finetune_checkpoint_dir
@@ -196,7 +203,44 @@ class Trainer:
                 if self.map_fname_for_simulated_pretraining:
                     # TODO: Implement simulate_particles
                     # simulatedParticles = simulate_particles(self.map_fname_for_simulated_pretraining, tmpdir)
-                    # execute_trainOnePartition() #TODO: Fill in this call. At the moment we do simulation externally
+                    from cryoPARES.simulation.simulateParticles import run_simulation
+                    from argParseFromDoc import generate_command_for_argparseFromDoc
+                    simulation_dir = os.path.join(tmpdir, "simulation")
+                    os.makedirs(simulation_dir, exist_ok=True)
+                    simulation_kwargs = dict(
+                        volume=self.map_fname_for_simulated_pretraining,
+                        in_star=self.particles_star_fname,
+                        output_dir=simulation_dir,
+                        basename="projections",
+                        images_per_file=10000,
+                        batch_size=self.batch_size,
+                        num_workers=self.num_data_workers,
+                        apply_ctf=True,
+                        snr=main_config.train.snr_for_simulation,
+                        use_gpu=main_config.train.use_cuda,
+                        gpus=list(range(torch.cuda.device_count())),
+                    )
+                    cmd = generate_command_for_argparseFromDoc(
+                        "cryoPARES.simulation.simulateParticles",
+                        fun=run_simulation,
+                        use_module=True,
+                        python_executable=sys.executable,
+                        **simulation_kwargs
+                    )
+                    simulation_train_dir = os.path.join(tmpdir, "simulation_train")
+                    execute_trainOnePartition(
+                        symmetry=self.symmetry,
+                        particles_star_fname=os.path.join(simulation_dir, "projections.star"),
+                        train_save_dir=simulation_train_dir,
+                        particles_dir=simulation_dir,
+                        n_epochs=main_config.train.n_epochs_simulation,
+                        partition=partition,
+                        compile_model=self.compile_model,
+                        val_check_interval=self.val_check_interval,
+                        overfit_batches=self.overfit_batches,
+                        config_args=config_args
+                    )
+                    #TODO: We need to automatically enable finetune model from the simulation training
                     raise NotImplementedError()
 
 

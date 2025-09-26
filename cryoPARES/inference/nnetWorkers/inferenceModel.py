@@ -6,168 +6,179 @@ from torch import nn, ScriptModule
 from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.projmatching.projMatcher import ProjectionMatcher
-from cryoPARES.reconstruction.reconstructor import Reconstructor
+from cryoPARES.reconstruction.reconstruct import Reconstructor
 from cryoPARES.inference.nnetWorkers.tensorDataBuffer import StreamingBuffer
 from cryoPARES.models.model import RotationPredictionMixin
 from cryoPARES.constants import (BATCH_IDS_NAME, BATCH_PARTICLES_NAME, BATCH_ORI_IMAGE_NAME,
                                  BATCH_ORI_CTF_NAME, BATCH_MD_NAME)
 
 class InferenceModel(RotationPredictionMixin, nn.Module):
-    @inject_defaults_from_config(main_config.inference, update_config_with_args=False)
-    def __init__(self,
-                 so3model: Union[nn.Module, ScriptModule],
-                 scoreNormalizer: Union[nn.Module, ScriptModule, None],
-                 normalizedScore_thr: float | None,
-                 localRefiner: ProjectionMatcher | None,
-                 reconstructor: Reconstructor | None = None,
-                 before_refiner_buffer_size: int = CONFIG_PARAM(),
-                 top_k_poses_nnet: int = CONFIG_PARAM()
-                 ):
-        super().__init__()
-        self.__init_mixin__()
-        self.so3model = so3model
-        self.symmetry = self.so3model.symmetry
-        self.scoreNormalizer = scoreNormalizer
-        self.normalizedScore_thr = normalizedScore_thr
-        self.localRefiner = localRefiner
-        self.reconstructor = reconstructor
-        self.buffer_size = before_refiner_buffer_size
-        self.top_k_poses_nnet = top_k_poses_nnet
+   @inject_defaults_from_config(main_config.inference, update_config_with_args=False)
+   def __init__(self,
+                so3model: Union[nn.Module, ScriptModule],
+                scoreNormalizer: Union[nn.Module, ScriptModule, None],
+                normalizedScore_thr: float | None,
+                localRefiner: ProjectionMatcher | None,
+                reconstructor: Reconstructor | None = None,
+                before_refiner_buffer_size: int = CONFIG_PARAM(),
+                top_k_poses_nnet: int = CONFIG_PARAM()
+                ):
+       super().__init__()
+       self.__init_mixin__()
+       self.so3model = so3model
+       self.symmetry = self.so3model.symmetry
+       self.scoreNormalizer = scoreNormalizer
+       self.normalizedScore_thr = normalizedScore_thr
+       self.localRefiner = localRefiner
+       self.reconstructor = reconstructor
+       self.buffer_size = before_refiner_buffer_size
+       self.top_k_poses_nnet = top_k_poses_nnet
 
-        if reconstructor is not None:
-            self.weight_with_confidence = reconstructor.weight_with_confidence
-        else:
-            self.weight_with_confidence = False
 
-        if self.normalizedScore_thr is not None:
-            self.buffer = StreamingBuffer(
-                buffer_size=before_refiner_buffer_size,
-                processing_fn=self._run_stage2,
-            )
-        else:
-            self.buffer = None
+       if reconstructor is not None:
+           self.weight_with_confidence = reconstructor.weight_with_confidence
+       else:
+           self.weight_with_confidence = False
 
-    def _firstforward(self, imgs, top_k_poses_nnet):
-        _top_k = 10 if top_k_poses_nnet < 10 else top_k_poses_nnet
-        _, _, _, pred_rotmats, maxprobs = self.so3model(imgs, _top_k)
-        if self.scoreNormalizer:
-            norm_nn_score = self.scoreNormalizer(pred_rotmats[:, 0, ...], maxprobs[:,:10].sum(1))
-        else:
-            norm_nn_score = torch.nan * torch.ones_like(maxprobs[:,0])
-        pred_rotmats = pred_rotmats[:,:top_k_poses_nnet]
-        maxprobs = maxprobs[:,:top_k_poses_nnet]
-        return pred_rotmats, maxprobs, norm_nn_score
 
-    def forward(self, ids, imgs, fullSizeImg, fullSizeCtfs, top_k_poses_nnet):
+       if self.normalizedScore_thr is not None:
+           self.buffer = StreamingBuffer(
+               buffer_size=before_refiner_buffer_size,
+               processing_fn=self._run_stage2,
+           )
+       else:
+           self.buffer = None
 
-        pred_rotmats, maxprobs, norm_nn_score = self._firstforward(imgs, top_k_poses_nnet)
-        if self.normalizedScore_thr is not None:
-            passing_mask = (norm_nn_score > self.normalizedScore_thr).squeeze()
-            if not passing_mask.any():
-                return None
-            valid_indices = torch.where(passing_mask)[0].to("cpu", non_blocking=False)
-            #fimg, ctf, rotmats
-            batch_to_add = {
-                'imgs': fullSizeImg[passing_mask],
-                'ctfs': fullSizeCtfs[passing_mask],
-                'rotmats': pred_rotmats[passing_mask],
-                'maxprobs': maxprobs[passing_mask],
-                'norm_nn_score': norm_nn_score[passing_mask],
-                'ids': [ids[i] for i in valid_indices.tolist()],
-            }
-        else:
-            batch_to_add = {
-                'ids': ids,
-                'imgs': fullSizeImg,
-                'ctfs': fullSizeCtfs,
-                'rotmats': pred_rotmats,
-                'maxprobs': maxprobs,
-                'norm_nn_score': norm_nn_score,
-            }
-        if self.localRefiner is not None:
-            if self.buffer is not None:
-                out = self.buffer.add_batch(batch_to_add)
-            else:
-                out = self._run_stage2(**batch_to_add)
-        else:
-            out = (batch_to_add['ids'], batch_to_add['rotmats'], None, batch_to_add['maxprobs'],
-                    batch_to_add['norm_nn_score'])
-            if self.reconstructor is not None:
-                raise NotImplementedError("Error, at the moment, local refinement is needed before "
-                                          "reconstruction")
-        return out
 
-    def forward_without_buffer(self, ids, imgs, fullSizeImg, fullSizeCtfs, top_k_poses_nnet):
-        """
-        A more efficient forward pass that bypasses the streaming buffer.
-        This is useful when no z-score filtering is applied and we want to process
-        batches directly without buffering.
-        """
-        pred_rotmats, maxprobs, norm_nn_score = self._firstforward(imgs, top_k_poses_nnet)
-        if self.localRefiner is not None:
-            kwargs = {
-                'imgs': fullSizeImg,
-                'ctfs': fullSizeCtfs,
-                'rotmats': pred_rotmats,
-                'maxprobs': maxprobs,
-                'norm_nn_score': norm_nn_score,
-                'ids': ids}
-            out = self._run_stage2(**kwargs)
-        else:
-            out = (ids, pred_rotmats, None, maxprobs, norm_nn_score)
-            if self.reconstructor is not None:
-                raise NotImplementedError("Error, at the moment, local refinement is needed before"
-                                          "reconstruction")
-        return out
+   def _firstforward(self, imgs, top_k_poses_nnet):
+       _top_k = 10 if top_k_poses_nnet < 10 else top_k_poses_nnet
+       _, _, _, pred_rotmats, maxprobs = self.so3model(imgs, _top_k)
+       if self.scoreNormalizer:
+           norm_nn_score = self.scoreNormalizer(pred_rotmats[:, 0, ...], maxprobs[:,:10].sum(1))
+       else:
+           norm_nn_score = torch.nan * torch.ones_like(maxprobs[:,0])
+       pred_rotmats = pred_rotmats[:,:top_k_poses_nnet]
+       maxprobs = maxprobs[:,:top_k_poses_nnet]
+       return pred_rotmats, maxprobs, norm_nn_score
 
-    def predict_step(self, batch, batch_idx, dataloader_idx=0):
-        ids = batch[BATCH_IDS_NAME]
-        imgs = batch[BATCH_PARTICLES_NAME]
-        fullSizeImg = batch[BATCH_ORI_IMAGE_NAME]
-        fullSizeCtfs = batch[BATCH_ORI_CTF_NAME]
-        # metadata = batch[BATCH_MD_NAME]
-        if self.normalizedScore_thr is not None:
-            results = self.forward(ids, imgs, fullSizeImg, fullSizeCtfs, top_k_poses_nnet=self.top_k_poses_nnet)
-        else:
 
-            results = self.forward_without_buffer(ids, imgs, fullSizeImg, fullSizeCtfs,
-                                                  top_k_poses_nnet=self.top_k_poses_nnet)
-        ## return ids, pred_rotmats, pred_shifts, maxprobs, norm_nn_score
-        # from scipy.spatial.transform import Rotation
-        # from cryoPARES.constants import  BATCH_MD_NAME, RELION_IMAGE_FNAME,RELION_ANGLES_NAMES
-        # import pandas as pd
-        # print(pd.DataFrame(batch[BATCH_MD_NAME])[[RELION_IMAGE_FNAME] + RELION_ANGLES_NAMES])
-        # print(Rotation.from_matrix(results[1][:,0,...].detach().cpu()).as_euler("ZYZ", degrees=True).round(0))
-        # breakpoint()
-        return results
+   def forward(self, ids, imgs, fullSizeImg, fullSizeCtfs, top_k_poses_nnet):
 
-    def _run_stage2(self, **kwargs): #TODO: This could be speeded-up if localRefiner and reconstructor
-                                        #TODO: are fed with fourier transformed images
-        #tensors.keys() -> imgs, ctfs, rotmats, maxprobs, norm_nn_score
-        (maxCorrs, predRotMats, predShiftsAngsXY,
-         comparedWeight) = self.localRefiner.forward(kwargs['imgs'], kwargs['ctfs'], kwargs['rotmats'])
-        #TODO: score does not get correclty computed when topk_nn and topk_local are not the same.
-        n_final_poses = comparedWeight.shape[-1]
-        score = torch.where(torch.isnan(comparedWeight),
-                            0.5 * kwargs['maxprobs'][..., :n_final_poses],
-                            kwargs['maxprobs'][..., :n_final_poses] * comparedWeight)
-        if self.reconstructor is not None:
-            if self.weight_with_confidence:
-                confidence = score
-            else:
-                confidence = None
-            self.reconstructor._backproject_batch(kwargs['imgs'], kwargs['ctfs'],
-                           rotMats=predRotMats, hwShiftAngs=predShiftsAngsXY.flip(-1),
-                                                  confidence=confidence, zyx_matrices=False)
 
-        return kwargs['ids'], predRotMats, predShiftsAngsXY, score, kwargs['norm_nn_score']
+       pred_rotmats, maxprobs, norm_nn_score = self._firstforward(imgs, top_k_poses_nnet)
+       if self.normalizedScore_thr is not None:
+           passing_mask = (norm_nn_score > self.normalizedScore_thr).squeeze()
+           if not passing_mask.any():
+               return None
+           valid_indices = torch.where(passing_mask)[0].to("cpu", non_blocking=False)
+           #fimg, ctf, rotmats
+           batch_to_add = {
+               'imgs': fullSizeImg[passing_mask],
+               'ctfs': fullSizeCtfs[passing_mask],
+               'rotmats': pred_rotmats[passing_mask],
+               'maxprobs': maxprobs[passing_mask],
+               'norm_nn_score': norm_nn_score[passing_mask],
+               'ids': [ids[i] for i in valid_indices.tolist()],
+           }
+       else:
+           batch_to_add = {
+               'ids': ids,
+               'imgs': fullSizeImg,
+               'ctfs': fullSizeCtfs,
+               'rotmats': pred_rotmats,
+               'maxprobs': maxprobs,
+               'norm_nn_score': norm_nn_score,
+           }
+       if self.localRefiner is not None:
+           if self.buffer is not None:
+               out = self.buffer.add_batch(batch_to_add)
+           else:
+               out = self._run_stage2(**batch_to_add)
+       else:
+           out = (batch_to_add['ids'], batch_to_add['rotmats'], None, batch_to_add['maxprobs'],
+                   batch_to_add['norm_nn_score'])
+           if self.reconstructor is not None:
+               raise NotImplementedError("Error, at the moment, local refinement is needed before "
+                                         "reconstruction")
+       return out
 
-    def flush(self):
-        if self.buffer:
-            results = self.buffer.flush()
-            return results
-        else:
-            return None
+
+   def forward_without_buffer(self, ids, imgs, fullSizeImg, fullSizeCtfs, top_k_poses_nnet):
+       """
+       A more efficient forward pass that bypasses the streaming buffer.
+       This is useful when no z-score filtering is applied and we want to process
+       batches directly without buffering.
+       """
+       pred_rotmats, maxprobs, norm_nn_score = self._firstforward(imgs, top_k_poses_nnet)
+       if self.localRefiner is not None:
+           kwargs = {
+               'imgs': fullSizeImg,
+               'ctfs': fullSizeCtfs,
+               'rotmats': pred_rotmats,
+               'maxprobs': maxprobs,
+               'norm_nn_score': norm_nn_score,
+               'ids': ids}
+           out = self._run_stage2(**kwargs)
+       else:
+           out = (ids, pred_rotmats, None, maxprobs, norm_nn_score)
+           if self.reconstructor is not None:
+               raise NotImplementedError("Error, at the moment, local refinement is needed before"
+                                         "reconstruction")
+       return out
+
+
+   def predict_step(self, batch, batch_idx, dataloader_idx=0):
+       ids = batch[BATCH_IDS_NAME]
+       imgs = batch[BATCH_PARTICLES_NAME]
+       fullSizeImg = batch[BATCH_ORI_IMAGE_NAME]
+       fullSizeCtfs = batch[BATCH_ORI_CTF_NAME]
+       # metadata = batch[BATCH_MD_NAME]
+       if self.normalizedScore_thr is not None:
+           results = self.forward(ids, imgs, fullSizeImg, fullSizeCtfs, top_k_poses_nnet=self.top_k_poses_nnet)
+       else:
+
+
+           results = self.forward_without_buffer(ids, imgs, fullSizeImg, fullSizeCtfs,
+                                                 top_k_poses_nnet=self.top_k_poses_nnet)
+       ## return ids, pred_rotmats, pred_shifts, maxprobs, norm_nn_score
+       # from scipy.spatial.transform import Rotation
+       # from cryoPARES.constants import  BATCH_MD_NAME, RELION_IMAGE_FNAME,RELION_ANGLES_NAMES
+       # import pandas as pd
+       # print(pd.DataFrame(batch[BATCH_MD_NAME])[[RELION_IMAGE_FNAME] + RELION_ANGLES_NAMES])
+       # print(Rotation.from_matrix(results[1][:,0,...].detach().cpu()).as_euler("ZYZ", degrees=True).round(0))
+       # breakpoint()
+       return results
+
+
+   def _run_stage2(self, **kwargs): #TODO: This could be speeded-up if localRefiner and reconstructor
+                                       #TODO: are fed with fourier transformed images
+       #tensors.keys() -> imgs, ctfs, rotmats, maxprobs, norm_nn_score
+       (maxCorrs, predRotMats, predShiftsAngsXY,
+        comparedWeight) = self.localRefiner.forward(kwargs['imgs'], kwargs['ctfs'], kwargs['rotmats'])
+
+       n_final_poses = comparedWeight.shape[-1]
+       score = torch.where(torch.isnan(comparedWeight),
+                           0.5 * kwargs['maxprobs'][..., :n_final_poses],
+                           kwargs['maxprobs'][..., :n_final_poses] * comparedWeight)
+       if self.reconstructor is not None:
+           if self.weight_with_confidence:
+               confidence = score
+           else:
+               confidence = None
+           self.reconstructor._backproject_batch(kwargs['imgs'], kwargs['ctfs'],
+                          rotMats=predRotMats, hwShiftAngs=predShiftsAngsXY.flip(-1),
+                                                 confidence=confidence, zyx_matrices=False)
+
+
+       return kwargs['ids'], predRotMats, predShiftsAngsXY, score, kwargs['norm_nn_score']
+
+
+   def flush(self):
+       if self.buffer:
+           results = self.buffer.flush()
+           return results
+       else:
+           return None
 
 def _update_config_for_test():
     main_config.models.image2sphere.lmax = 6
@@ -178,7 +189,7 @@ def _update_config_for_test():
     main_config.models.image2sphere.so3components.s2conv.f_out = 16
     main_config.models.image2sphere.so3components.so3outputgrid.hp_order = 3
 
-    main_config.datamanager.particlesdataset.desired_image_size_px = 336
+    main_config.datamanager.particlesdataset.image_size_px_for_nnet = 336
     main_config.models.image2sphere.so3components.i2sprojector.rand_fraction_points_to_project = 1
     main_config.models.image2sphere.label_smoothing = 0.1
 

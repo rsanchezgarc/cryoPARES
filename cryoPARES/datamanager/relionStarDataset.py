@@ -86,9 +86,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
     kwargs = {}
     if args.resize_box:
-        kwargs["desired_image_size_px"] = args.resize_box
+        kwargs["image_size_px_for_nnet"] = args.resize_box
     if args.resize_box:
-        kwargs["desired_sampling_rate_angs"] = args.sampling_rate
+        kwargs["sampling_rate_angs_for_nnet"] = args.sampling_rate
     if args.mask_radius_angs:
         kwargs["mask_radius_angs"] = args.mask_radius_angs
     if args.ctf_correction:

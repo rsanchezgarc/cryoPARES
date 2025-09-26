@@ -77,7 +77,7 @@ def queue_manager_server(ip, port, authkey, queue_maxsize):
 
     try:
         print(f"Manager server started on {ip}:{port}")
-        print(f"Authkey: {authkey}")
+        print(f"Authkey: {authkey.decode()}")
         print(f"Queue maxsize: {queue_maxsize}")
         print("\nWaiting for client connections...")
         print("Press Ctrl+C to stop the server\n")

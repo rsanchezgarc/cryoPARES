@@ -13,7 +13,7 @@ from multiprocessing import Process
 from cryoPARES.inference.daemon.queueManager import main as queue_main
 from cryoPARES.inference.daemon.spoolingFiller import main as spooler_main
 from cryoPARES.inference.daemon.daemonInference import DaemonInferencer
-from cryoPARES.inference.daemon.materializeVolume import materialize_volume
+from cryoPARES.inference.daemon.materializePartialResults import materialize_partial_results
 
 def run_queue_manager():
     queue_main(ip="localhost", port=50001, authkey="test_key")
@@ -208,7 +208,7 @@ def test_daemon_mode(cryo_em_data, dummy_checkpoint, reference_map, tmp_path):
     assert len(partial_results) > 0, "No partial reconstruction files were created"
     # 6. Materialize the final volume
     output_mrc = results_dir / "final_map.mrc"
-    materialize_volume(input_files=[str(p) for p in partial_results], output_mrc=str(output_mrc))
+    materialize_partial_results(input_files=[str(p) for p in partial_results], output_mrc=str(output_mrc))
 
     assert output_mrc.exists(), "Final MRC map was not created"
     assert output_mrc.stat().st_size > 0, "Final MRC map is empty"

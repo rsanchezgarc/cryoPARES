@@ -36,53 +36,67 @@ class DaemonInferencer(SingleInferencer):
                  n_cpus_if_no_cuda: int = CONFIG_PARAM(),
                  compile_model: bool = False,
                  top_k_poses_nnet: int = CONFIG_PARAM(),
+                 top_k_poses_localref: int = CONFIG_PARAM(config=main_config.projmatching),
                  reference_map: Optional[str] = None,
+                 reference_mask: Optional[str] = None,
                  directional_zscore_thr: Optional[float] = CONFIG_PARAM(),
                  skip_localrefinement: bool = CONFIG_PARAM(),
                  skip_reconstruction: bool = CONFIG_PARAM(),
+                 show_debug_stats: bool = False,
+                 float32_matmul_precision: str = constants.float32_matmul_precision,
                  secs_between_partial_results_written: int = 5,
                  resubmit_poison_pill: bool = True
                  ):
         """
+        Initializes the DaemonInferencer for running inference on a set of particles from a queue.
 
-        :param checkpoint_dir:
-        :param results_dir:
-        :param net_address:
-        :param net_port:
-        :param net_authkey:
-        :param model_halfset:
-        :param particles_dir:
-        :param batch_size:
-        :param num_data_workers:
-        :param use_cuda:
-        :param n_cpus_if_no_cuda:
-        :param compile_model:
-        :param top_k_poses_nnet:
-        :param reference_map: If not provided, it will be tried to load from the checkpoint
-        :param directional_zscore_thr:
-        :param skip_localrefinement:
-        :param skip_reconstruction:
+        :param checkpoint_dir: Directory where the trained model checkpoints are stored.
+        :param results_dir: Directory where the inference results will be saved.
+        :param net_address: Network address of the queue manager.
+        :param net_port: Network port of the queue manager.
+        :param net_authkey: Network authentication key for the queue manager.
+        :param model_halfset: Specifies which half-set of the model to use ("half1", "half2").
+        :param particles_dir: Directory where the particle images are located. If None, paths in the STAR file are assumed to be absolute.
+        :param batch_size: The number of particles to process in each batch.
+        :param num_data_workers: The number of worker processes to use for data loading.
+        :param use_cuda: Whether to use a CUDA-enabled GPU for inference.
+        :param n_cpus_if_no_cuda: The number of CPU cores to use if CUDA is not available.
+        :param compile_model: Whether to compile the model using `torch.compile` for potential speed-up.
+        :param top_k_poses_nnet: The number of top predictions to predict with the nn for each particle.
+        :param top_k_poses_localref: The number of top predictions to return after local refinement.
+        :param reference_map: Path to the reference map for local refinement. If not provided, it will be loaded from the checkpoint.
+        :param reference_mask: Path to the mask of the reference map. Used only for FSC calculation.
+        :param directional_zscore_thr: The threshold for the directional Z-score to filter particles.
+        :param skip_localrefinement: Whether to skip local refinement of the particle poses.
+        :param skip_reconstruction: Whether to skip 3D reconstruction from the inferred poses.
+        :param show_debug_stats: Whether to print debug statistics, such as rotation errors if ground truth in the starfile.
+        :param float32_matmul_precision: The precision used in multiplications. Speed/accuracy tradeoff
         :param secs_between_partial_results_written: Partial results are saved from RAM to disk every few seconds
-        :param: resubmit_poison_pill: If True, posion pills are re-submitted, to ensure that all workers will die
+        :param resubmit_poison_pill: If True, posion pills are re-submitted, to ensure that all workers will die
         """
 
         super().__init__(particles_star_fname=None,
-                         checkpoint_dir =checkpoint_dir,
-                         results_dir = results_dir,
-                         data_halfset = "allParticles",
-                         model_halfset = model_halfset,
-                         particles_dir = particles_dir,
-                         batch_size = batch_size,
-                         num_data_workers = num_data_workers,
-                         use_cuda = use_cuda,
-                         n_cpus_if_no_cuda = n_cpus_if_no_cuda,
-                         compile_model = compile_model,
-                         top_k_poses_nnet = top_k_poses_nnet,
-                         reference_map = reference_map,
-                         directional_zscore_thr = directional_zscore_thr,
-                         skip_localrefinement = skip_localrefinement,
-                         skip_reconstruction = skip_reconstruction,
-                         subset_idxs=None)
+                         checkpoint_dir=checkpoint_dir,
+                         results_dir=results_dir,
+                         data_halfset="allParticles",
+                         model_halfset=model_halfset,
+                         particles_dir=particles_dir,
+                         batch_size=batch_size,
+                         num_data_workers=num_data_workers,
+                         use_cuda=use_cuda,
+                         n_cpus_if_no_cuda=n_cpus_if_no_cuda,
+                         compile_model=compile_model,
+                         top_k_poses_nnet=top_k_poses_nnet,
+                         top_k_poses_localref=top_k_poses_localref,
+                         reference_map=reference_map,
+                         reference_mask=reference_mask,
+                         directional_zscore_thr=directional_zscore_thr,
+                         skip_localrefinement=skip_localrefinement,
+                         skip_reconstruction=skip_reconstruction,
+                         subset_idxs=None,
+                         n_first_particles=None,
+                         show_debug_stats=show_debug_stats,
+                         float32_matmul_precision=float32_matmul_precision)
 
         self.net_address = net_address
         self.net_port = net_port

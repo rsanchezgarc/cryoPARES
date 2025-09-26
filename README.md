@@ -209,7 +209,7 @@ The daemon workflow consists of three main components:
     You can materialize the final 3D volume from the partial results at any time, even while the inferencers are still running. The script will combine all the available partial results.
 
     ```bash
-    python -m cryoPARES.inference.daemon.materializeVolume --input_files "/path/to/results_*/mapcomponents_*.npz" --output_mrc /path/to/final_map.mrc
+    python -m cryoPARES.inference.daemon.materializePartialResults --partial_outputs_dirs /path/to/results_*/ --output_mrc /path/to/final_map.mrc --output_star /path/to/final_particles.star
     ```
 
 ### Projection Matching

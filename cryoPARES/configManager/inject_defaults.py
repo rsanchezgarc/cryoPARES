@@ -194,6 +194,8 @@ def inject_defaults_from_config(default_config: Any, update_config_with_args: bo
 
             # Create final kwargs dict starting with positional args
             final_kwargs = {}
+            consumed_positional_names = []
+            consumed_first_config_param_positional = False
 
             # Handle the 'self' parameter for methods
             skip_first = inspect.ismethod(func) or (func.__name__ == '__init__' and 'self' in sig.parameters)
@@ -206,21 +208,36 @@ def inject_defaults_from_config(default_config: Any, update_config_with_args: bo
             positional_params = [p for p in sig.parameters.values()
                                  if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
 
+            used_positional = 0
             for i, param in enumerate(positional_params[1:] if skip_first else positional_params):
-                if i < len(args):
-                    # Use the positional argument value
-                    value = args[i]
-                    if param.name in param_processors:
-                        processor = param_processors[param.name]
-                        expected_type = hints.get(param.name)
-                        value = processor.convert_to_enum_if_needed(value, expected_type)
-                        value = processor.transform_value(value)
-                        if not processor.validate(value):
-                            raise ValueError(f"Validation failed for parameter {param.name}")
-                        if update_config_with_args:
-                            config_to_update = param_configs[param.name]
-                            setattr(config_to_update, param.name, value)
-                    final_kwargs[param.name] = value
+                if i >= len(args):
+                    break
+                # Decide whether to consume this positional into a named parameter
+                take_as_named = True
+                if isinstance(param.default, CONFIG_PARAM):
+                    # Policy: allow only the FIRST CONFIG_PARAM to be set positionally,
+                    # push remaining positionals into *args instead.
+                    if consumed_first_config_param_positional:
+                        take_as_named = False
+                    else:
+                        consumed_first_config_param_positional = True
+                if not take_as_named:
+                    break
+                # Use the positional argument value
+                value = args[i]
+                if param.name in param_processors:
+                    processor = param_processors[param.name]
+                    expected_type = hints.get(param.name)
+                    value = processor.convert_to_enum_if_needed(value, expected_type)
+                    value = processor.transform_value(value)
+                    if not processor.validate(value):
+                        raise ValueError(f"Validation failed for parameter {param.name}")
+                    if update_config_with_args:
+                        config_to_update = param_configs[param.name]
+                        setattr(config_to_update, param.name, value)
+                final_kwargs[param.name] = value
+                consumed_positional_names.append(param.name)
+                used_positional += 1
 
             # Then process keyword arguments and remaining parameters
             for name, param in sig.parameters.items():
@@ -245,7 +262,38 @@ def inject_defaults_from_config(default_config: Any, update_config_with_args: bo
                 elif param.default is not param.empty:
                     final_kwargs[name] = param.default
 
-            return func(**final_kwargs)
+            for k, v in kwargs.items():
+                if k not in final_kwargs and k not in sig.parameters:
+                    final_kwargs[k] = v
+
+            # --- Build final call safely ---
+            call_args = []
+            if 'self' in final_kwargs:
+                call_args.append(final_kwargs.pop('self'))
+            # Append consumed named positionals in order and remove from kwargs
+            for pname in consumed_positional_names:
+                call_args.append(final_kwargs.pop(pname))
+            # Fill any remaining POSITIONAL_ONLY / POSITIONAL_OR_KEYWORD params positionally
+            # so that following extras go into *args (instead of binding to those params).
+            for p in (positional_params[1:] if skip_first else positional_params):
+                if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD):
+                    if p.name in consumed_positional_names:
+                        continue
+                    if p.name in final_kwargs:
+                        call_args.append(final_kwargs.pop(p.name))
+                    # else: if it's not in final_kwargs, it either had no default
+                    # (already validated upstream) or will be provided by kwargs later.
+
+            # Any leftover original positionals go to *args if accepted
+            extra_positional = args[used_positional:]
+            has_var_positional = any(
+                p.kind is inspect.Parameter.VAR_POSITIONAL
+                for p in sig.parameters.values()
+            )
+            if has_var_positional:
+                call_args.extend(extra_positional)
+            # Call with reconstructed args/kwargs
+            return func(*call_args, **final_kwargs)
 
         # Update the signature
         new_params = []
@@ -399,8 +447,60 @@ def test_multi_config_injection():
     except ValueError:
         pass
 
+def test_args_passthrough():
+    """Test that extra *args are forwarded correctly through the decorator."""
+
+    from dataclasses import dataclass
+
+    @dataclass
+    class DummyConfig:
+        a: int = 1
+        b: int = 2
+
+    cfg = DummyConfig()
+
+    class Target:
+        @inject_defaults_from_config(cfg, update_config_with_args=True)
+        def __init__(self,
+                     a: int = CONFIG_PARAM(),
+                     b: int = CONFIG_PARAM(),
+                     *args):
+            self.a = a
+            self.b = b
+            self.extra_args = args
+
+    t = Target(5, "pos1", "pos2")
+    assert t.a == 5, f"Expected a==5, got {t.a}"
+    assert t.b == 2, f"Expected default b==2, got {t.b}"
+    assert t.extra_args == ("pos1", "pos2"), f"Args not forwarded: {t.extra_args}"
+    print(" test_args_passthrough passed.")
+
+
+def test_kwargs_passthrough():
+    """Test that extra **kwargs are forwarded correctly through the decorator."""
+
+    from dataclasses import dataclass
+
+    @dataclass
+    class DummyConfig:
+        a: int = 1
+
+    cfg = DummyConfig()
+
+    class Target:
+        @inject_defaults_from_config(cfg, update_config_with_args=True)
+        def __init__(self, a: int = CONFIG_PARAM(), **kwargs):
+            self.a = a
+            self.extra_kwargs = kwargs
+
+    t = Target(7, foo="bar", z=42)
+    assert t.a == 7, f"Expected a==7, got {t.a}"
+    assert t.extra_kwargs == {"foo": "bar", "z": 42}, f"Kwargs not forwarded: {t.extra_kwargs}"
+    print(" test_kwargs_passthrough passed.")
 
 if __name__ == "__main__":
     test_config_injection()
     test_multi_config_injection()
+    test_args_passthrough()
+    test_kwargs_passthrough()
     print("All tests passed successfully!")

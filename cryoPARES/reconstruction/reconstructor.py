@@ -37,7 +37,7 @@ class Reconstructor(nn.Module):
         correct_ctf: bool = CONFIG_PARAM(),
         eps: float = CONFIG_PARAM(),
         min_denominator_value: Optional[float] = None,
-        weight_with_confidence: bool = CONFIG_PARAM(),
+        weight_with_confidence: bool = CONFIG_PARAM(), #TODO: Not helping at the moment.
         *args,
         **kwargs,
     ):

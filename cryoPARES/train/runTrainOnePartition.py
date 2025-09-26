@@ -346,7 +346,7 @@ def execute_trainOnePartition(**kwargs):
         **kwargs
     )
     config_args = kwargs.get("config_args", None)
-    if config_args is not None:
+    if config_args:
         cmd += " --config " + " ".join(config_args)
     print(cmd)  # TODO: Use loggers
     subprocess.run(

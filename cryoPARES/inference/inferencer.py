@@ -242,16 +242,17 @@ class SingleInferencer:
         """
         The symmetry of the model, loaded from the hyperparameters file.
         """
-        return self._get_symmetry()
+        return self._get_symmetry(self.checkpoint_dir, self.model_halfset)
 
-    def _get_symmetry(self):
+    @staticmethod
+    def _get_symmetry(checkpoint_dir, model_halfset):
         """
         Retrieves the symmetry value from the `hparams.yaml` file in the checkpoint directory.
 
         :return: The symmetry value.
         :raises RuntimeError: If the symmetry cannot be loaded from the file.
         """
-        hparams = os.path.join(self.checkpoint_dir, self.model_halfset, "hparams.yaml")
+        hparams = os.path.join(checkpoint_dir, model_halfset, "hparams.yaml")
         try:
             with open(hparams) as f:
                 symmetry = yaml.safe_load(f)["symmetry"]

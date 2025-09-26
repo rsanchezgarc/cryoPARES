@@ -355,30 +355,10 @@ def distributed_inference(
             reconstructor_parent = None
 
             if not skip_reconstruction:
-                parent_inferencer = SingleInferencer(
-                    particles_star_fname=particles_star_fname,
-                    checkpoint_dir=checkpoint_dir,
-                    results_dir=None,
-                    data_halfset=d_half,
-                    model_halfset=resolved_model_halfset,
-                    particles_dir=particles_dir,
-                    batch_size=max(1, min(batch_size, 2)),
-                    num_data_workers=0,
-                    use_cuda=False,
-                    n_cpus_if_no_cuda=1,
-                    compile_model=False,
-                    top_k_poses_nnet=top_k_poses_nnet,
-                    top_k_poses_localref=top_k_poses_localref,
-                    reference_map=reference_map,
-                    reference_mask=reference_mask,
-                    directional_zscore_thr=directional_zscore_thr,
-                    skip_localrefinement=True,
-                    skip_reconstruction=False,
-                    subset_idxs=[], #We don't need particles. we just need to create the inferencer
-                    show_debug_stats=False,
-                    float32_matmul_precision=float32_matmul_precision,
-                )
-                reconstructor_parent = parent_inferencer._setup_reconstructor(symmetry=parent_inferencer.symmetry)
+                symmetry = SingleInferencer._get_symmetry(checkpoint_dir, resolved_model_halfset)
+                reconstructor_parent = SingleInferencer._get_reconstructor(particles_star_fname,
+                                                                           particles_dir,
+                                                                           symmetry=symmetry)
                 numerator_shape = reconstructor_parent.numerator.shape
                 weights_shape = reconstructor_parent.weights.shape
                 ctfsq_shape = reconstructor_parent.ctfsq.shape

@@ -130,7 +130,7 @@ class RotationPredictionMixin:
 
 class PlModel(RotationPredictionMixin, pl.LightningModule):
     def __init__(self, lr: float, symmetry: str, num_augmented_copies_per_batch: int,
-                 top_k: int,
+                 top_k_poses_nnet: int,
                  so3model: Optional[Union[nn.Module, ScriptModule]] = None,
                 ):
 
@@ -140,7 +140,7 @@ class PlModel(RotationPredictionMixin, pl.LightningModule):
         self.lr = lr #The original LR
         self.symmetry = symmetry
         self.num_augmented_copies_per_batch = num_augmented_copies_per_batch
-        self.top_k = top_k
+        self.top_k_poses_nnet = top_k_poses_nnet
 
         if so3model is None:
             so3model = self.build_components(symmetry, num_augmented_copies_per_batch)
@@ -166,7 +166,7 @@ class PlModel(RotationPredictionMixin, pl.LightningModule):
         # metadata = batch[self.BATCH_MD_NAME]
         del batch
         (_, _, _, pred_rotmats, maxprobs
-         ), loss, error_rads = self.so3model.forward_and_loss(imgs, gt_rotMats, confid, top_k=self.top_k)
+         ), loss, error_rads = self.so3model.forward_and_loss(imgs, gt_rotMats, confid, top_k=self.top_k_poses_nnet)
         error_degs = torch.rad2deg(error_rads)
         return loss, error_degs, pred_rotmats, maxprobs, gt_rotMats
 
@@ -204,7 +204,7 @@ class PlModel(RotationPredictionMixin, pl.LightningModule):
 
     def forward(self, imgs: torch.Tensor, batch_idx: int, dataloader_idx: int = 0, top_k: Optional[int] = None) -> Any:
         if top_k is None:
-            top_k = self.top_k
+            top_k = self.top_k_poses_nnet
         return self.so3model(imgs, top_k=top_k) #wD, rotMat_logits, pred_rotmat_id, pred_rotmats, maxprobs
 
 

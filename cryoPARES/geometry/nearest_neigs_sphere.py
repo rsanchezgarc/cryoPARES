@@ -31,7 +31,7 @@ def compute_nearest_neighbours(eulerDegs, k, cache_dir, n_jobs):
     if os.path.exists(fname):
         return joblib.load(fname)
 
-    print(f"Computing nearest neighbours. For n > 294912, it will take a long time (hp_order={eulerDegs.shape[0]})")
+    print(f"Computing nearest neighbours. For n > 294912, it will take a long time (Current n={eulerDegs.shape[0]})")
 
     rs = R.from_euler(RELION_EULER_CONVENTION, eulerDegs, degrees=True)
     X = rs.as_quat()

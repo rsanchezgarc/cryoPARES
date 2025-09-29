@@ -98,7 +98,7 @@ class ParticlesDataset(Dataset, ABC):
         self._image_size = None
 
     @property
-    def image_size_px(self) -> int:
+    def nnet_image_size_px(self) -> int:
         """The image size in pixels"""
         if self.image_size_px_for_nnet is None:
             return self.particles.particle_shape[-1]
@@ -114,6 +114,9 @@ class ParticlesDataset(Dataset, ABC):
         self._particles = part_set
         assert len(part_set) > 0, "Error, no particles were found in the star file"
 
+        if self.subset_idxs is not None:
+            self._particles = self._particles.createSubset(idxs=self.subset_idxs)
+
         if self.halfset is not None:
             if "rlnRandomSubset" not in self._particles.particles_md:
                 half1, half2 = train_test_split(self._particles.particles_md.index, test_size=0.5,
@@ -128,8 +131,7 @@ class ParticlesDataset(Dataset, ABC):
             idxs = np.where(subsetNums == self.halfset)[0]
             self._particles = self._particles.createSubset(idxs=idxs)
 
-        if self.subset_idxs is not None:
-            self._particles = self._particles.createSubset(idxs=self.subset_idxs)
+
 
         if self.min_maxProb is not None:
             maxprob = self._particles.particles_md[RELION_ORI_POSE_CONFIDENCE_NAME]
@@ -157,6 +159,9 @@ class ParticlesDataset(Dataset, ABC):
 
     def original_sampling_rate(self) -> float:
         return self.particles.sampling_rate
+
+    def original_image_size(self) -> int:
+        return self.particles.optics_md["rlnImageSize"].values
 
     @property
     def augmenter(self) -> AugmenterBase:
@@ -205,7 +210,7 @@ class ParticlesDataset(Dataset, ABC):
         Returns:
 
         """
-        backgroundMask = self._getParticleMask(self.image_size_px, sampling_rate=self.sampling_rate, mask_radius_angs=self.mask_radius_angs)[0]
+        backgroundMask = self._getParticleMask(self.nnet_image_size_px, sampling_rate=self.sampling_rate, mask_radius_angs=self.mask_radius_angs)[0]
         noiseRegion = img[:, backgroundMask]
         meanImg = noiseRegion.mean()
         stdImg = noiseRegion.std()
@@ -273,7 +278,7 @@ class ParticlesDataset(Dataset, ABC):
         img, pad_info, crop_info = resize_and_padCrop_tensorBatch(img.unsqueeze(0),
                                                                   ori_pixelSize,
                                                                   self.sampling_rate_angs_for_nnet,
-                                                                  self.image_size_px,
+                                                                  self.nnet_image_size_px,
                                                                   padding_mode="constant")
         img = img.squeeze(0)
         return img
@@ -284,8 +289,8 @@ class ParticlesDataset(Dataset, ABC):
         if self.augmenter is not None:
             prepro_img, degEuler, shift, _ = self.augmenter(prepro_img,  # 1xSxS image expected
                                                             degEuler,
-                                                            shiftFraction=xyShiftAngs / (self.image_size_px * self.sampling_rate))
-            xyShiftAngs = shift * (self.image_size_px * self.sampling_rate)
+                                                            shiftFraction=xyShiftAngs / (self.nnet_image_size_px * self.sampling_rate))
+            xyShiftAngs = shift * (self.nnet_image_size_px * self.sampling_rate)
 
         r = R.from_euler(RELION_EULER_CONVENTION, degEuler, degrees=True)
 
@@ -295,7 +300,7 @@ class ParticlesDataset(Dataset, ABC):
         rotMat = torch.FloatTensor(rotMat)
 
         if self.apply_mask_to_img:
-            mask = self._getParticleMask(self.image_size_px, sampling_rate=self.sampling_rate, mask_radius_angs=self.mask_radius_angs)[1]
+            mask = self._getParticleMask(self.nnet_image_size_px, sampling_rate=self.sampling_rate, mask_radius_angs=self.mask_radius_angs)[1]
             prepro_img *= mask
 
         batch = {BATCH_IDS_NAME: iid,

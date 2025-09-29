@@ -282,12 +282,6 @@ def projmatching_starfile(
             starfile.write({"optics": optics_df, "particles": particles_df}, star_in_limited)
             particles_star_fname = star_in_limited
 
-        # Volume filtering
-        if filter_resolution_angst is not None:
-            new_reference_vol = os.path.join(tmpdir, f"input_vol_{os.path.basename(reference_vol)}")
-            from cryoPARES.projmatching.projmatchingUtils.filterToResolution import low_pass_filter_fname
-            low_pass_filter_fname(reference_vol, resolution=filter_resolution_angst, out_fname=new_reference_vol)
-            reference_vol = new_reference_vol
 
         matcher_init_kwargs = dict(
             reference_vol=reference_vol,

@@ -4,7 +4,6 @@ import sys
 from time import time
 from pathlib import Path
 
-import starfile
 import torch
 import yaml
 from lightning import seed_everything
@@ -32,7 +31,7 @@ class DaemonInferencer(SingleInferencer):
                  model_halfset: Literal["half1", "half2"] = "half1",
                  particles_dir: Optional[str] = None,
                  batch_size: int = CONFIG_PARAM(),
-                 num_data_workers: int = CONFIG_PARAM(config=main_config.datamanager),
+                 num_dataworkers: int = CONFIG_PARAM(config=main_config.datamanager),
                  use_cuda: bool = CONFIG_PARAM(),
                  n_cpus_if_no_cuda: int = CONFIG_PARAM(),
                  compile_model: bool = False,
@@ -59,7 +58,7 @@ class DaemonInferencer(SingleInferencer):
         :param model_halfset: Specifies which half-set of the model to use ("half1", "half2").
         :param particles_dir: Directory where the particle images are located. If None, paths in the STAR file are assumed to be absolute.
         :param batch_size: The number of particles to process in each batch.
-        :param num_data_workers: The number of worker processes to use for data loading.
+        :param num_dataworkers: The number of worker processes to use for data loading.
         :param use_cuda: Whether to use a CUDA-enabled GPU for inference.
         :param n_cpus_if_no_cuda: The number of CPU cores to use if CUDA is not available.
         :param compile_model: Whether to compile the model using `torch.compile` for potential speed-up.
@@ -83,7 +82,7 @@ class DaemonInferencer(SingleInferencer):
                          model_halfset=model_halfset,
                          particles_dir=particles_dir,
                          batch_size=batch_size,
-                         num_data_workers=num_data_workers,
+                         num_dataworkers=num_dataworkers,
                          use_cuda=use_cuda,
                          n_cpus_if_no_cuda=n_cpus_if_no_cuda,
                          compile_model=compile_model,
@@ -104,17 +103,13 @@ class DaemonInferencer(SingleInferencer):
         self.net_authkey = net_authkey
         self.secs_between_partial_results_written = secs_between_partial_results_written
         self.resubmit_poison_pill = resubmit_poison_pill
-        self.particles_list = []
+        self.particles_star_fname_list = []
 
     def _setup_reconstructor(self, symmetry: Optional[str]= None):
-        print("Setting up the reconstructor")
-        item = self.particles_list[0]
-        if isinstance(item, str):
-            self.particles_star_fname = item
-        else:
-            self.particles_star_fname = item[0]
+        print("Setting-up the reconstructor")
+        self.particles_star_fname = self.particles_star_fname_list[0]
         reconstructor = super()._setup_reconstructor(symmetry)
-        self.particles_star_fname = self.particles_list
+        self.particles_star_fname = self.particles_star_fname_list
         return reconstructor
 
     def run(self):
@@ -123,29 +118,12 @@ class DaemonInferencer(SingleInferencer):
     def resolve_data(self, starfname:Optional[str]):
         if starfname is POISON_PILL:
             return True
-        self.particles_list.append(starfname)
+        self.particles_star_fname_list.append(starfname)
         return False
 
     def _setup_dataloader(self, rank: Optional[int] = None):
-        if self.particles_list:
-            self.particles_star_fname = []
-
-            for item in self.particles_list:
-                if isinstance(item, str):
-                    self.particles_star_fname.append(item)
-                elif isinstance(item, tuple) and len(item) == 2:
-                    star_fname, subset_df = item
-                    d = starfile.read(star_fname)
-                    optics, parts = d["optics"], d["particles"]
-                    parts = parts.merge(subset_df,
-                            left_on=['rlnImageName', 'rlnCoordinateX', 'rlnCoordinateY'],
-                            right_on=['_rlnImageName', '_rlnCoordinateX', '_rlnCoordinateY'],
-                            how='inner'
-                        )
-                    parts = parts.drop(columns=['_rlnImageName', '_rlnCoordinateX', '_rlnCoordinateY'])
-                    self.particles_star_fname.append(dict(optics=optics, particles=parts))
-                else:
-                    raise RuntimeError()
+        if self.particles_star_fname_list:
+            self.particles_star_fname = self.particles_star_fname_list
             return super()._setup_dataloader(rank)
         else:
             return None
@@ -171,16 +149,16 @@ class DaemonInferencer(SingleInferencer):
 
             while not terminateJob:
                 # 1) If we already have files pending, process them first
-                if self.particles_list:
+                if self.particles_star_fname_list:
                     print("processing:")
-                    print("\n".join([x if isinstance(x, str) else x[0] for x in self.particles_list]))
+                    print("\n".join(self.particles_star_fname_list))
                     dataloader = self._setup_dataloader()
                     if dataloader:
                         all_results_list.append(
                             self._process_all_batches(model, dataloader, pbar=None)
                         )
                         datasets.append(dataloader.dataset)
-                        self.particles_list = []
+                        self.particles_star_fname_list = []
                 else:
                     # 2) Only block for new data when idle
                     print("waiting for new data")
@@ -196,7 +174,7 @@ class DaemonInferencer(SingleInferencer):
                     and current_time - last_save_timestamp >= self.secs_between_partial_results_written
                 ):
                     for all_results, dataset in zip(all_results_list, datasets):
-                        particles_md_list += self._save_particles_results(all_results, dataset)[0]
+                        particles_md_list += self._save_particles_results(all_results, dataset)
                     all_results_list = []
                     datasets = []
                     if not self.skip_reconstruction:
@@ -206,7 +184,7 @@ class DaemonInferencer(SingleInferencer):
         # Final save for any remaining results
         if all_results_list:
             for all_results, dataset in zip(all_results_list, datasets):
-                particles_md_list += self._save_particles_results(all_results, dataset)[0]
+                particles_md_list += self._save_particles_results(all_results, dataset)
             if not self.skip_reconstruction:
                 self._save_reconstruction(materialize=False)
 

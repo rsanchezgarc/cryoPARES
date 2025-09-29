@@ -56,7 +56,13 @@ This method is recommended if you want to modify the cryoPARES source code.
     cd cryoPARES
     ```
 
-2.  **Install the package in editable mode:**
+2.  **Install dependencies:**
+
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+3.  **Install the package in editable mode:**
 
     This allows you to make changes to the code without having to reinstall the package.
 
@@ -85,7 +91,7 @@ a pre-aligned dataset of particles. While not mandatory, we encourage using part
 
 **Usage:**
 ```bash
-cryopares_train [ARGUMENTS] --config [CONFIG_OVERRIDES]
+python -m cryopares_train [ARGUMENTS] --config [CONFIG_OVERRIDES]
 ```
 
 **Key Arguments:**
@@ -96,7 +102,7 @@ cryopares_train [ARGUMENTS] --config [CONFIG_OVERRIDES]
 *   `--train_save_dir`: Directory to save model checkpoints, logs, and other outputs.
 *   `--n_epochs`: Number of training epochs.
 *   `--batch_size`: Number of particles per batch.
-*   `--num_data_workers`: Number of parallel data loading workers. One CPU each. Set it to 0 to read and process the data in the main thread
+*   `--num_dataworkers`: Number of parallel data loading workers. One CPU each. Set it to 0 to read and process the data in the main thread
 *   `--continue_checkpoint_dir`: Continue training from a previous run.
 *   `--finetune_checkpoint_dir`: Fine-tune a pre-trained model on a new dataset.
 
@@ -132,7 +138,7 @@ cryopares_infer [ARGUMENTS] --config [CONFIG_OVERRIDES]
 *   `--checkpoint_dir`: Path to the directory containing the trained model created by `train.py`.
 *   `--results_dir`: Directory where the output `.star` file and reconstruction will be saved.
 *   `--batch_size`: Number of particles per batch.
-*   `--num_data_workers`: Number of parallel data loading workers. One CPU each. Set it to 0 to read and process the data in the main thread
+*   `--num_dataworkers`: Number of parallel data loading workers. One CPU each. Set it to 0 to read and process the data in the main thread
 *   `--reference_map`: Path to a reference `.mrc` used for local refinement and reconstruction. If not provided, it will use half-maps reconstructed from the training set.
 
 **Half-Set Selection (`--data_halfset` and `--model_halfset`)**
@@ -173,7 +179,7 @@ The daemon workflow consists of three main components:
     This script creates the central queue. It should be run once and kept running in the background.
 
     ```bash
-    python -m cryoPARES.inference.daemon.queueManager  [OPTIONS]
+    python -m cryoPARES.inference.daemon.queueManager
     ```
 
 2.  **Start the Spooling Filler:**
@@ -203,7 +209,7 @@ The daemon workflow consists of three main components:
     You can materialize the final 3D volume from the partial results at any time, even while the inferencers are still running. The script will combine all the available partial results.
 
     ```bash
-    python -m cryoPARES.inference.daemon.materializePartialResults --partial_outputs_dirs /path/to/results_worker1 /path/to/results_worker2 --output_mrc /path/to/final_map.mrc --output_star /path/to/final_particles.star
+    python -m cryoPARES.inference.daemon.materializePartialResults --partial_outputs_dirs /path/to/results_*/ --output_mrc /path/to/final_map.mrc --output_star /path/to/final_particles.star
     ```
 
 ### Projection Matching

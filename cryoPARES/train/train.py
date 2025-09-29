@@ -20,7 +20,7 @@ class Trainer:
     def __init__(self, symmetry: str, particles_star_fname: List[str], train_save_dir: str,
                  particles_dir: Optional[List[str]] = None, n_epochs: int = CONFIG_PARAM(),
                  batch_size: int = CONFIG_PARAM(), #CONFIG_PARAM status with update_config_with_args gets updated in config directly
-                 num_data_workers: int = CONFIG_PARAM(config=main_config.datamanager), #CONFIG_PARAM status with update_config_with_args gets updated in config directly
+                 num_dataworkers: int = CONFIG_PARAM(config=main_config.datamanager), #CONFIG_PARAM status with update_config_with_args gets updated in config directly
                  image_size_px_for_nnet: int = CONFIG_PARAM(config=main_config.datamanager.particlesdataset), #CONFIG_PARAM status with update_config_with_args gets updated in config directly
                  sampling_rate_angs_for_nnet: float = CONFIG_PARAM(config=main_config.datamanager.particlesdataset), # CONFIG_PARAM status with update_config_with_args gets updated in config directly
                  mask_radius_angs: Optional[float] = CONFIG_PARAM(config=main_config.datamanager.particlesdataset), # CONFIG_PARAM status with update_config_with_args gets updated in config directly
@@ -42,7 +42,7 @@ class Trainer:
             particles_dir: The directory where the particles of the particlesStarFname are located. If not, it is assumed os.dirname(particlesStarFname)
             n_epochs: The number of epochs
             batch_size: The batch size
-            num_data_workers: Number of parallel data loading workers. One CPU each. Set it to 0 to read and process the data in the same thread
+            num_dataworkers: Number of parallel data loading workers. One CPU each. Set it to 0 to read and process the data in the same thread
             image_size_px_for_nnet: The desired image size, in pixels, for the particles to be fed in the neural network. Local refinement uses the original image-size particles. Particles are first downsampled, and the padded/cropped to the desired image size.
             sampling_rate_angs_for_nnet: The desired sampling rate, in pixels, for the particles to be fed in the neural network. Local refinement uses the original sampling-rate particles. Particles are first downsampled, and the padded/cropped to the desired image size.
             mask_radius_angs: The radius of the particle in Angstroms. Used to create a circular mask arround it.
@@ -60,7 +60,7 @@ class Trainer:
         self.particles_dir = particles_dir
         self.n_epochs = n_epochs
         self.batch_size = batch_size
-        self.num_data_workers = num_data_workers
+        self.num_dataworkers = num_dataworkers
         self.split_halfs = split_halfs
         self.continue_checkpoint_dir = continue_checkpoint_dir
         self.finetune_checkpoint_dir = finetune_checkpoint_dir
@@ -214,7 +214,7 @@ class Trainer:
                         basename="projections",
                         images_per_file=10000,
                         batch_size=self.batch_size,
-                        num_workers=self.num_data_workers,
+                        num_workers=self.num_dataworkers,
                         apply_ctf=True,
                         snr=main_config.train.snr_for_simulation,
                         use_gpu=main_config.train.use_cuda,
@@ -291,6 +291,6 @@ if __name__ == "__main__":
     """
 
 python -m cryoPARES.train.train  \
---symmetry C1 --particles_star_fname /home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles.star  --train_save_dir /tmp/cryoPARES_train/ --n_epochs 1 --overfit_batches 20 --batch_size 4 --config models.image2sphere.lmax=6 models.image2sphere.so3components.i2sprojector.hp_order=2 models.image2sphere.so3components.s2conv.hp_order=2 models.image2sphere.so3components.so3outputgrid.hp_order=2  models.image2sphere.imageencoder.encoderArtchitecture="resnet" models.image2sphere.imageencoder.resnet.resnetName="resnet18" datamanager.num_data_workers=1
+--symmetry C1 --particles_star_fname /home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles.star  --train_save_dir /tmp/cryoPARES_train/ --n_epochs 1 --overfit_batches 20 --batch_size 4 --config models.image2sphere.lmax=6 models.image2sphere.so3components.i2sprojector.hp_order=2 models.image2sphere.so3components.s2conv.hp_order=2 models.image2sphere.so3components.so3outputgrid.hp_order=2  models.image2sphere.imageencoder.encoderArtchitecture="resnet" models.image2sphere.imageencoder.resnet.resnetName="resnet18" datamanager.num_dataworkers=1
  
     """

@@ -34,7 +34,7 @@ class TrainerPartition:
                  partition: Literal["allParticles", "half1", "half2"] = "allParticles",
                  continue_checkpoint_fname: Optional[str] = None, finetune_checkpoint_fname: Optional[str] = None,
                  find_lr: bool = False, compile_model: bool = False, val_check_interval: Optional[float] = None,
-                 num_data_workers: int = CONFIG_PARAM(config=main_config.datamanager),
+                 num_dataworkers: int = CONFIG_PARAM(config=main_config.datamanager),
                  mask_radius_angs: Optional[float] = CONFIG_PARAM(config=main_config.datamanager.particlesdataset),
                  overfit_batches: Optional[int] = None,
                  float32_matmul_precision: str= constants.float32_matmul_precision):
@@ -52,7 +52,7 @@ class TrainerPartition:
             find_lr: Use automatic learning rate finder (GPU only)
             compile_model: Use torch 2.0 compilation
             val_check_interval: Fraction of epoch between validations
-            num_data_workers: The number of workers (one CPU process each, to be used to load data)
+            num_dataworkers: The number of workers (one CPU process each, to be used to load data)
             mask_radius_angs: The radius of the particle in Angstroms. Used to create a circular mask arround it.
             overfit_batches: Number of batches to use if overfitting
             float32_matmul_precision:
@@ -236,7 +236,7 @@ class TrainerPartition:
             print("Trained finished. Saving model ")
             self._save_training_completion(checkpointer)
             save_train_val_partition_dir = trainer.datamodule.save_train_val_partition_dir
-            num_data_workers = datamodule.num_data_workers
+            num_dataworkers = datamodule.num_dataworkers
             del trainer, pl_model, checkpointer, datamodule, callbacks
             gc.collect()
             torch.cuda.empty_cache()
@@ -257,7 +257,7 @@ class TrainerPartition:
                                   symmetry=self.symmetry,
                                   output_fname=output_fname,
                                   particles_dir=particles_dir,
-                                  num_workers=num_data_workers,
+                                  num_workers=num_dataworkers,
                                   batch_size=main_config.train.batch_size_for_reconstruct,
                                   use_cuda=main_config.train.cuda_for_reconstruct,
                                   correct_ctf=True, eps=1e-3, min_denominator_value=1e-4,

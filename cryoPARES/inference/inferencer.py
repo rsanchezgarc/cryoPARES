@@ -43,7 +43,7 @@ class SingleInferencer:
                  model_halfset: Literal["half1", "half2", "allCombinations", "matchingHalf"] = "matchingHalf",
                  particles_dir: Optional[str] = None,
                  batch_size: int = CONFIG_PARAM(),
-                 num_data_workers: int = CONFIG_PARAM(config=main_config.datamanager),
+                 num_dataworkers: int = CONFIG_PARAM(config=main_config.datamanager),
                  use_cuda: bool = CONFIG_PARAM(),
                  n_cpus_if_no_cuda: int = CONFIG_PARAM(),
                  compile_model: bool = False,
@@ -69,7 +69,7 @@ class SingleInferencer:
         :param model_halfset: Specifies which half-set of the model to use ("half1", "half2", "allCombinations", or "matchingHalf").
         :param particles_dir: Directory where the particle images are located. If None, paths in the STAR file are assumed to be absolute.
         :param batch_size: The number of particles to process in each batch.
-        :param num_data_workers: The number of worker processes to use for data loading.
+        :param num_dataworkers: The number of worker processes to use for data loading.
         :param use_cuda: Whether to use a CUDA-enabled GPU for inference.
         :param n_cpus_if_no_cuda: The number of CPU cores to use if CUDA is not available.
         :param compile_model: Whether to compile the model using `torch.compile` for potential speed-up.
@@ -435,7 +435,7 @@ class SingleInferencer:
         else:
             return f"_{self.data_halfset}.{extension}"
 
-    def _run(self)-> Tuple[pd.DataFrame, pd.DataFrame, torch.Tensor]:
+    def _run(self, materialize_reconstruction=True)-> Tuple[pd.DataFrame, pd.DataFrame, torch.Tensor]:
         """
         The main private method that executes a single inference run. It sets up the data loader and model,
         processes all batches, and saves the results.
@@ -461,8 +461,11 @@ class SingleInferencer:
             all_results = self._process_all_batches(model, dataloader, pbar=pbar)
             print("Aggregating results and saving to STAR files...")
             particles_md, optics_md = self._save_particles_results(all_results, dataset)
-            if not self.skip_reconstruction: print("Materializing reconstruction...")
-            vol = self._save_reconstruction(not self.skip_reconstruction)
+            if not self.skip_reconstruction and materialize_reconstruction:
+                print("Materializing reconstruction...")
+                vol = self._save_reconstruction(not self.skip_reconstruction)
+            else:
+                vol = None
             return particles_md, optics_md, vol
         finally:
             pbar.close()

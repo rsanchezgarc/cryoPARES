@@ -276,7 +276,7 @@ class ProjectionMatcher(nn.Module):
                          save_train_val_partition_dir=None,
                          is_global_zero=True,
                          num_augmented_copies_per_batch=1,
-                         num_data_workers=n_cpus,
+                         num_dataworkers=n_cpus,
                          return_ori_imagen=True,
                          subset_idxs=subset_idxs
                          )
@@ -359,15 +359,25 @@ class ProjectionMatcher(nn.Module):
         assert len(particlesDataSet) > 0, "Error, the starfile contains no particles"
         try:
             pixel_size = particlesDataSet.sampling_rate
+            particle_size = particlesDataSet[0].original_image_size()
         except AttributeError:
             pixel_size = particlesDataSet.datasets[0].original_sampling_rate()
-        assert np.isclose(pixel_size, self.vol_voxel_size, atol=1e-2)
+            particle_size = particlesDataSet.datasets[0].original_image_size()
+
+        assert np.isclose(pixel_size, self.vol_voxel_size, atol=1e-2), ("Error, the pixel size of the particle images "
+                                                                        f"{pixel_size} "
+                                                                        "do not match the voxel size of the reference "
+                                                                        "{self.vol_voxel_size} ")
+
+        assert np.allclose(particle_size, self.ori_image_shape, atol=1e-1), (f"Error, the size of the particle images "
+                                                                            f"{particle_size} "
+                                                                            f"do not match the size of the reference "
+                                                                            f"{self.ori_image_shape}")
         half_particle_size = self.image_shape[-1] / 2
         assert half_particle_size == self.half_particle_size
         n_particles = len(particlesDataSet)
 
         results_corr_matrix = torch.zeros(n_particles, self.top_k_poses_localref)
-        # results_shifts_matrix = torch.zeros(n_particles, self.top_k_poses_localref, 2, dtype=torch.int64)
         results_shiftsAngs_matrix = torch.zeros(n_particles, self.top_k_poses_localref, 2)
         results_eulerDegs_matrix = torch.zeros(n_particles, self.top_k_poses_localref, 3)
         stats_corr_matrix = torch.zeros(n_particles, self.top_k_poses_localref)
@@ -583,11 +593,6 @@ def align_star(
             starfile.write({"optics": optics_df, "particles": particles_df}, star_in_limited)
             particles_star_fname = star_in_limited
 
-        # Optional low-pass filter of the reference volume
-        if filter_resolution_angst is not None:
-            new_reference_vol = os.path.join(tmpdir, f"input_vol_{os.path.basename(reference_vol)}")
-            low_pass_filter_fname(reference_vol, resolution=filter_resolution_angst, out_fname=new_reference_vol)
-            reference_vol = new_reference_vol
 
         # Build aligner and run
         aligner = ProjectionMatcher(

@@ -40,7 +40,7 @@ def run_worker(checkpoint_dir, results_dir, reference_map):
         net_authkey="test_key",
         model_halfset="half1",
         batch_size=2,
-        num_data_workers=0,
+        num_dataworkers=0,
         use_cuda=torch.cuda.is_available(),
         skip_localrefinement=False, # Must be False for reconstruction
         skip_reconstruction=False, # We want to test the reconstruction
@@ -90,7 +90,7 @@ def dummy_checkpoint(tmp_path_factory):
             "update_progressbar_n_batches": 1,
         },
                     "datamanager": {
-                        "num_data_workers": 0,
+                        "num_dataworkers": 0,
                         "pin_memory": False,
                         "particlesDataset": {                "sampling_rate_angs_for_nnet": 4.0,
                 "image_size_px_for_nnet": 64,

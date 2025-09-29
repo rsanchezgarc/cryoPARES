@@ -52,7 +52,7 @@ class DataManager(pl.LightningDataModule):
                  num_augmented_copies_per_batch: int = CONFIG_PARAM(),
                  train_validaton_split_seed: int = CONFIG_PARAM(),
                  train_validation_split: Tuple[float, float] = CONFIG_PARAM(),
-                 num_data_workers: int = CONFIG_PARAM(),
+                 num_dataworkers: int = CONFIG_PARAM(),
                  augment_train: bool = CONFIG_PARAM(),
                  only_first_dataset_for_validation: bool = CONFIG_PARAM(),
                  return_ori_imagen: bool = False,
@@ -71,7 +71,7 @@ class DataManager(pl.LightningDataModule):
         self.train_validaton_split_seed = train_validaton_split_seed
         self.train_validation_split = train_validation_split
         self.batch_size = batch_size
-        self.num_data_workers = num_data_workers
+        self.num_dataworkers = num_dataworkers
         self.is_global_zero = is_global_zero
         self.save_train_val_partition_dir = save_train_val_partition_dir
         self.augment_train = augment_train
@@ -156,8 +156,8 @@ class DataManager(pl.LightningDataModule):
             sampler = DistributedSampler(dataset, num_replicas=distributed_world_size, rank=rank) \
                                         if distributed_world_size > 1 else None
             return DataLoader(dataset, batch_size=self.batch_size, shuffle=False,
-                              num_workers=self.num_data_workers, sampler=sampler,
-                              pin_memory=True if self.num_data_workers > 0 else False)
+                              num_workers=self.num_dataworkers, sampler=sampler,
+                              pin_memory=True if self.num_dataworkers > 0 else False)
 
         if partitionName == "train":
             print(f"Train dataset {len(dataset)}")
@@ -180,9 +180,9 @@ class DataManager(pl.LightningDataModule):
             return DataLoader(
                 dataset,
                 batch_sampler=batch_sampler,
-                num_workers=self.num_data_workers,
-                persistent_workers=True if self.num_data_workers > 0 else False,
-                pin_memory=True if self.num_data_workers > 0 else False,
+                num_workers=self.num_dataworkers,
+                persistent_workers=True if self.num_dataworkers > 0 else False,
+                pin_memory=True if self.num_dataworkers > 0 else False,
             )
         elif partitionName == "val":
             print(f"Validation dataset {len(dataset)}")
@@ -194,10 +194,10 @@ class DataManager(pl.LightningDataModule):
                 dataset,
                 batch_size=self.batch_size,
                 shuffle=False,
-                num_workers=self.num_data_workers,
-                persistent_workers=True if self.num_data_workers > 0 else False,
+                num_workers=self.num_dataworkers,
+                persistent_workers=True if self.num_dataworkers > 0 else False,
                 sampler=sampler,
-                pin_memory=True if self.num_data_workers > 0 else False,
+                pin_memory=True if self.num_dataworkers > 0 else False,
             )
         else:
             raise ValueError("Error, wrong partition")
@@ -228,7 +228,7 @@ class MultiInstanceSampler(BatchSampler):
 
 def _test():
 
-    main_config.datamanager.num_data_workers = 0
+    main_config.datamanager.num_dataworkers = 0
     dm = DataManager(star_fnames=["~/cryo/data/preAlignedParticles/EMPIAR-10166/data/1000particles.star"],
                      symmetry="c1",
                      augment_train=True,

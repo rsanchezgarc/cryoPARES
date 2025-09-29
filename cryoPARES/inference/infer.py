@@ -39,7 +39,7 @@ def _device_index_from_str(device: Optional[str]) -> Optional[int]:
 
 
 def _flatten_inference_output(out: Any) -> List[tuple[pd.DataFrame, pd.DataFrame | None]]:
-    """[REFAC] Flatten SingleInferencer.run() output into a list of (particles_df, optics_df) pairs.
+    """ Flatten SingleInferencer.run() output into a list of (particles_df, optics_df) pairs.
 
     Expected nested structure from SingleInferencer.run():
       list_over_model_halfset [
@@ -100,7 +100,7 @@ def _flatten_inference_output(out: Any) -> List[tuple[pd.DataFrame, pd.DataFrame
 
 
 def _aggregate_worker_results(results: Dict[int, Any]) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
-    """[REFAC] Aggregate results from multiple workers into (particles_df, optics_df)."""
+    """ Aggregate results from multiple workers into (particles_df, optics_df)."""
     if not results:
         return None, None
     part_dfs: List[pd.DataFrame] = []
@@ -144,7 +144,7 @@ def _load_particles_indices_with_halfset(
     else:
         df = star
 
-    idx = df.index.to_numpy()
+    idx = np.arange(len(df))
     if "rlnRandomSubset" in df.columns:
         mask = (df["rlnRandomSubset"].astype(int) == (1 if data_half == "half1" else 2))
         idx = df.index[mask].to_numpy()
@@ -190,8 +190,8 @@ def _worker(worker_id,
 
     with SharedMemoryProgressBarWorker(worker_id, pbar_fname) as pbar:
         inferencer._pbar = pbar
-        out = inferencer.run()
-        output_q.put((worker_id, out))
+        particles_md, optics_md = inferencer._run(materialize_reconstruction=False)[:2]  #TODO: We don't need to reinitialize the model to run severl  _run(), use a global var
+        output_q.put((worker_id, (particles_md, optics_md)))
 
         # Accumulate reconstructor buffers into shared memory if present
         reconstructor = getattr(inferencer, "_reconstructor", None)
@@ -229,7 +229,7 @@ def distributed_inference(
         particles_dir: Optional[str] = None,
         batch_size: int = CONFIG_PARAM(),
         n_jobs: Optional[int] = None,
-        num_data_workers: int = CONFIG_PARAM(config=main_config.datamanager),
+        num_dataworkers: int = CONFIG_PARAM(config=main_config.datamanager),
         use_cuda: bool = CONFIG_PARAM(),
         n_cpus_if_no_cuda: int = CONFIG_PARAM(),
         compile_model: bool = False,
@@ -271,7 +271,7 @@ def distributed_inference(
     n_jobs : int, optional
         Number of worker processes. If CUDA is on and GPUs are present, defaults to #GPUs; else 1.
         If set to 1, this function uses a **single-process** path and calls `SingleInferencer` directly.
-    num_data_workers : int
+    num_dataworkers : int
         PyTorch dataloader workers per process.
     use_cuda : bool
         Run on GPU if True, else CPU.
@@ -338,7 +338,7 @@ def distributed_inference(
             model_halfset=model_halfset,  # pass through as provided
             particles_dir=particles_dir,
             batch_size=batch_size,
-            num_data_workers=num_data_workers,
+            num_dataworkers=num_dataworkers,
             use_cuda=use_cuda,
             n_cpus_if_no_cuda=n_cpus_if_no_cuda,
             compile_model=compile_model,
@@ -382,6 +382,7 @@ def distributed_inference(
         data_halfset_list = [data_halfset]
 
     for m_half in model_halfset_list:
+        fsc_by_model = {m_half:{"half1": None, "half2": None, "sampling_rate": None}}
         for d_half in data_halfset_list:
             resolved_model_halfset = d_half if m_half is None else m_half
             print(f"\n=== Running data {d_half} with model {resolved_model_halfset} ===")
@@ -434,7 +435,7 @@ def distributed_inference(
                         model_halfset=resolved_model_halfset,
                         particles_dir=particles_dir,
                         batch_size=batch_size,
-                        num_data_workers=num_data_workers,
+                        num_dataworkers=num_dataworkers,
                         use_cuda=use_cuda,
                         n_cpus_if_no_cuda=n_cpus_if_no_cuda if not use_cuda else n_cpus_if_no_cuda,
                         compile_model=compile_model,
@@ -516,45 +517,45 @@ def distributed_inference(
                     print(f"Saved aggregated STAR: {out_star}")
             else:
                 aggregated_results[key] = None
-    if not skip_reconstruction and reconstructor_parent is not None:
-        print("Backprojection done. Reconstructing...")
-        final_numerator = torch.frombuffer(shared_numerator.get_obj(), dtype=torch.float32).reshape(numerator_shape)
-        final_weights = torch.frombuffer(shared_weights.get_obj(), dtype=torch.float32).reshape(weights_shape)
-        final_ctfsq = torch.frombuffer(shared_ctfsq.get_obj(), dtype=torch.float32).reshape(ctfsq_shape)
+            if not skip_reconstruction and reconstructor_parent is not None:
+                print("Backprojection done. Reconstructing...")
+                final_numerator = torch.frombuffer(shared_numerator.get_obj(), dtype=torch.float32).reshape(numerator_shape)
+                final_weights = torch.frombuffer(shared_weights.get_obj(), dtype=torch.float32).reshape(weights_shape)
+                final_ctfsq = torch.frombuffer(shared_ctfsq.get_obj(), dtype=torch.float32).reshape(ctfsq_shape)
 
-        reconstructor_parent.numerator = final_numerator
-        reconstructor_parent.weights = final_weights
-        reconstructor_parent.ctfsq = final_ctfsq
+                reconstructor_parent.numerator = final_numerator
+                reconstructor_parent.weights = final_weights
+                reconstructor_parent.ctfsq = final_ctfsq
 
-        out_mrc = os.path.join(results_dir, f"reconstruction_{d_half}.mrc")
-        reconstructor_parent.generate_volume(out_mrc)
-        print(f"Reconstruction saved for {d_half}: {out_mrc}")
-        key_model = f"model_{resolved_model_halfset}"
-        slot = fsc_by_model.setdefault(key_model, {"half1": None, "half2": None, "sampling_rate": None})
-        slot[d_half] = out_mrc
+                out_mrc = os.path.join(results_dir, f"reconstruction_{d_half}.mrc")
+                reconstructor_parent.generate_volume(out_mrc)
+                print(f"Reconstruction saved for {d_half}: {out_mrc}")
+                fsc_by_model[m_half][d_half] = out_mrc
+                try:
+                    fsc_by_model[m_half]["sampling_rate"] = getattr(reconstructor_parent, "sampling_rate",
+                                                           fsc_by_model[m_half]["sampling_rate"])
+                except Exception:
+                    pass
+
+        print(fsc_by_model)
+        # Compute FSC when reconstructions for both halves exist
         try:
-            slot["sampling_rate"] = getattr(reconstructor_parent, "sampling_rate", slot["sampling_rate"])
-        except Exception:
-            pass
-
-
-    # Compute FSC when reconstructions for both halves exist
-    try:
-        for model_key, rec in fsc_by_model.items():
-            if rec.get("half1") and rec.get("half2") and rec.get("sampling_rate"):
-                print(f"Computing FSC for {model_key}...")
-                vol1 = get_vol(rec["half1"], pixel_size=None)[0]
-                vol2 = get_vol(rec["half2"], pixel_size=None)[0]
-                mask_arr = None
-                if reference_mask is not None:
-                    mask_arr = get_vol(reference_mask, pixel_size=None)[0]
-                fsc, spatial_freq, resolution_A, (res_05, res_0143) = compute_fsc(
-                    vol1, vol2, rec["sampling_rate"], mask=mask_arr
-                )
-                print(f"[FSC] Resolution at 0.143: {res_0143:.3f} Å; at 0.5: {res_05:.3f} Å")
-    except Exception as e:
-        print(f"FSC computation failed: {e}")
-    return aggregated_results
+            for model_key, rec in fsc_by_model.items():
+                if rec.get("half1") and rec.get("half2") and rec.get("sampling_rate"):
+                    print(f"Computing FSC, " "" if model_key is None else f" for {model_key}...")
+                    vol1 = get_vol(rec["half1"], pixel_size=None)[0]
+                    vol2 = get_vol(rec["half2"], pixel_size=None)[0]
+                    mask_arr = None
+                    if reference_mask is not None:
+                        mask_arr = get_vol(reference_mask, pixel_size=None)[0]
+                    fsc, spatial_freq, resolution_A, (res_05, res_0143) = compute_fsc(
+                        vol1, vol2, rec["sampling_rate"], mask=mask_arr
+                    )
+                    print(f"[FSC] Resolution at 0.143: {res_0143:.3f} Å\n"
+                          f"                   at 0.5: {res_05:.3f} Å")
+        except Exception as e:
+            print(f"FSC computation failed: {e}")
+        return aggregated_results
 
 
 def main():

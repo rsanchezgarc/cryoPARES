@@ -5,6 +5,7 @@ import warnings
 from functools import cached_property
 
 import numpy as np
+import pandas as pd
 import torch
 import yaml
 from scipy.spatial.transform import Rotation
@@ -276,7 +277,6 @@ class SingleInferencer:
             data_halfset = None
         else:
             raise ValueError(f"Error, not valid self.data_halfset {self.data_halfset}")
-
         datamanager = DataManager(
             star_fnames=self.particles_star_fname,
             symmetry=self.symmetry,
@@ -352,27 +352,14 @@ class SingleInferencer:
 
         torch.set_float32_matmul_precision(self.float32_matmul_precision)
 
-        if self.model_halfset == "allCombinations":
-            model_halfset_list = ["half1", "half2"]
-        elif self.model_halfset == "matchingHalf":
-            model_halfset_list = [None]
-        else:
-            model_halfset_list = [self.model_halfset]
-
-        if self.data_halfset == "allParticles":
-            data_halfset_list = ["half1", "half2"]
-        else:
-            data_halfset_list = [self.data_halfset]
+        data_halfset_list, model_halfset_list = self.resolve_halfset_lists(self.data_halfset, self.model_halfset)
 
         all_out_list = []
         for model_halfset in model_halfset_list:
             out_list = []
             sampling_rate = None
             for data_halfset in data_halfset_list:
-                if model_halfset is None:
-                    self.model_halfset = data_halfset
-                else:
-                    self.model_halfset = model_halfset
+                self.model_halfset = data_halfset if model_halfset is None else model_halfset
                 self.data_halfset = data_halfset
                 print(f"Running inference for data {self.data_halfset} with model {self.model_halfset}")
                 out = self._run()
@@ -383,9 +370,8 @@ class SingleInferencer:
                 all_out_list.append(out_list)
 
             if len(out_list) == 2 and not self.skip_reconstruction:
-                vol1 = out_list[0][1]
-                vol2 = out_list[1][1]
-
+                vol1 = out_list[0][-1]
+                vol2 = out_list[1][-1]
                 if vol1 is not None and vol2 is not None and sampling_rate is not None:
                     print("Computing FSC...")
                     if self.reference_mask is not None:
@@ -400,6 +386,28 @@ class SingleInferencer:
                     print(f"Resolution at FSC=0.5: {res_05:.3f} Å")
             self._model = None
         return all_out_list
+
+    @staticmethod
+    def resolve_halfset_lists(
+        data_halfset: Literal["half1", "half2", "allParticles"],
+        model_halfset: Literal["half1", "half2", "allCombinations", "matchingHalf"],
+    ) -> Tuple[List[Literal["half1", "half2"]], List[Optional[Literal["half1", "half2"]]]]:
+        """ Return normalized lists of data and model-half policies for iteration.
+        - data list is concrete halves: ["half1"], ["half2"], or ["half1","half2"].
+        - model list is ["half1"], ["half2"], [None] (matchingHalf), or ["half1","half2"] (allCombinations).
+        """
+        data_list: List[Literal["half1", "half2"]]
+        if data_halfset == "allParticles":
+            data_list = ["half1", "half2"]
+        else:
+            data_list = [data_halfset]
+        if model_halfset == "allCombinations":
+            model_list: List[Optional[Literal["half1", "half2"]]] = ["half1", "half2"]
+        elif model_halfset == "matchingHalf":
+            model_list = [None]
+        else:
+            model_list = [model_halfset]
+        return data_list, model_list
 
     def _get_pbar(self, total):
         """
@@ -427,7 +435,7 @@ class SingleInferencer:
         else:
             return f"_{self.data_halfset}.{extension}"
 
-    def _run(self):
+    def _run(self)-> Tuple[pd.DataFrame, pd.DataFrame, torch.Tensor]:
         """
         The main private method that executes a single inference run. It sets up the data loader and model,
         processes all batches, and saves the results.
@@ -452,10 +460,10 @@ class SingleInferencer:
         try:
             all_results = self._process_all_batches(model, dataloader, pbar=pbar)
             print("Aggregating results and saving to STAR files...")
-            particles_md = self._save_particles_results(all_results, dataset)
+            particles_md, optics_md = self._save_particles_results(all_results, dataset)
             if not self.skip_reconstruction: print("Materializing reconstruction...")
             vol = self._save_reconstruction(not self.skip_reconstruction)
-            return particles_md, vol
+            return particles_md, optics_md, vol
         finally:
             pbar.close()
 
@@ -552,10 +560,11 @@ class SingleInferencer:
 
         # Create a mapping from particle ID to its index in the results array
         particles_md_list = []
+        optics_md_list = []
         for datIdx, _dataset in enumerate(dataset.datasets):
             particlesSet = _dataset.particles
             particles_md = particlesSet.particles_md
-
+            optics_md = particlesSet.optics_md
             # Find which of the processed IDs are in the current dataset's index
             ids_to_update_in_df = []
             result_indices = []
@@ -609,7 +618,7 @@ class SingleInferencer:
                 particles_md.loc[ids_to_update_in_df, confide_name] = result_arrays["score"][result_indices, k].numpy()
 
             particles_md_list.append(particles_md)
-
+            optics_md_list.append(optics_md)
             if self.results_dir is not None and save_to_file:
                 if particlesSet.starFname is not None:
                     basename = os.path.basename(particlesSet.starFname).removesuffix(".star")
@@ -620,7 +629,7 @@ class SingleInferencer:
                 print(f"Results were saved at {out_fname}")
                 particlesSet.save(out_fname)
             self._last_dataset_processed += 1
-        return particles_md_list
+        return particles_md_list, optics_md_list
 
     def __enter__(self):
         return self

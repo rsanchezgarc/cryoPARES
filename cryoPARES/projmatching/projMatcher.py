@@ -238,8 +238,9 @@ class ProjectionMatcher(nn.Module):
     def _correlateCrossCorrelation(self, parts: torch.Tensor, projs: torch.Tensor):
         corrs = self.correlate_dft_2d(parts, projs)
         b, options, l0, l1 = corrs.shape
+        h0, h1, w0, w1 = _get_begin_end_from_max_shift(corrs.shape[-2:], self.max_shift_fraction)
         maxcorr, maxcorrIdxs = self._extract_ccor_max(corrs.reshape(-1, *corrs.shape[-2:]),
-                                                      max_shift_fraction=self.max_shift_fraction)
+                                                      h0, h1, w0, w1)
 
         del corrs
         return maxcorr.reshape(b, options), maxcorrIdxs.reshape(b, options, 2)
@@ -475,36 +476,10 @@ class ProjectionMatcher(nn.Module):
         return finalParticlesStar
 
 
-    @classmethod
-    @lru_cache(1)
-    def _get_begin_end_from_max_shift(cls, image_shape, max_shift_fraction):
-        h, w = image_shape
-        one_minux_max_shift = 1 - max_shift_fraction
-        delta_h = math.ceil((h * one_minux_max_shift) / 2)
-        h0 = delta_h
-        h1 = h - delta_h
-
-        delta_w = math.ceil((w * one_minux_max_shift) / 2)
-        w0 = delta_w
-        w1 = w - delta_w
-
-        return h0, h1, w0, w1
-
-    def _extract_ccor_max(self, corrs, max_shift_fraction):
-        pixelShiftsXY = torch.empty(corrs.shape[0], 2, device=corrs.device, dtype=torch.int64)
-        h0, h1, w0, w1 = self._get_begin_end_from_max_shift(corrs.shape[-2:], max_shift_fraction)
-        corrs = corrs[..., h0:h1, w0:w1]
-        maxCorrsJ, maxIndxJ = corrs.max(-1)
-        perImgCorr, maxIndxI = maxCorrsJ.max(-1)
-        pixelShiftsXY[:, 1] = h0 + maxIndxI
-        pixelShiftsXY[:, 0] = w0 + torch.gather(maxIndxJ, 1, maxIndxI.unsqueeze(1)).squeeze(1)
-        return perImgCorr, pixelShiftsXY
-
-
-
-
 @lru_cache(1)
 def _get_begin_end_from_max_shift(image_shape, max_shift):
+    if max_shift is None:
+        return 0, -1, 0, -1
     h, w = image_shape
     one_minus_max_shift = 1 - max_shift
     delta_h = math.ceil((h * one_minus_max_shift) / 2)
@@ -517,20 +492,21 @@ def _get_begin_end_from_max_shift(image_shape, max_shift):
 
     return h0, h1, w0, w1
 
-def _extract_ccor_max(corrs, max_shift_fraction):
+def _extract_ccor_max(corrs, h0, h1, w0, w1):
     pixelShiftsXY = torch.empty(corrs.shape[:-2] + (2,), device=corrs.device, dtype=torch.int64)
-
-    if max_shift_fraction is not None:
-        h0, h1, w0, w1 = _get_begin_end_from_max_shift(corrs.shape[-2:], max_shift_fraction)
+    if h0 > 0:
         corrs = corrs[..., h0:h1, w0:w1]
-    else:
-        h0, w0 = 0, 0
     maxCorrsJ, maxIndxJ = corrs.max(-1)
     perImgCorr, maxIndxI = maxCorrsJ.max(-1)
     pixelShiftsXY[..., 1] = h0 + maxIndxI
     pixelShiftsXY[..., 0] = w0 + torch.gather(maxIndxJ, -1, maxIndxI.unsqueeze(-1)).squeeze(-1)
 
     return perImgCorr, pixelShiftsXY
+
+def extract_ccor_max(corrs, max_shift_fraction):
+    h0, h1, w0, w1 = _get_begin_end_from_max_shift(corrs.shape[-2:], max_shift_fraction)
+    return _extract_ccor_max(corrs, h0, h1, w0, w1)
+
 
 
 def align_star(

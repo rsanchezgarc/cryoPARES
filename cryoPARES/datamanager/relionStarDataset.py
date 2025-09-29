@@ -1,8 +1,9 @@
 import os.path as osp
 import subprocess
 
+import pandas as pd
 from starstack.particlesStar import ParticlesStarSet, split_particle_and_fname
-from typing import Union, Optional, List
+from typing import Union, Optional, List, Tuple
 from os import PathLike
 
 from cryoPARES.constants import BATCH_PARTICLES_NAME
@@ -32,7 +33,9 @@ class ParticlesRelionStarDataset(ParticlesDataset):
         """
 
         super().__init__(subset_idxs=subset_idxs, **kwargs)
-        self._star_fname = str(particles_star_fname)
+        self._star_fname = particles_star_fname
+        if not isinstance(particles_star_fname, dict):
+            self._star_fname = str(particles_star_fname)
         self._datadir = osp.expanduser(particles_dir) if particles_dir is not None else None
 
     def load_ParticlesStarSet(self):
@@ -62,7 +65,6 @@ class ParticlesRelionStarDataset(ParticlesDataset):
         """
         assert fname.endswith(".star"), "Error, metadata files will be saved as star files. Change extension to .star"
         self.particles.save(starFname=fname, overwrite=overwrite)
-
 
 if __name__ == "__main__":
     from argparse import ArgumentParser

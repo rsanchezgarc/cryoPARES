@@ -2,6 +2,7 @@ import collections
 import os
 import os.path as osp
 
+import pandas as pd
 import torch
 from torch.utils.data import DataLoader, BatchSampler, Sampler, RandomSampler, ConcatDataset, DistributedSampler, \
     SequentialSampler
@@ -40,7 +41,7 @@ class DataManager(pl.LightningDataModule):
     DataManager: A LightningDataModule that wraps a ParticlesDataset
     """
     @inject_defaults_from_config(main_config.datamanager, update_config_with_args=False)
-    def __init__(self, star_fnames: List[FNAME_TYPE] | FNAME_TYPE,
+    def __init__(self, star_fnames: List[FNAME_TYPE] | FNAME_TYPE | List[Tuple[pd.DataFrame, pd.DataFrame]],
                  symmetry:str,
                  particles_dir: Optional[List[FNAME_TYPE]] | FNAME_TYPE,
                  halfset: Optional[Literal[1, 2]],
@@ -85,14 +86,14 @@ class DataManager(pl.LightningDataModule):
 
     @staticmethod
     def _expand_fname(fnameOrList):
-            if fnameOrList is None:
-                return None
-            elif isinstance(fnameOrList, str):
-                return [osp.expanduser(fnameOrList)]
-            elif isinstance(fnameOrList, collections.abc.Iterable):
-                return [osp.expanduser(fname) if fname else None for fname in fnameOrList]
-            else:
-                raise ValueError(f"Not valid fname {fnameOrList}")
+        if fnameOrList is None:
+            return None
+        elif isinstance(fnameOrList, str):
+            return [osp.expanduser(fnameOrList)]
+        elif isinstance(fnameOrList, collections.abc.Iterable):
+            return [osp.expanduser(fname) if isinstance(fname, str) else fname for fname in fnameOrList]
+        else:
+            raise ValueError(f"Not valid fname {fnameOrList}")
 
     def prepare_data(self) -> None:
         return

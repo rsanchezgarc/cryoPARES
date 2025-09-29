@@ -56,13 +56,7 @@ This method is recommended if you want to modify the cryoPARES source code.
     cd cryoPARES
     ```
 
-2.  **Install dependencies:**
-
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-3.  **Install the package in editable mode:**
+2.  **Install the package in editable mode:**
 
     This allows you to make changes to the code without having to reinstall the package.
 
@@ -91,7 +85,7 @@ a pre-aligned dataset of particles. While not mandatory, we encourage using part
 
 **Usage:**
 ```bash
-python -m cryopares_train [ARGUMENTS] --config [CONFIG_OVERRIDES]
+cryopares_train [ARGUMENTS] --config [CONFIG_OVERRIDES]
 ```
 
 **Key Arguments:**
@@ -179,7 +173,7 @@ The daemon workflow consists of three main components:
     This script creates the central queue. It should be run once and kept running in the background.
 
     ```bash
-    python -m cryoPARES.inference.daemon.queueManager
+    python -m cryoPARES.inference.daemon.queueManager  [OPTIONS]
     ```
 
 2.  **Start the Spooling Filler:**
@@ -209,7 +203,7 @@ The daemon workflow consists of three main components:
     You can materialize the final 3D volume from the partial results at any time, even while the inferencers are still running. The script will combine all the available partial results.
 
     ```bash
-    python -m cryoPARES.inference.daemon.materializePartialResults --partial_outputs_dirs /path/to/results_*/ --output_mrc /path/to/final_map.mrc --output_star /path/to/final_particles.star
+    python -m cryoPARES.inference.daemon.materializePartialResults --partial_outputs_dirs /path/to/results_worker1 /path/to/results_worker2 --output_mrc /path/to/final_map.mrc --output_star /path/to/final_particles.star
     ```
 
 ### Projection Matching

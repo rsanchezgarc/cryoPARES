@@ -376,7 +376,7 @@ class SingleInferencer:
                 self.data_halfset = data_halfset
                 print(f"Running inference for data {self.data_halfset} with model {self.model_halfset}")
                 out = self._run()
-                if self._model and hasattr(self._model, "reconstructor"):
+                if self._model and not self.skip_reconstruction and hasattr(self._model, "reconstructor"):
                     sampling_rate = self._model.reconstructor.sampling_rate
                     self._model.reconstructor.zero_buffers() # Clean the reconstructor after each half is processed
                 out_list.append(out)

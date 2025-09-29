@@ -18,6 +18,8 @@ from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.reconstruction.reconstruct import create_shared_tensor
 from cryoPARES.inference.inferencer import SingleInferencer
 from cryoPARES.utils.paths import get_most_recent_file
+from cryoPARES.scripts.computeFsc import compute_fsc
+from cryoPARES.utils.reconstructionUtils import get_vol
 from cryoPARES.configManager.configParser import ConfigArgumentParser, ConfigOverrideSystem
 
 
@@ -36,19 +38,46 @@ def _device_index_from_str(device: Optional[str]) -> Optional[int]:
         return None
 
 
-def _flatten_inference_output(out: Any) -> List[pd.DataFrame]:
-    """Flatten SingleInferencer.run() output into a list of DataFrames.
+def _flatten_inference_output(out: Any) -> List[tuple[pd.DataFrame, pd.DataFrame | None]]:
+    """[REFAC] Flatten SingleInferencer.run() output into a list of (particles_df, optics_df) pairs.
 
-    Expected structure from SingleInferencer.run():
-      list_over_model_halfset[
-         list_over_datasets[
-            (particles_md_list, vol)
-         ]
+    Expected nested structure from SingleInferencer.run():
+      list_over_model_halfset [
+        list_over_data_half [
+          (particles_md_list, optics_md_list, vol)
+        ]
       ]
+
+    We pair the items from particles_md_list and optics_md_list by index.
     """
-    dfs: List[pd.DataFrame] = []
+    pairs: List[tuple[pd.DataFrame, pd.DataFrame | None]] = []
     if out is None:
-        return dfs
+        return pairs
+
+    def _add_pairs(p_list, o_list):
+        if isinstance(p_list, list):
+            # optics list may be None or list-like of same length
+            if isinstance(o_list, list):
+                for p_df, o_df in zip(p_list, o_list):
+                    if isinstance(p_df, pd.DataFrame):
+                        pairs.append((p_df, o_df if isinstance(o_df, pd.DataFrame) else None))
+            else:
+                for p_df in p_list:
+                    if isinstance(p_df, pd.DataFrame):
+                        pairs.append((p_df, None))
+
+    if not isinstance(out, list):
+        maybe = out
+        if isinstance(maybe, tuple) and len(maybe) >= 2:
+            _add_pairs(maybe[0], maybe[1])
+        return pairs
+
+    for out_list in out:
+        if isinstance(out_list, list):
+            for elem in out_list:
+                if isinstance(elem, tuple) and len(elem) >= 2:
+                    _add_pairs(elem[0], elem[1])
+    return pairs
 
     if not isinstance(out, list):
         maybe = out
@@ -70,23 +99,36 @@ def _flatten_inference_output(out: Any) -> List[pd.DataFrame]:
     return dfs
 
 
-def _aggregate_worker_results(results: Dict[int, Any]) -> Optional[pd.DataFrame]:
-    """Aggregate results from multiple workers into a single DataFrame."""
+def _aggregate_worker_results(results: Dict[int, Any]) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
+    """[REFAC] Aggregate results from multiple workers into (particles_df, optics_df)."""
     if not results:
-        return None
-    all_dfs: List[pd.DataFrame] = []
+        return None, None
+    part_dfs: List[pd.DataFrame] = []
+    opt_dfs: List[pd.DataFrame] = []
     for worker_id in sorted(results.keys()):
         out = results[worker_id]
-        all_dfs.extend(_flatten_inference_output(out))
-    if not all_dfs:
-        return None
-    return pd.concat(all_dfs, axis=0)
+        for p_df, o_df in _flatten_inference_output(out):
+            if isinstance(p_df, pd.DataFrame):
+                part_dfs.append(p_df)
+            if isinstance(o_df, pd.DataFrame):
+                opt_dfs.append(o_df)
+
+    agg_particles = pd.concat(part_dfs, axis=0) if part_dfs else None
+    # Optics tables are typically identical; we de-duplicate rows if multiple are present.
+    if opt_dfs:
+        try:
+            agg_optics = pd.concat(opt_dfs, axis=0).drop_duplicates().reset_index(drop=True)
+        except Exception:
+            agg_optics = opt_dfs[0]
+    else:
+        agg_optics = None
+    return agg_particles, agg_optics
 
 
 def _load_particles_indices_with_halfset(
-    star_path: str,
-    data_half: Literal["half1", "half2"],
-    subset_idxs: Optional[List[int]] = None
+        star_path: str,
+        data_half: Literal["half1", "half2"],
+        subset_idxs: Optional[List[int]] = None
 ) -> np.ndarray:
     """Read STAR and return the *row indices* to process for the requested data half.
 
@@ -137,7 +179,6 @@ def _worker(worker_id,
             shared_weights,
             shared_ctfsq,
             device=None):
-
     if device is not None and torch.cuda.is_available():
         dev_index = _device_index_from_str(device)
         if dev_index is not None:
@@ -292,9 +333,9 @@ def distributed_inference(
         inferencer = SingleInferencer(
             particles_star_fname=particles_star_fname,
             checkpoint_dir=checkpoint_dir,
-            results_dir=results_dir,          # let SingleInferencer write outputs
-            data_halfset=data_halfset,        # pass through as provided
-            model_halfset=model_halfset,      # pass through as provided
+            results_dir=results_dir,  # let SingleInferencer write outputs
+            data_halfset=data_halfset,  # pass through as provided
+            model_halfset=model_halfset,  # pass through as provided
             particles_dir=particles_dir,
             batch_size=batch_size,
             num_data_workers=num_data_workers,
@@ -308,7 +349,7 @@ def distributed_inference(
             directional_zscore_thr=directional_zscore_thr,
             skip_localrefinement=skip_localrefinement,
             skip_reconstruction=skip_reconstruction,
-            subset_idxs=subset_idxs,          # interpreted inside per half
+            subset_idxs=subset_idxs,  # interpreted inside per half
             n_first_particles=n_first_particles,
             show_debug_stats=False,
             float32_matmul_precision=float32_matmul_precision,
@@ -323,6 +364,9 @@ def distributed_inference(
     print(f"Multiprocess mode: spawning {n_jobs} worker(s).")
     ctx = multiprocessing.get_context('spawn')
     aggregated_results: Dict[str, Optional[pd.DataFrame]] = {}
+
+    # Track reconstructions per model-half to compute FSC
+    fsc_by_model: Dict[str, dict] = {}
 
     # Build lists mirroring SingleInferencer.run() logic
     if model_halfset == "allCombinations":
@@ -460,30 +504,56 @@ def distributed_inference(
             key = f"model_{resolved_model_halfset}__data_{d_half}"
             if results:
                 print(f"Aggregating results from {len(results)} workers for {key}...")
-                aggregated_df = _aggregate_worker_results(results)
-                aggregated_results[key] = aggregated_df
-
-                if aggregated_df is not None and results_dir is not None:
-                    out_star = os.path.join(results_dir, f"particles_{d_half}_nnet.star")
-                    starfile.write({"particles": aggregated_df}, out_star, overwrite=True)
+                aggregated_particles, aggregated_optics = _aggregate_worker_results(results)
+                aggregated_results[key] = aggregated_particles
+                if aggregated_particles is not None and results_dir is not None:
+                    basename = os.path.basename(particles_star_fname).removesuffix(".star")
+                    out_star = os.path.join(results_dir, basename + f"_{d_half}.star")
+                    star_payload = {"particles": aggregated_particles}
+                    if aggregated_optics is not None:
+                        star_payload["optics"] = aggregated_optics
+                    starfile.write(star_payload, out_star, overwrite=True)
                     print(f"Saved aggregated STAR: {out_star}")
             else:
                 aggregated_results[key] = None
-            #TODO: Reconstruction with n_jobs>1 is not working
-            if not skip_reconstruction and reconstructor_parent is not None:
-                print("Backprojection done. Reconstructing...")
-                final_numerator = torch.frombuffer(shared_numerator.get_obj(), dtype=torch.float32).reshape(numerator_shape)
-                final_weights = torch.frombuffer(shared_weights.get_obj(), dtype=torch.float32).reshape(weights_shape)
-                final_ctfsq = torch.frombuffer(shared_ctfsq.get_obj(), dtype=torch.float32).reshape(ctfsq_shape)
+    if not skip_reconstruction and reconstructor_parent is not None:
+        print("Backprojection done. Reconstructing...")
+        final_numerator = torch.frombuffer(shared_numerator.get_obj(), dtype=torch.float32).reshape(numerator_shape)
+        final_weights = torch.frombuffer(shared_weights.get_obj(), dtype=torch.float32).reshape(weights_shape)
+        final_ctfsq = torch.frombuffer(shared_ctfsq.get_obj(), dtype=torch.float32).reshape(ctfsq_shape)
 
-                reconstructor_parent.numerator = final_numerator
-                reconstructor_parent.weights = final_weights
-                reconstructor_parent.ctfsq = final_ctfsq
+        reconstructor_parent.numerator = final_numerator
+        reconstructor_parent.weights = final_weights
+        reconstructor_parent.ctfsq = final_ctfsq
 
-                out_mrc = os.path.join(results_dir, f"reconstruction_{d_half}_nnet.mrc")
-                reconstructor_parent.generate_volume(out_mrc)
-                print(f"Reconstruction saved for {d_half}: {out_mrc}")
-    #TODO: Compute FSC also when n_jobs > 0
+        out_mrc = os.path.join(results_dir, f"reconstruction_{d_half}.mrc")
+        reconstructor_parent.generate_volume(out_mrc)
+        print(f"Reconstruction saved for {d_half}: {out_mrc}")
+        key_model = f"model_{resolved_model_halfset}"
+        slot = fsc_by_model.setdefault(key_model, {"half1": None, "half2": None, "sampling_rate": None})
+        slot[d_half] = out_mrc
+        try:
+            slot["sampling_rate"] = getattr(reconstructor_parent, "sampling_rate", slot["sampling_rate"])
+        except Exception:
+            pass
+
+
+    # Compute FSC when reconstructions for both halves exist
+    try:
+        for model_key, rec in fsc_by_model.items():
+            if rec.get("half1") and rec.get("half2") and rec.get("sampling_rate"):
+                print(f"Computing FSC for {model_key}...")
+                vol1 = get_vol(rec["half1"], pixel_size=None)[0]
+                vol2 = get_vol(rec["half2"], pixel_size=None)[0]
+                mask_arr = None
+                if reference_mask is not None:
+                    mask_arr = get_vol(reference_mask, pixel_size=None)[0]
+                fsc, spatial_freq, resolution_A, (res_05, res_0143) = compute_fsc(
+                    vol1, vol2, rec["sampling_rate"], mask=mask_arr
+                )
+                print(f"[FSC] Resolution at 0.143: {res_0143:.3f} Å; at 0.5: {res_05:.3f} Å")
+    except Exception as e:
+        print(f"FSC computation failed: {e}")
     return aggregated_results
 
 
@@ -513,8 +583,8 @@ if __name__ == '__main__':
     main()
 
     """
-    
+
 python -m cryoPARES.inference.infer \
 --particles_star_fname /home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/1000particles.star  --results_dir /tmp/cryoPARES_train/cryoPARES_inference/ --particles_dir /home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data --checkpoint_dir /tmp/cryoPARES_train/version_0/ --NOT_use_cuda --config inference.before_refiner_buffer_size=4 --batch_size 8 
-    
+
     """

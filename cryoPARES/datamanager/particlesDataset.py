@@ -114,10 +114,6 @@ class ParticlesDataset(Dataset, ABC):
         self._particles = part_set
         assert len(part_set) > 0, "Error, no particles were found in the star file"
 
-        #Since subset_idxs is used in distributed executions, it is the first subset that needs to be applied
-        if self.subset_idxs is not None:
-            self._particles = self._particles.createSubset(idxs=self.subset_idxs)
-
         if self.halfset is not None:
             if "rlnRandomSubset" not in self._particles.particles_md:
                 half1, half2 = train_test_split(self._particles.particles_md.index, test_size=0.5,
@@ -131,6 +127,9 @@ class ParticlesDataset(Dataset, ABC):
             assert min(_subsetNums) >= 1 and max(_subsetNums) <= 2
             idxs = np.where(subsetNums == self.halfset)[0]
             self._particles = self._particles.createSubset(idxs=idxs)
+
+        if self.subset_idxs is not None:
+            self._particles = self._particles.createSubset(idxs=self.subset_idxs)
 
         if self.min_maxProb is not None:
             maxprob = self._particles.particles_md[RELION_ORI_POSE_CONFIDENCE_NAME]

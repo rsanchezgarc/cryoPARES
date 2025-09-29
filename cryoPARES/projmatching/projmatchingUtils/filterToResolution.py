@@ -1,5 +1,5 @@
 import torch
-from typing import Literal, get_args
+from typing import Literal, get_args, Optional
 
 from cryoPARES.utils.reconstructionUtils import get_vol, write_vol
 
@@ -62,6 +62,7 @@ def low_pass_filter(img, resolution, sampling_rate, mode: Literal["raised_cos"] 
                              resolution+delta_resolution. In Å
     :return: The filtered image.
     """
+    print(f"Filtering reference to {resolution}")
     if mode == "raised_cos":
         filt = _raised_cosine_filter(img.shape, freq_or_res=resolution, delta=delta_resolution,
                                      sampling_rate=sampling_rate)
@@ -72,9 +73,10 @@ def low_pass_filter(img, resolution, sampling_rate, mode: Literal["raised_cos"] 
 
 
 delta_resolution_mode_typeHint = Literal["Angstroms", "digital", "n_shells"]
-def low_pass_filter_fname(vol_fname, resolution, out_fname: str, mode: Literal["raised_cos"] = "raised_cos",
-                    delta_resolution: float = 2.,
-                    delta_resolution_mode: delta_resolution_mode_typeHint = "n_shells"):
+def low_pass_filter_fname(vol_fname, resolution, out_fname: Optional[str],
+                          mode: Literal["raised_cos"] = "raised_cos",
+                          delta_resolution: float = 2.,
+                          delta_resolution_mode: delta_resolution_mode_typeHint = "n_shells"):
     """
 
     :param vol_fname:
@@ -102,9 +104,9 @@ def low_pass_filter_fname(vol_fname, resolution, out_fname: str, mode: Literal["
     elif delta_resolution_mode != "Angstroms":
         raise NotImplementedError(f"Error, no valid delta_resolution_mode {delta_resolution_mode}. Only allowed: {get_args(delta_resolution_mode_typeHint)}")
     vol = low_pass_filter(vol, resolution, sampling_rate=pixel_size, mode=mode, delta_resolution=delta_resolution)
-    vol.pixel_size = pixel_size
-    write_vol(vol, out_fname, pixel_size=pixel_size)
-    return vol, (resolution - delta_resolution)
+    if out_fname is not None:
+        write_vol(vol, out_fname, pixel_size=pixel_size)
+    return vol, pixel_size, (resolution - delta_resolution)
 
 
 def _test():

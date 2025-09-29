@@ -454,7 +454,9 @@ def distributed_inference(
                         if p.is_alive():
                             p.terminate()
                     sys.exit(1)
-
+                finally:
+                    for p in processes:
+                        p.join()
             key = f"model_{resolved_model_halfset}__data_{d_half}"
             if results:
                 print(f"Aggregating results from {len(results)} workers for {key}...")
@@ -467,7 +469,7 @@ def distributed_inference(
                     print(f"Saved aggregated STAR: {out_star}")
             else:
                 aggregated_results[key] = None
-
+            #TODO: Reconstruction with n_jobs>1 is not working
             if not skip_reconstruction and reconstructor_parent is not None:
                 print("Backprojection done. Reconstructing...")
                 final_numerator = torch.frombuffer(shared_numerator.get_obj(), dtype=torch.float32).reshape(numerator_shape)

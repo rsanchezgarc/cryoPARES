@@ -152,7 +152,13 @@ class ProjectionMatcher(nn.Module):
         Load volume, move to Fourier domain (rfft & shift), register buffers and
         set up correlation choice.
         """
-        reference_vol, pixel_size = get_vol(reference_vol, pixel_size=pixel_size)
+
+        if self.max_resolution_A is not None:
+            reference_vol , pixel_size = low_pass_filter_fname(reference_vol, resolution=self.max_resolution_A,
+                                                               out_fname=None)[:2]
+        else:
+            reference_vol, pixel_size = get_vol(reference_vol, pixel_size=pixel_size)
+
         self.ori_vol_shape = reference_vol.shape
         self.ori_image_shape = self.ori_vol_shape[-2:]
         self.vol_voxel_size = pixel_size
@@ -190,11 +196,9 @@ class ProjectionMatcher(nn.Module):
         rmask = circle(radius_px, image_shape=self.image_shape, smoothing_radius=radius_px * .05)
         self.register_buffer("rmask", rmask)
         if self.max_resolution_A is not None:
-            nyquist_freq = 1 / (2 * self.vol_voxel_size)  # Nyquist freq in cycles/Å
-            cutoff_freq = 1 / self.max_resolution_A  # cutoff freq in cycles/Å
-            self.fftfreq_max = min(cutoff_freq / nyquist_freq, 1.0)  # normalize to Nyquist (0..1)
+            self.fftfreq_max = min(self.vol_voxel_size / self.max_resolution_A, 0.5)
         else:
-            self.fftfreq_max = None
+            self.fftfreq_max = 0.5
 
     def _projectF(self, rotMats: torch.Tensor) -> torch.Tensor:
 

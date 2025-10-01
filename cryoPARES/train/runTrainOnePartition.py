@@ -147,7 +147,7 @@ class TrainerPartition:
             sync_batchnorm=self.train_config.sync_batchnorm,
             plugins=plUtils.GET_PL_PLUGIN(main_config.train.pl_plugin),
             callbacks=callbacks,
-            use_distributed_sampler=False #TODO: Check if this is required
+            use_distributed_sampler=False #We are manually handling distributed sampling.
         )
 
     def _kwargs_for_loading(self):
@@ -169,7 +169,7 @@ class TrainerPartition:
             else:
                 load_fname = self.continue_checkpoint_fname
                 resume_from_checkpoint = self.continue_checkpoint_fname
-
+            print(f"Loading model state from {load_fname}")
             pl_model = PlModel.load_from_checkpoint(load_fname, **kwargs)
 
         else:
@@ -260,7 +260,7 @@ class TrainerPartition:
                                   num_workers=num_dataworkers,
                                   batch_size=main_config.train.batch_size_for_reconstruct,
                                   use_cuda=main_config.train.cuda_for_reconstruct,
-                                  correct_ctf=True, eps=1e-3, min_denominator_value=1e-4,
+                                  correct_ctf=True, eps=1e-3, min_denominator_value=None,
                                   float32_matmul_precision=main_config.train.float32_matmul_precision_for_reconstruct)
                     if self.overfit_batches is not None:
                         kwargs["use_only_n_first_batches"] = self.overfit_batches
@@ -278,7 +278,7 @@ class TrainerPartition:
                         cwd=os.path.abspath(os.path.join(__file__, "..", "..", "..")), check=True
                     )
             else:
-                warnings.warn("No validation particles found, directional precentiles were not computed")
+                warnings.warn("No validation particles found, directional percentiles were not computed")
 
     def _save_training_completion(self, checkpointer):
         dirname = osp.dirname(checkpointer.best_model_path)

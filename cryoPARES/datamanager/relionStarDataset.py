@@ -27,7 +27,7 @@ class ParticlesRelionStarDataset(ParticlesDataset):
         ##Builder
 
         Args:
-            particles_star_fname (Union[PathLike, str]): The star filename to use
+            particles_star_fname (Union[PathLike, str, dict[str, pd.DataFrame]): The star filename to use
             particles_dir (str): The root directory where the stack files are
             subset_idxs (Optional[List[int]] ): The subset of idxs to use
         """

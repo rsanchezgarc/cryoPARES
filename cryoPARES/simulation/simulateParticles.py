@@ -1,497 +1,457 @@
+# cryoem_simulator.py
 """
-Cryo-EM particle stack simulator (Fourier central-slice pipeline)
+Cryo-EM particle stack simulator (DataLoader version)
+- central_slice: Fourier central-slice projections (+ optional CTF/noise)
+- noise_additive: RELION-like simulate
+    noise_only = orig - (alpha * CTF(proj_sub) + beta)
+    out        = noise_only + scale_add( CTF(proj_add) ) [+ optional noise]
 
-Given a 3D volume (MRC) and a RELION-style STAR file with per-particle
-poses (Rot/Tilt/Psi), optional XY shifts, and CTF/optics parameters,
-this module synthesizes a 2D particle stack and a matching STAR.
-
-CLI example
------------
-```bash
-python cryoem_simulator.py \
-  --volume /path/map.mrc \
-  --in_star /path/particles.star \
-  --output_dir /path/sim_out \
-  --basename sim \
-  --images_per_file 1000 \
-  --num_workers 4 \
-  --apply_ctf \
-  --use_gpu \
-  --gpus 0,1,2 \
-  --batch_size 128 \
-  --snr 0.1 \
-  --randomize_angles_frac 0.2 \
-  --randomize_angles_max_deg 5 \
-  --randomize_shifts_frac 0.1 \
-  --randomize_shifts_max_A 2.0 \
-  --random_seed 123
-```
-
-Programmatic example
--------------------
-```python
-from cryoem_simulator import run_simulation
-
-run_simulation(
-    volume="/path/map.mrc",
-    in_star="/path/particles.star",
-    output_dir="/path/sim_out",
-    use_gpu=True,
-    gpus=[0, 1, 2],
-    num_workers=4,
-    apply_ctf=True,
-    snr=0.1
-)
-```
+Key simplifications:
+- Uses starstack.particlesStar.ParticlesStarSet once at startup.
+- Minimal Dataset/DataLoader that yields (index, md_row, [image_if_needed]).
+- Batch-wise projection & CTF; per-image shift & scaling.
 """
-from __future__ import annotations
 
 import math
 import os
 import warnings
-from typing import Optional, Union, List
+from typing import Optional, Union, List, Tuple, Dict
 
 import numpy as np
+import pandas as pd
 import torch
-import starfile
+from torch.utils.data import Dataset, DataLoader
+
 import mrcfile
+import starfile
+
+# --- your stack & helpers ---
+from starstack.particlesStar import ParticlesStarSet  # preferred entry point  :contentReference[oaicite:1]{index=1}
 
 from cryoPARES.constants import (
-    RELION_ANGLES_NAMES,
-    RELION_EULER_CONVENTION,
-    RELION_SHIFTS_NAMES,
+    RELION_ANGLES_NAMES, RELION_EULER_CONVENTION, RELION_SHIFTS_NAMES,
 )
 from cryoPARES.geometry.convert_angles import euler_angles_to_matrix
-from cryoPARES.datamanager.ctf.rfft_ctf import corrupt_with_ctf
-from cryoPARES.projmatching.projmatchingUtils.fourierOperations import compute_dft_3d, _fourier_proj_to_real_2d
+from cryoPARES.projmatching.projmatchingUtils.fourierOperations import (
+    compute_dft_3d, _fourier_proj_to_real_2d,
+)
 from torch_fourier_slice.slice_extraction import extract_central_slices_rfft_3d
 from torch_fourier_shift import fourier_shift_image_2d
+from cryoPARES.datamanager.ctf.rfft_ctf import corrupt_with_ctf
 
 
-# ----------------------------- STAR I/O ----------------------------- #
+# ---------------------------- Small utilities ---------------------------- #
 
-def load_star_with_optics(star_path: str):
-    """Load a RELION STAR file containing particle data and optional optics table."""
-    data = starfile.read(star_path)
-    if isinstance(data, dict):
-        particles = data.get("particles")
-        optics = data.get("optics")
-    else:
-        particles = data
-        optics = None
-    if particles is None:
-        raise ValueError("STAR file has no 'particles' table")
-
-    if optics is not None and "rlnOpticsGroup" in particles.columns and "rlnOpticsGroup" in optics.columns:
-        particles = particles.merge(
-            optics,
-            how="left",
-            on="rlnOpticsGroup",
-            suffixes=("", "_optics"),
-        )
-    return particles, optics
-
-
-def get_optics_pixel_size(row) -> float:
-    """Extract pixel size from a STAR file row containing optics information."""
-    for k in ("rlnImagePixelSize", "rlnPixelSize", "rlnDetectorPixelSize"):
-        if k in row and not (isinstance(row[k], float) and math.isnan(row[k])):
-            return float(row[k])
-    raise ValueError("Could not find pixel size in STAR (optics).")
-
-# ----------------------------- Helpers ------------------------------ #
-
-def relion_eulers_to_rotmats_deg(eulers_deg: torch.Tensor) -> torch.Tensor:
-    """Convert RELION Euler angles (in degrees) to rotation matrices."""
+def _deg_eulers_to_R(eulers_deg: torch.Tensor) -> torch.Tensor:
     return euler_angles_to_matrix(torch.deg2rad(eulers_deg), convention=RELION_EULER_CONVENTION)
 
+def _isnan_or_none(x) -> bool:
+    try:
+        return x is None or (isinstance(x, float) and math.isnan(x))
+    except Exception:
+        return False
 
-def _validate_gpu_setup(use_gpu: bool, gpus: Optional[List[int]]) -> List[str]:
-    """Validate GPU configuration and return list of device strings."""
-    if not use_gpu:
-        return ["cpu"]
+def _get_px_A_from_optics_row(row) -> float:
+    for k in ("rlnImagePixelSize", "rlnPixelSize", "rlnDetectorPixelSize"):
+        if k in row and not (isinstance(row[k], float) and math.isnan(row[k])):
+            try: return float(row[k])
+            except Exception: return float(pd.to_numeric(row[k], errors="coerce"))
+    raise ValueError("No pixel size found in optics/particles")
 
-    if not torch.cuda.is_available():
-        raise RuntimeError("GPU requested but CUDA is not available")
+def _match_linear(y: torch.Tensor, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> Tuple[float, float]:
+    """
+    Find alpha, beta minimizing || y - (alpha*x + beta) ||_2 over (masked) pixels.
+    Returns (alpha, beta) as floats. Robust & fast closed-form.
+    """
+    if mask is not None:
+        y = y[mask]
+        x = x[mask]
+    xm = x.mean()
+    ym = y.mean()
+    xv = (x - xm)
+    denom = float(torch.sum(xv * xv))
+    if denom <= 1e-12:
+        return 1.0, float(ym - xm)  # degenerate: fall back
+    alpha = float(torch.sum(xv * (y - ym)) / denom)
+    beta = float(ym - alpha * xm)
+    return alpha, beta
 
-    if gpus is None or len(gpus) == 0:
-        return ["cuda:0"]
-
-    # Validate GPU indices
-    available_gpus = torch.cuda.device_count()
-    for gpu_idx in gpus:
-        if gpu_idx >= available_gpus or gpu_idx < 0:
-            raise ValueError(f"GPU index {gpu_idx} is invalid. Available GPUs: 0-{available_gpus-1}")
-
-    return [f"cuda:{gpu_idx}" for gpu_idx in gpus]
-
-
-def _apply_randomizations(
-    parts_df,
-    angles_frac: float,
-    angles_max_deg: float,
-    shifts_frac: float,
-    shifts_max_A: float,
-    seed: Optional[int] = None,
-):
-    """Apply randomizations to a fraction of particle angles and/or shifts in-place."""
-    rng = np.random.default_rng(seed)
-    N = len(parts_df)
-
-    if angles_frac and angles_frac > 0:
-        k = max(1, int(round(angles_frac * N)))
-        idx = rng.choice(N, size=k, replace=False)
-        noise = rng.uniform(-angles_max_deg, angles_max_deg, size=(k, 3)).astype(np.float32)
-        for j, col in enumerate(RELION_ANGLES_NAMES):
-            if col in parts_df.columns:
-                parts_df.iloc[idx, parts_df.columns.get_loc(col)] = (
-                    parts_df.iloc[idx][col].values.astype(np.float32) + noise[:, j]
-                )
-
-    if shifts_frac and shifts_frac > 0:
-        k = max(1, int(round(shifts_frac * N)))
-        idx = rng.choice(N, size=k, replace=False)
-        noise = rng.uniform(-shifts_max_A, shifts_max_A, size=(k, 2)).astype(np.float32)
-        for j, col in enumerate(RELION_SHIFTS_NAMES[:2]):
-            if col in parts_df.columns:
-                parts_df.iloc[idx, parts_df.columns.get_loc(col)] = (
-                    parts_df.iloc[idx][col].values.astype(np.float32) + noise[:, j]
-                )
+def _circular_background_mask(HW: int, radius_frac: float = 0.5, device=None) -> torch.Tensor:
+    """
+    Simple circular background mask (outside a radius). Useful to regress scale on background only, if desired.
+    radius_frac: fraction of half-size defining the particle radius.
+    """
+    rmax = HW / 2
+    rr = radius_frac * rmax
+    ys, xs = torch.meshgrid(
+        torch.linspace(-rmax, rmax, HW, device=device, dtype=torch.float32),
+        torch.linspace(-rmax, rmax, HW, device=device, dtype=torch.float32),
+        indexing="ij"
+    )
+    rad = torch.sqrt(ys * ys + xs * xs)
+    # background = outside radius
+    return (rad > rr)
 
 
-# ------------------------------ Core -------------------------------- #
+# ------------------------- Dataset / DataLoader ------------------------- #
+
+class ParticlesDatasetLite(Dataset):
+    """
+    Very basic dataset:
+      - Holds a ParticlesStarSet and yields (idx, md_row, image) for noise_additive,
+        or (idx, md_row, None) for central_slice.
+    """
+    def __init__(self, pset: ParticlesStarSet, need_images: bool):
+        self.pset = pset
+        self.need_images = need_images
+        # Do NOT reset_index here; pandas collision can happen if the index name
+        # already exists as a column (e.g., 'rlnImageName').
+        # We don’t need a separate DataFrame copy anyway.
+
+    def __len__(self) -> int:
+        return len(self.pset)
+
+    def __getitem__(self, idx: int):
+        # pset[idx] -> (img, md_row) per your particlesDataset.py
+        if self.need_images:
+            img, md_row = self.pset[idx]
+            img = torch.as_tensor(img, dtype=torch.float32)   # HxW
+        else:
+            _, md_row = self.pset[idx]
+            img = None
+        return idx, md_row, img
+
+
+def _collate(batch):
+    idxs, md_rows, imgs = zip(*batch)
+    # Put md into a list of dicts to avoid heavy conversions
+    return list(idxs), list(md_rows), list(imgs)  # imgs may contain None in central_slice
+
+
+# ------------------------------ Simulator ------------------------------ #
 
 class CryoEMSimulator:
-    """Cryo-EM particle stack simulator using Fourier central slice theorem."""
+    """
+    Simulator with two modes (select via simulation_mode):
+      - 'central_slice' (default)
+      - 'noise_additive' (RELION-like subtraction + addition with scaling)
+    """
 
     def __init__(self, volume_mrc: str, device: str = "cpu", normalize_volume: bool = True):
-        """Initialize the simulator with a 3D volume."""
-        self.volume_mrc = volume_mrc
         self.device = torch.device(device)
-
-        # Load and validate volume
+        # Load volume and precompute its RFFT once
         with mrcfile.open(volume_mrc, permissive=True) as mrc:
             vol_np = np.asarray(mrc.data.copy(), dtype=np.float32)
-            if vol_np.ndim == 4:
-                vol_np = vol_np.squeeze()
+            if vol_np.ndim == 4: vol_np = vol_np.squeeze()
             assert vol_np.ndim == 3 and vol_np.shape[0] == vol_np.shape[1] == vol_np.shape[2], "Volume must be cubic"
-            self.n = int(vol_np.shape[0])
-            self.voxel_size_A = float(abs(mrc.voxel_size.x)) if mrc.voxel_size.x != 0 else None
+            self.N = int(vol_np.shape[0])
 
-        # Prepare volume tensor
         vol = torch.as_tensor(vol_np, device=self.device, dtype=torch.float32)
         if normalize_volume:
             vol = (vol - vol.mean()) / (vol.std() + 1e-6)
 
-        # Precompute fftshifted RFFT of volume; keep padding_factor=0 for direct size
         vol_rfft, vol_shape, _ = compute_dft_3d(vol, pad_length=0)
-        self.vol_rfft = vol_rfft.to(torch.complex64)  # (D, D, D//2+1)
-        self.vol_shape = tuple(int(x) for x in vol_shape)
+        self.vol_rfft = vol_rfft.to(torch.complex64)
+        self.image_shape = (int(vol_shape[-1]), int(vol_shape[-1]))
 
-    @staticmethod
-    def _process_shard(
-        volume_path: str,
-        device: str,
-        star_csv,
-        start: int,
-        end: int,
-        optics_row,
-        px_A: float,
-        out_path: str,
+    def _project(self, R: torch.Tensor) -> torch.Tensor:
+        """
+        R: (B, 3, 3)
+        returns real-space projections (B, H, W) float32
+        """
+        projs_rfft = extract_central_slices_rfft_3d(
+            self.vol_rfft, image_shape=self.image_shape, rotation_matrices=R, fftfreq_max=None, zyx_matrices=False
+        )
+        projs_real = _fourier_proj_to_real_2d(projs_rfft, pad_length=None)
+        return projs_real
+
+    def _batch_angles_R(self, md_rows: List[pd.Series]) -> torch.Tensor:
+        euls_deg = torch.tensor(
+            [[float(row.get(k, 0.0)) for k in RELION_ANGLES_NAMES] for row in md_rows],
+            device=self.device, dtype=torch.float32
+        )
+        return _deg_eulers_to_R(euls_deg)
+
+    def _row_shifts_px(self, row: pd.Series, px_A: float) -> Tuple[float, float]:
+        sxA = float(row.get(RELION_SHIFTS_NAMES[0], 0.0))
+        syA = float(row.get(RELION_SHIFTS_NAMES[1], 0.0))
+        return (sxA / px_A, syA / px_A)
+
+    def _apply_shift_ctf(self, img: torch.Tensor, row: pd.Series, px_A: float,
+                         volt_kV: float, cs_mm: float, amp_contrast: float) -> torch.Tensor:
+        # Fourier shift (if any)
+        sx, sy = self._row_shifts_px(row, px_A)
+        if sx or sy:
+            img = fourier_shift_image_2d(img, shifts=torch.tensor([sx, sy], device=self.device))
+        # CTF (always needed for noise_additive; optional for central_slice)
+        dfU = float(row.get("rlnDefocusU", 15000.0))
+        dfV = float(row.get("rlnDefocusV", 15000.0))
+        dfAng = float(row.get("rlnDefocusAngle", 0.0))
+        phase_shift = float(row.get("rlnPhaseShift", 0.0)) if "rlnPhaseShift" in row else 0.0
+        bfac_val = row.get("rlnCtfBfactor", None)
+        bfactor = None if _isnan_or_none(bfac_val) else float(bfac_val)
+        _, img_ctf = corrupt_with_ctf(
+            image=img, sampling_rate=px_A,
+            dfu=dfU, dfv=dfV, dfang=dfAng,
+            volt=volt_kV, cs=cs_mm, w=amp_contrast,
+            phase_shift=phase_shift, bfactor=bfactor, fftshift=True
+        )
+        return img_ctf
+
+    # ---------------------------- Main loop ---------------------------- #
+
+    @torch.no_grad()
+    def run(
+        self,
+        pset: ParticlesStarSet,
+        out_dir: str,
+        basename: str,
+        images_per_file: int,
         batch_size: int,
+        simulation_mode: str,
         apply_ctf: bool,
         snr: Optional[float],
-    ) -> list[str]:
-        """Process a single shard of particles in a worker process."""
-        # Initialize simulator for this worker
-        sim = CryoEMSimulator(volume_mrc=volume_path, device=device)
-        parts_df = star_csv.iloc[start:end]
+        grayscale_adjust: str,
+        reuse_subtraction_scale_for_addition: bool,
+        num_workers: int,
+    ) -> str:
 
-        # Extract CTF parameters
-        voltage_kV = float(optics_row.get("rlnVoltage", 300.0))
+        os.makedirs(out_dir, exist_ok=True)
+        parts_df = pset.particles_md
+        optics_df = getattr(pset, "optics_md", None)
+        optics_row = (optics_df.iloc[0] if optics_df is not None else parts_df.iloc[0])
+        px_A = _get_px_A_from_optics_row(optics_row)
+
+        volt_kV = float(optics_row.get("rlnVoltage", 300.0))
         cs_mm = float(optics_row.get("rlnSphericalAberration", 2.7))
         amp_contrast = float(optics_row.get("rlnAmplitudeContrast", 0.07))
 
-        H = W = sim.vol_shape[-1]
-        N = len(parts_df)
-        stack = np.empty((N, H, W), dtype=np.float32)
+        need_images = (simulation_mode == "noise_additive")
+        ds = ParticlesDatasetLite(pset, need_images=need_images)
+        loader = DataLoader(ds, batch_size=batch_size, shuffle=False,
+                            num_workers=num_workers, collate_fn=_collate, pin_memory=False)
 
-        def row_eulers(row):
-            return [float(row.get(k, 0.0)) for k in RELION_ANGLES_NAMES]
+        H, W = self.image_shape
+        stack_paths: List[str] = []
+        image_names_all: List[str] = []
 
-        def row_shifts_px(row):
-            sxA = float(row.get(RELION_SHIFTS_NAMES[0], 0.0))
-            syA = float(row.get(RELION_SHIFTS_NAMES[1], 0.0))
-            return (sxA / px_A, syA / px_A)
+        # Output shard mgmt
+        def _new_shard_writer(shard_idx: int):
+            out_path = os.path.join(out_dir, f"{basename}_{shard_idx:04d}.mrcs")
+            buf = np.empty((0, H, W), dtype=np.float32)
+            return out_path, buf
 
-        # Process particles in batches
-        i_local = 0
-        while i_local < N:
-            j_local = min(i_local + batch_size, N)
-            batch = parts_df.iloc[i_local:j_local]
+        shard_idx = 0
+        out_path, buffer = _new_shard_writer(shard_idx)
 
-            # Extract Euler angles and convert to rotation matrices
-            euls = torch.tensor([row_eulers(r) for _, r in batch.iterrows()], device=sim.device, dtype=torch.float32)
-            R = relion_eulers_to_rotmats_deg(euls)
+        def _flush_and_rotate_shard(buf: np.ndarray, shard_idx: int) -> Tuple[str, np.ndarray, int]:
+            nonlocal out_path
+            with mrcfile.new(out_path, overwrite=True) as m:
+                m.set_data(buf)
+                m.voxel_size = (px_A, px_A, px_A)
+            stack_paths.append(out_path)
+            return *_new_shard_writer(shard_idx + 1), shard_idx + 1  # type: ignore
 
-            # Generate projections using Fourier slice theorem
-            projs_rfft = extract_central_slices_rfft_3d(
-                sim.vol_rfft, image_shape=sim.vol_shape, rotation_matrices=R, fftfreq_max=None, zyx_matrices=False
-            )
-            projs_real = _fourier_proj_to_real_2d(projs_rfft, pad_length=None)
+        img_counter = 0
 
-            # Process each projection in the batch
-            for b, ((_, row), img) in enumerate(zip(batch.iterrows(), projs_real)):
-                # Apply shifts
-                sx_px, sy_px = row_shifts_px(row)
-                img_shifted = (
-                    fourier_shift_image_2d(image=img, shifts=torch.tensor([sx_px, sy_px], device=sim.device))
-                    if (sx_px or sy_px) else img
-                )
+        for idxs, md_rows, imgs in loader:
+            # 1) Project current batch
+            R = self._batch_angles_R(md_rows)
+            projs = self._project(R)  # (B,H,W)
+            B = projs.shape[0]
 
-                # Apply CTF if requested
-                if apply_ctf:
-                    dfU = float(row.get("rlnDefocusU", 15000.0))
-                    dfV = float(row.get("rlnDefocusV", 15000.0))
-                    dfAng = float(row.get("rlnDefocusAngle", 0.0))
-                    phase_shift = float(row.get("rlnPhaseShift", 0.0)) if "rlnPhaseShift" in row else 0.0
-                    bfactor = float(row.get("rlnCtfBfactor", float("nan"))) if "rlnCtfBfactor" in row else None
-                    _, img_corr = corrupt_with_ctf(
-                        image=img_shifted,
-                        sampling_rate=px_A,
-                        dfu=dfU,
-                        dfv=dfV,
-                        dfang=dfAng,
-                        volt=voltage_kV,
-                        cs=cs_mm,
-                        w=amp_contrast,
-                        phase_shift=phase_shift,
-                        bfactor=bfactor,
-                        fftshift=True,
-                    )
-                    out_img = img_corr
-                else:
-                    out_img = img_shifted
+            # 2) For each image in the batch, finalize according to mode
+            for i in range(B):
+                row = md_rows[i]
+                proj = projs[i]  # (H,W), device=self.device, float32
 
-                # Add noise if requested
+                if simulation_mode == "central_slice":
+                    out_img = proj
+                    if apply_ctf:
+                        out_img = self._apply_shift_ctf(out_img, row, px_A, volt_kV, cs_mm, amp_contrast)
+                    else:
+                        # still apply shift if defined (without CTF)
+                        sx, sy = self._row_shifts_px(row, px_A)
+                        if sx or sy:
+                            out_img = fourier_shift_image_2d(out_img, shifts=torch.tensor([sx, sy], device=self.device))
+
+                else:  # noise_additive
+                    assert imgs[i] is not None, "Dataset must provide images in noise_additive mode"
+                    orig = imgs[i].to(self.device)  # HxW
+
+                    # Subtraction projection uses current row pose/shifts/ctf
+                    proj_sub_ctf = self._apply_shift_ctf(proj, row, px_A, volt_kV, cs_mm, amp_contrast)
+
+                    # ----- SCALE (alpha, beta) so experimental & reference are on same scale -----
+                    # Optionally regress on full image, or restrict to background if wanted:
+                    bg_mask = None  # you can set to _circular_background_mask(H) if you prefer background-based fit
+                    alpha, beta = _match_linear(orig, proj_sub_ctf, mask=bg_mask)
+
+                    noise_only = orig - (alpha * proj_sub_ctf + beta)
+
+                    # Addition: make another projection to add (here we use same R; if you randomize angles upstream,
+                    # they will already differ).
+                    proj_add_ctf = self._apply_shift_ctf(proj, row, px_A, volt_kV, cs_mm, amp_contrast)
+
+                    # Scale the added projection
+                    if reuse_subtraction_scale_for_addition:
+                        proj_add_scaled = alpha * proj_add_ctf  # reuse alpha, no extra offset
+                    else:
+                        if grayscale_adjust == "match_noise_std":
+                            s_noise = float(torch.std(noise_only).cpu())
+                            scale = s_noise if s_noise > 0 else 1.0
+                            proj_add_scaled = (proj_add_ctf - proj_add_ctf.mean()) * scale
+                        elif grayscale_adjust == "variance_residual":
+                            v_orig = float(torch.var(orig).cpu())
+                            v_noise = float(torch.var(noise_only).cpu())
+                            s_sig = math.sqrt(max(v_orig - v_noise, 1e-8))
+                            proj_add_scaled = (proj_add_ctf - proj_add_ctf.mean()) * s_sig
+                        else:  # "none"
+                            proj_add_scaled = proj_add_ctf
+
+                    out_img = noise_only + proj_add_scaled
+
+                # Optional final additive white noise
                 if snr is not None and snr > 0:
                     sig_var = float(torch.var(out_img).cpu())
                     noise_std = math.sqrt(sig_var / snr) if sig_var > 0 else 1.0
-                    noise = torch.randn_like(out_img) * noise_std
-                    out_img = (out_img + noise).to(out_img.dtype)
+                    out_img = out_img + torch.randn_like(out_img) * noise_std
 
-                stack[i_local + b] = out_img.detach().cpu().numpy()
+                # Stash to current shard buffer
+                np_img = out_img.detach().cpu().numpy().astype(np.float32)
+                if buffer.shape[0] == 0:
+                    buffer = np_img[None, ...]
+                else:
+                    buffer = np.concatenate([buffer, np_img[None, ...]], axis=0)
 
-            i_local = j_local
+                img_counter += 1
+                # Roll shard if full
+                if buffer.shape[0] >= images_per_file:
+                    out_path, buffer, shard_idx = _flush_and_rotate_shard(buffer, shard_idx)
 
-        # Save stack to MRCS file
-        os.makedirs(os.path.dirname(out_path), exist_ok=True)
-        with mrcfile.new(out_path, overwrite=True) as m:
-            m.set_data(stack)
-            m.voxel_size = (px_A, px_A, px_A)
+                # Build RELION-style name (k@basename.mrcs); k is 1-based within shard
+                # We’ll fix names after final write using actual shard files and counts.
+                # For now, just track counts.
 
-        # Generate RELION-style image names
-        base = os.path.basename(out_path)
-        names = [f"{k+1}@{base}" for k in range(N)]
-        return names
+        # Final flush
+        if buffer.shape[0] > 0:
+            with mrcfile.new(out_path, overwrite=True) as m:
+                m.set_data(buffer)
+                m.voxel_size = (px_A, px_A, px_A)
+            stack_paths.append(out_path)
 
-    @torch.no_grad()
-    def simulate_to_dir(
-        self,
-        star_in: str,
-        output_dir: str,
-        basename: str = "stack",
-        images_per_file: int = 1000,
-        batch_size: int = 128,
-        num_workers: int = 1,
-        apply_ctf: bool = True,
-        snr: Optional[float] = None,
-        use_gpu: bool = False,
-        gpus: Optional[List[int]] = None,
-        randomize_angles_frac: float = 0.0,
-        randomize_angles_max_deg: float = 0.0,
-        randomize_shifts_frac: float = 0.0,
-        randomize_shifts_max_A: float = 0.0,
-        random_seed: Optional[int] = None,
-    ) -> str:
-        """Simulate a complete particle stack from input parameters."""
-        import multiprocessing as mp
+        # Build final STAR with proper rlnImageName
+        # Collect names from each shard in order
+        image_names_all = []
+        for p in stack_paths:
+            n_in_file = mrcfile.open(p, permissive=True, mode="r").data.shape[0]
+            base = os.path.basename(p)
+            image_names_all.extend([f"{k+1}@{base}" for k in range(n_in_file)])
 
-        # Load and validate input
-        parts_df, optics_df = load_star_with_optics(star_in)
+        out_star = os.path.join(out_dir, f"{basename}.star")
+        parts_out = parts_df.copy()
+        assert len(image_names_all) == len(parts_out), "Mismatch between written images and metadata rows"
+        parts_out["rlnImageName"] = image_names_all
 
-        # Validate GPU setup
-        gpu_devices = _validate_gpu_setup(use_gpu, gpus)
-
-        # Apply requested randomizations IN-PLACE before sharding
-        _apply_randomizations(
-            parts_df,
-            angles_frac=randomize_angles_frac,
-            angles_max_deg=randomize_angles_max_deg,
-            shifts_frac=randomize_shifts_frac,
-            shifts_max_A=randomize_shifts_max_A,
-            seed=random_seed,
-        )
-
-        # Extract optics parameters
-        optics_row = (optics_df.iloc[0] if optics_df is not None else parts_df.iloc[0])
-        px_A = get_optics_pixel_size(optics_row)
-
-        N = len(parts_df)
-        os.makedirs(output_dir, exist_ok=True)
-
-        # Build shard specifications for parallel processing
-        shard_specs = []
-        shard_idx = 0
-
-        for start in range(0, N, images_per_file):
-            end = min(start + images_per_file, N)
-            out_path = os.path.join(output_dir, f"{basename}_{shard_idx:04d}.mrcs")
-            dev_for_shard = gpu_devices[shard_idx % len(gpu_devices)]
-            shard_specs.append((
-                self.volume_mrc,
-                dev_for_shard,
-                parts_df,
-                start,
-                end,
-                optics_row,
-                px_A,
-                out_path,
-                batch_size,
-                apply_ctf,
-                snr,
-            ))
-            shard_idx += 1
-
-        # Process shards in parallel or sequentially
-        if num_workers > 1 and len(shard_specs) > 1:
-            try:
-                mp.set_start_method("spawn", force=False)
-            except RuntimeError:
-                pass
-
-            # Adjust number of workers for multi-GPU setups
-            effective_workers = min(num_workers, len(shard_specs))
-            if len(gpu_devices) > 1 and effective_workers > len(gpu_devices):
-                warnings.warn(
-                    f"Using {effective_workers} workers with {len(gpu_devices)} GPUs. "
-                    f"Consider using {len(gpu_devices)} workers for optimal GPU utilization."
-                )
-
-            with mp.Pool(processes=effective_workers) as pool:
-                names_per_shard = pool.starmap(CryoEMSimulator._process_shard, shard_specs)
-        else:
-            names_per_shard = [CryoEMSimulator._process_shard(*spec) for spec in shard_specs]
-
-        # Write output STAR file
-        out_star = os.path.join(output_dir, f"{basename}.star")
-        particles_out = parts_df.copy()
-        all_names = [name for names in names_per_shard for name in names]
-        assert len(all_names) == len(particles_out), f"Mismatch: {len(all_names)} names vs {len(particles_out)} particles"
-        particles_out["rlnImageName"] = all_names
-
-        star_dict = {"particles": particles_out}
-        if optics_df is not None:
-            star_dict["optics"] = optics_df
+        star_dict = {"particles": parts_out}
+        if hasattr(pset, "optics_md") and pset.optics_md is not None:
+            star_dict["optics"] = pset.optics_md
         starfile.write(star_dict, out_star, overwrite=True)
-
         return out_star
 
 
-# -------------------------- Public API ---------------------------- #
+# -------------------------- Public API + CLI -------------------------- #
 
+@torch.no_grad()
 def run_simulation(
     volume: str,
     in_star: str,
     output_dir: str,
     basename: str = "stack",
-    images_per_file: int = 10000,
+    images_per_file: int = 10_000,
     batch_size: int = 128,
-    num_workers: int = 1,
+    num_workers: int = 0,  # DataLoader workers (0 = main process; safer with CUDA)
     apply_ctf: bool = True,
     snr: Optional[float] = None,
     use_gpu: bool = False,
-    gpus: Optional[Union[List[int], str]] = None,
-    randomize_angles_frac: float = 0.0,
+    device: Optional[str] = None,   # allow explicit 'cuda:0'
+    randomize_angles_frac: float = 0.0,  # (kept for parity; apply upstream if needed)
     randomize_angles_max_deg: float = 0.0,
     randomize_shifts_frac: float = 0.0,
     randomize_shifts_max_A: float = 0.0,
     random_seed: Optional[int] = None,
+    simulation_mode: str = "central_slice",  # "central_slice" | "noise_additive"
+    grayscale_adjust: str = "match_noise_std",  # used if not reusing subtraction alpha
+    reuse_subtraction_scale_for_addition: bool = True,
 ) -> str:
-    """Run cryo-EM particle stack simulation from Python code."""
-    # Parse GPU specification if provided as string
-    gpu_list = None
-    if gpus is not None:
-        if isinstance(gpus, str):
-            try:
-                gpu_list = [int(x.strip()) for x in gpus.split(',') if x.strip()]
-            except ValueError:
-                raise ValueError(f"Invalid GPU specification: {gpus}. Use comma-separated integers.")
-        else:
-            gpu_list = list(gpus)
+    """
+    Minimal high-level entry point.
 
-    # Determine device for main simulator instance
-    device = "cpu"
-    if use_gpu:
-        if not torch.cuda.is_available():
-            raise RuntimeError("GPU requested but CUDA is not available")
-        device = "cuda:0" if not gpu_list else f"cuda:{gpu_list[0]}"
+    Notes:
+      - Randomization knobs kept to match your previous interface, but this simplified
+        script does not mutate the STAR. If you need randomization, do it before calling.
+      - num_workers defaults to 0 to avoid CUDA+fork issues; raise if CPU-only.
+    """
+    if device is None:
+        device = "cuda:0" if use_gpu and torch.cuda.is_available() else "cpu"
 
-    # Create simulator and run
+    # Prepare ParticlesStarSet (single place for images+metadata)
+    pset = ParticlesStarSet(in_star)  # matches your usage pattern  :contentReference[oaicite:3]{index=3}
+
     sim = CryoEMSimulator(volume_mrc=volume, device=device)
-    return sim.simulate_to_dir(
-        star_in=in_star,
-        output_dir=output_dir,
+    return sim.run(
+        pset=pset,
+        out_dir=output_dir,
         basename=basename,
         images_per_file=images_per_file,
         batch_size=batch_size,
-        num_workers=num_workers,
+        simulation_mode=simulation_mode,
         apply_ctf=apply_ctf,
         snr=snr,
-        use_gpu=use_gpu,
-        gpus=gpu_list,
-        randomize_angles_frac=randomize_angles_frac,
-        randomize_angles_max_deg=randomize_angles_max_deg,
-        randomize_shifts_frac=randomize_shifts_frac,
-        randomize_shifts_max_A=randomize_shifts_max_A,
-        random_seed=random_seed,
+        grayscale_adjust=grayscale_adjust,
+        reuse_subtraction_scale_for_addition=reuse_subtraction_scale_for_addition,
+        num_workers=num_workers,
     )
 
 
-# -------------------------------- CLI ------------------------------- #
-
 def main():
-    """Main entry point for command-line interface."""
     import argparse
-
-    p = argparse.ArgumentParser(description="Simulate cryo-EM particle stack from volume+STAR (Fourier slices)")
-    p.add_argument("--volume", required=True, help="Input MRC volume (cubic)")
-    p.add_argument("--in_star", required=True, help="Input STAR with particles (+optics)")
-    p.add_argument("--output_dir", required=True, help="Directory to write .mrcs shards and the STAR")
-    p.add_argument("--basename", default="stack", help="Basename prefix for shard files and STAR")
-    p.add_argument("--images_per_file", type=int, default=10_000, help="Max images per .mrcs shard")
-    p.add_argument("--batch_size", type=int, default=128, help="In-memory batch size per worker")
-    p.add_argument("--num_workers", type=int, default=1, help="Number of parallel worker processes")
+    p = argparse.ArgumentParser(description="Simulate cryo-EM particle stack from volume+STAR (DataLoader version)")
+    p.add_argument("--volume", required=True)
+    p.add_argument("--in_star", required=True)
+    p.add_argument("--output_dir", required=True)
+    p.add_argument("--basename", default="stack")
+    p.add_argument("--images_per_file", type=int, default=10_000)
+    p.add_argument("--batch_size", type=int, default=128)
+    p.add_argument("--num_workers", type=int, default=0)
     p.add_argument("--apply_ctf", dest="apply_ctf", action="store_true")
     p.add_argument("--NOT_apply_ctf", dest="apply_ctf", action="store_false")
     p.set_defaults(apply_ctf=True)
-    p.add_argument("--snr", type=float, default=None, help="Target SNR for additive Gaussian noise (per-image)")
-    p.add_argument("--use_gpu", dest="use_gpu", action="store_true", help="Use GPU(s) for simulation")
-    p.add_argument("--NOT_use_gpu", dest="use_gpu", action="store_false", help="Disable GPU; force CPU")
-    p.set_defaults(use_gpu=False)
-    p.add_argument("--gpus", default="0", help="Comma-separated GPU IDs (e.g., '0,1,3'). Default: '0'")
-    p.add_argument("--randomize_angles_frac", type=float, default=0.0, help="Fraction [0,1] of particles to randomize angles")
-    p.add_argument("--randomize_angles_max_deg", type=float, default=0.0, help="Max |Δ| in degrees for Rot/Tilt/Psi")
-    p.add_argument("--randomize_shifts_frac", type=float, default=0.0, help="Fraction [0,1] of particles to randomize shifts")
-    p.add_argument("--randomize_shifts_max_A", type=float, default=0.0, help="Max |Δ| in Å for rlnOriginX/YAngst")
-    p.add_argument("--random_seed", type=int, default=None, help="Seed for reproducible randomization")
+    p.add_argument("--snr", type=float, default=None)
+
+    p.add_argument("--use_gpu", action="store_true")
+    p.add_argument("--device", default=None)
+
+    p.add_argument("--simulation_mode", choices=["central_slice", "noise_additive"], default="central_slice")
+    p.add_argument("--grayscale_adjust", choices=["none", "match_noise_std", "variance_residual"],
+                   default="match_noise_std")
+    p.add_argument("--reuse_subtraction_scale_for_addition", action="store_true")
+    p.add_argument("--no_reuse_subtraction_scale_for_addition", dest="reuse_subtraction_scale_for_addition",
+                   action="store_false")
+    p.set_defaults(reuse_subtraction_scale_for_addition=True)
+
+    # (randomization flags kept for API parity; not applied here)
+    p.add_argument("--randomize_angles_frac", type=float, default=0.0)
+    p.add_argument("--randomize_angles_max_deg", type=float, default=0.0)
+    p.add_argument("--randomize_shifts_frac", type=float, default=0.0)
+    p.add_argument("--randomize_shifts_max_A", type=float, default=0.0)
+    p.add_argument("--random_seed", type=int, default=None)
 
     args = p.parse_args()
 
-    # Run simulation using the extracted function
-    star_path = run_simulation(
+    out_star = run_simulation(
         volume=args.volume,
-        in_star=getattr(args, "in_star"),
+        in_star=args.in_star,
         output_dir=args.output_dir,
         basename=args.basename,
         images_per_file=args.images_per_file,
@@ -500,14 +460,17 @@ def main():
         apply_ctf=args.apply_ctf,
         snr=args.snr,
         use_gpu=args.use_gpu,
-        gpus=args.gpus,
+        device=args.device,
         randomize_angles_frac=args.randomize_angles_frac,
         randomize_angles_max_deg=args.randomize_angles_max_deg,
         randomize_shifts_frac=args.randomize_shifts_frac,
         randomize_shifts_max_A=args.randomize_shifts_max_A,
         random_seed=args.random_seed,
+        simulation_mode=args.simulation_mode,
+        grayscale_adjust=args.grayscale_adjust,
+        reuse_subtraction_scale_for_addition=args.reuse_subtraction_scale_for_addition,
     )
-    print(f"Wrote STAR: {star_path}")
+    print(f"Wrote STAR: {out_star}")
 
 
 if __name__ == "__main__":

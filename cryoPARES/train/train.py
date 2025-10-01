@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+import subprocess
 import warnings
 import psutil
 import torch
@@ -12,6 +13,7 @@ from typing import Optional, List, Literal
 from cryoPARES import constants
 from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
+from cryoPARES.utils.checkpointUtils import get_best_checkpoint
 from cryoPARES.utils.paths import get_most_recent_file
 
 
@@ -68,6 +70,13 @@ class Trainer:
         self.val_check_interval = val_check_interval
         self.overfit_batches = overfit_batches
         self.map_fname_for_simulated_pretraining = map_fname_for_simulated_pretraining
+        if map_fname_for_simulated_pretraining is not None:
+            for fname in map_fname_for_simulated_pretraining:
+                assert os.path.isfile(fname), f"Error, {fname} is not a file"
+            assert len(map_fname_for_simulated_pretraining) == len(particles_star_fname), (f"Error,"
+                       f"the number of particle star files and maps for simulation needs to be the same")
+            assert not finetune_checkpoint_dir, ("Error, if using map_fname_for_simulated_pretraining, "
+                                                 "finetune_checkpoint_dir is not a valid option")
         self.float32_matmul_precision = float32_matmul_precision
 
         self._validate_inputs()
@@ -168,7 +177,6 @@ class Trainer:
     def get_continue_checkpoint_fname(self, partition:Literal["allParticles", "half1", "half2"]):
         if self.continue_checkpoint_dir:
             fname = get_most_recent_file(os.path.join(self.continue_checkpoint_dir, partition, "checkpoints"), "*.ckpt")
-            # assert fname is not None, f"Error, checkpoint not found at {self.continue_checkpoint_dir}"
             warnings.warn( f"Error, checkpoint not found at {self.continue_checkpoint_dir}")
             return fname
         else:
@@ -176,8 +184,8 @@ class Trainer:
 
     def get_finetune_checkpoint_fname(self, partition:Literal["allParticles", "half1", "half2"]):
         if self.finetune_checkpoint_dir:
-            fname = get_most_recent_file(os.path.join(self.finetune_checkpoint_dir, partition, "checkpoints"), "*.ckpt")
-            assert fname is not None, f"Error, checkpoint not found at {self.continue_checkpoint_dir}"
+            fname = get_best_checkpoint(os.path.join(self.finetune_checkpoint_dir, partition, "checkpoints"), "*.ckpt")
+            assert fname is not None, f"Error, checkpoint not found at {self.finetune_checkpoint_dir}"
             return fname
         else:
             return None
@@ -202,37 +210,52 @@ class Trainer:
                     continue
                 if self.map_fname_for_simulated_pretraining:
                     # TODO: Implement simulate_particles
-                    # simulatedParticles = simulate_particles(self.map_fname_for_simulated_pretraining, tmpdir)
                     from cryoPARES.simulation.simulateParticles import run_simulation
                     from argParseFromDoc import generate_command_for_argparseFromDoc
-                    simulation_dir = os.path.join(tmpdir, "simulation")
-                    os.makedirs(simulation_dir, exist_ok=True)
-                    simulation_kwargs = dict(
-                        volume=self.map_fname_for_simulated_pretraining,
-                        in_star=self.particles_star_fname,
-                        output_dir=simulation_dir,
-                        basename="projections",
-                        images_per_file=10000,
-                        batch_size=self.batch_size,
-                        num_workers=self.num_dataworkers,
-                        apply_ctf=True,
-                        snr=main_config.train.snr_for_simulation,
-                        use_gpu=main_config.train.use_cuda,
-                        gpus=list(range(torch.cuda.device_count())),
-                    )
-                    cmd = generate_command_for_argparseFromDoc(
-                        "cryoPARES.simulation.simulateParticles",
-                        fun=run_simulation,
-                        use_module=True,
-                        python_executable=sys.executable,
-                        **simulation_kwargs
-                    )
+                    sim_star_fnames = []
+                    sim_dirs = []
+                    for sim_idx, fname in enumerate(self.map_fname_for_simulated_pretraining):
+                        simulation_dir = os.path.join(tmpdir, "simulation%d"%sim_idx)
+                        os.makedirs(simulation_dir, exist_ok=True)
+                        simulation_kwargs = dict(
+                            volume=self.map_fname_for_simulated_pretraining[sim_idx],
+                            in_star=self.particles_star_fname[sim_idx],
+                            output_dir=simulation_dir,
+                            basename="projections",
+                            images_per_file=10000,
+                            batch_size=self.batch_size,
+                            num_workers=self.num_dataworkers,
+                            apply_ctf=True,
+                            snr=main_config.train.snr_for_simulation,
+                            use_gpu=main_config.train.use_cuda,
+                            gpus=",".join([str(x) for x in range(torch.cuda.device_count())]), #TODO: homogenize API to use list rather than str
+                        )
+                        cmd = generate_command_for_argparseFromDoc(
+                            "cryoPARES.simulation.simulateParticles",
+                            fun=run_simulation,
+                            use_module=True,
+                            python_executable=sys.executable,
+                            **simulation_kwargs
+                        )
+                        print(cmd)
+                        subprocess.run(
+                            cmd.split(),
+                            cwd=os.path.abspath(os.path.join(__file__, "..", "..", "..")), check=True
+                        )
+                        print(f"simulated data was generated at {simulation_dir}")
+                        sim_star_fnames.append(os.path.join(simulation_dir, "projections.star"))
+                        sim_dirs.append(simulation_dir)
                     simulation_train_dir = os.path.join(tmpdir, "simulation_train")
+                    try:
+                        idx_n_epochs = [x.split("=")[0] for x in config_args].index('train.n_epochs')
+                        config_args[idx_n_epochs] = f'train.n_epochs={main_config.train.n_epochs_simulation}'
+                    except ValueError:
+                        pass
                     execute_trainOnePartition(
                         symmetry=self.symmetry,
-                        particles_star_fname=os.path.join(simulation_dir, "projections.star"),
+                        particles_star_fname=sim_star_fnames,
                         train_save_dir=simulation_train_dir,
-                        particles_dir=simulation_dir,
+                        particles_dir=sim_dirs,
                         n_epochs=main_config.train.n_epochs_simulation,
                         partition=partition,
                         compile_model=self.compile_model,
@@ -240,11 +263,12 @@ class Trainer:
                         overfit_batches=self.overfit_batches,
                         config_args=config_args
                     )
-                    #TODO: We need to automatically enable finetune model from the simulation training
-                    raise NotImplementedError()
-
-
+                    self.finetune_checkpoint_dir = simulation_train_dir
+                    config_args[idx_n_epochs] = f'train.n_epochs={main_config.train.n_epochs}'
+                    config_fname = get_most_recent_file(self.experiment_root, "configs_*.yml")
+                    shutil.copy(config_fname, simulation_train_dir)
                 print(f"\nExecuting training for partition {partition}")
+                breakpoint()
                 execute_trainOnePartition(
                     symmetry=self.symmetry,
                     particles_star_fname=self.particles_star_fname,

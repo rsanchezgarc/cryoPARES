@@ -25,7 +25,7 @@ def get_best_checkpoint(checkpoint_dir, best_is_less=True):
                            key=lambda x:os.stat(os.path.join(checkpoint_dir, x)).st_mtime, reverse=True):
         if filename.endswith(".ckpt"):
             checkpoint_path = os.path.join(checkpoint_dir, filename)
-            checkpoint = torch.load(checkpoint_path, map_location=torch.device('cpu'))
+            checkpoint = torch.load(checkpoint_path, map_location=torch.device('cpu'), weights_only=False)
             for cback_name in checkpoint['callbacks']:
                 if cback_name.startswith("ModelCheckpoint"):
                     value = checkpoint["callbacks"][cback_name]["current_score"]

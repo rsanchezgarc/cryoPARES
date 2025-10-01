@@ -4,12 +4,19 @@ from typing import Optional, Sequence, Union, Tuple
 import torch
 import torch.nn.functional as F
 import numpy as np
+from sympy.abc import alpha
 
 from torch_grid_utils import fftfreq_grid
 from torch_grid_utils.shapes_2d import circle
 
 from cryoPARES.configs.mainConfig import main_config
 
+def _tri_kernel_1d(u: torch.Tensor, nyquist: float = 0.5) -> torch.Tensor:
+    """
+    Triangle kernel in frequency with support [-nyquist, +nyquist].
+    Peak 1 at 0; goes to 0 at ±nyquist. 'u' is in cycles/pixel.
+    """
+    return torch.clamp(1.0 - (u.abs() / nyquist), min=0.0)
 
 def compute_dft_3d(
     volume: torch.Tensor,
@@ -41,20 +48,41 @@ def compute_dft_3d(
         volume = F.pad(volume, pad=[pad_length] * 6, mode='constant', value=0)
 
     vol_shape = tuple(volume.shape)
+
     # premultiply by sinc2
-    grid = fftfreq_grid(
-        image_shape=vol_shape,
-        rfft=False,
-        fftshift=True,
-        norm=True,
-        device=volume.device
-    )
-    volume = volume * torch.sinc(grid) ** 2
+    # grid = fftfreq_grid(
+    #     image_shape=vol_shape,
+    #     rfft=False,
+    #     fftshift=True,
+    #     norm=True,
+    #     device=volume.device
+    # )
+    # volume = volume * torch.sinc(grid) ** 2
 
     # calculate DFT
     dft = torch.fft.fftshift(volume, dim=(-3, -2, -1))  # volume center to array origin
     dft = torch.fft.rfftn(dft, dim=(-3, -2, -1))
     dft = torch.fft.fftshift(dft, dim=(-3, -2,))  # actual fftshift of rfft
+
+    grid = fftfreq_grid(
+        image_shape=vol_shape,  # pre-FFT real-space shape
+        rfft=True,  # last axis is rFFT (0..Nyquist)
+        fftshift=True,  # z,y are shifted (as above)
+        norm=False,
+        device=volume.device,
+    )
+    kz, ky, kx = grid[..., 0], grid[..., 1], grid[..., 2]  # cycles/pixel
+
+    # Separable triangle kernel per axis (models trilinear in k)
+    eps = 1e-3
+    alpha = 0.5
+    Kz = _tri_kernel_1d(kz)
+    Ky = _tri_kernel_1d(ky)
+    Kx = _tri_kernel_1d(kx)
+    K = (Kz * Ky * Kx).clamp_min(eps)
+
+    # Gentle inverse: divide by K^alpha
+    dft = dft / K.pow(alpha)
 
     return dft, vol_shape, pad_length
 

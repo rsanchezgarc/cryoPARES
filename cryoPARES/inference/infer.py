@@ -169,7 +169,7 @@ def worker(worker_id, output_q, *args, **kwargs):
         traceback.print_exc()
         raise e
 
-
+_INFERENCER = None
 def _worker(worker_id,
             output_q,
             pbar_fname,
@@ -179,6 +179,7 @@ def _worker(worker_id,
             shared_weights,
             shared_ctfsq,
             device=None):
+    global _INFERENCER
     if device is not None and torch.cuda.is_available():
         dev_index = _device_index_from_str(device)
         if dev_index is not None:
@@ -186,7 +187,11 @@ def _worker(worker_id,
 
     ConfigOverrideSystem.update_config_from_dataclass(main_config, main_config_updated, verbose=False)
 
-    inferencer = SingleInferencer(**inferencer_init_kwargs)
+    if _INFERENCER is None:
+        inferencer = SingleInferencer(**inferencer_init_kwargs)
+        _INFERENCER = inferencer
+    else:
+        inferencer = _INFERENCER
 
     with SharedMemoryProgressBarWorker(worker_id, pbar_fname) as pbar:
         inferencer._pbar = pbar
@@ -213,7 +218,7 @@ def _worker(worker_id,
                 shared_c_t = torch.frombuffer(shared_ctfsq.get_obj(), dtype=torch.float32).reshape(
                     reconstructor.ctfsq.shape)
                 shared_c_t += reconstructor.ctfsq.detach().cpu()
-
+            inferencer.clean_reconstructer_buffers()
 
 # -----------------------------
 # Orchestrator
@@ -533,11 +538,10 @@ def distributed_inference(
                 fsc_by_model[m_half][d_half] = out_mrc
                 try:
                     fsc_by_model[m_half]["sampling_rate"] = getattr(reconstructor_parent, "sampling_rate",
-                                                           fsc_by_model[m_half]["sampling_rate"])
+                                                                    fsc_by_model[m_half]["sampling_rate"])
                 except Exception:
                     pass
 
-        print(fsc_by_model)
         # Compute FSC when reconstructions for both halves exist
         try:
             for model_key, rec in fsc_by_model.items():

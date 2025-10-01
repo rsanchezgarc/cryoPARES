@@ -138,7 +138,7 @@ class SingleInferencer:
             accelerator = "cpu"
             device_count = self.n_cpus_if_no_cuda
 
-        print(f'devices={device_count} accelerator={accelerator}', flush=True)
+        # print(f'devices={device_count} accelerator={accelerator}', flush=True)
         torch.set_num_threads(max(1, torch.get_num_threads() // device_count))
 
         self.device, self.device_count = accelerator, device_count
@@ -365,7 +365,7 @@ class SingleInferencer:
                 out = self._run()
                 if self._model and not self.skip_reconstruction and hasattr(self._model, "reconstructor"):
                     sampling_rate = self._model.reconstructor.sampling_rate
-                    self._model.reconstructor.zero_buffers() # Clean the reconstructor after each half is processed
+                    self.clean_reconstructer_buffers() # Clean the reconstructor after each half is processed
                 out_list.append(out)
                 all_out_list.append(out_list)
 
@@ -386,6 +386,9 @@ class SingleInferencer:
                     print(f"Resolution at FSC=0.5: {res_05:.3f} Å")
             self._model = None
         return all_out_list
+
+    def clean_reconstructer_buffers(self):
+        self._model.reconstructor.zero_buffers()
 
     @staticmethod
     def resolve_halfset_lists(

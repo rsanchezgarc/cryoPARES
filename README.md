@@ -1,19 +1,15 @@
 # CryoPARES: Cryo-EM Pose Assignment for Related Experiments via Supervised deep learning
 
-CryoPARES is a software package for assigning poses to 2D cryo-electron microscopy (cryo-EM) particle images. 
-It offers two main functionalities: supervised deep learning for initial pose estimation and local refinement through projection matching.
-
-## Core Concept: Supervised Learning for Cryo-EM
-
-CryoPARES utilizes a **supervised learning** approach to accelerate the 3D reconstruction process for related cryo-EM experiments.
-The core idea is to leverage the results of a high-quality, initial 3D reconstruction to train a deep learning model.
-This model then learns the complex relationship between a 2D particle image and its corresponding 3D orientation.
+**CryoPARES** is a software package for assigning poses to 2D cryo-electron microscopy (cryo-EM) particle images.
+It uses a supervised deep learning approach to accelerate 3D reconstruction in related cryo-EM experiments. 
+The key idea is to train a neural network on a high-quality reference reconstruction, and then reuse this trained model 
+to rapidly estimate particle poses in other, similar datasets.
 
 This workflow is divided into two main phases:
 
 *   **Training:** In this phase, you use a pre-existing, high-resolution dataset (where particle poses have already been determined by
-traditional methods) to train a CryoPARES model. This process creates a highly specialized "expert" model that can recognize and assign
-* poses to particles of that specific macromolecule.
+traditional methods like RELION refine) to train a CryoPARES model. This process creates a highly specialized "expert" model that 
+can recognize and assign poses to particles of that specific type of macromolecule.
 
 *   **Inference:** Once the model is trained, you can use it for inference on new datasets of the *same* or *very similar* molecules 
 (e.g., the same protein with a different ligand bound). Because the model has already learned the features of the molecule, it can predict
@@ -25,6 +21,14 @@ collection and analysis.
 
 For a detailed explanation of the method, please refer to our paper:
 [Supervised Deep Learning for Efficient Cryo-EM Image Alignment in Drug Discovery](https://www.biorxiv.org/content/10.1101/2025.03.04.641536v2)
+
+## Documentation
+
+- **[Training Guide](./docs/training_guide.md)** - Comprehensive guide on training models, monitoring with TensorBoard, and avoiding overfitting/underfitting
+- **[API Reference](./docs/api_reference.md)** - Detailed API documentation with type hints for all major classes and functions
+- **[Configuration Guide](./docs/configuration_guide.md)** - Complete reference for all configuration parameters
+- **[Troubleshooting Guide](./docs/troubleshooting.md)** - Solutions to common issues
+- **[CLI Reference](./docs/cli.md)** - Command-line interface documentation
 
 ## Installation
 
@@ -56,13 +60,7 @@ This method is recommended if you want to modify the cryoPARES source code.
     cd cryoPARES
     ```
 
-2.  **Install dependencies:**
-
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-3.  **Install the package in editable mode:**
+2.  **Install the package in editable mode:**
 
     This allows you to make changes to the code without having to reinstall the package.
 
@@ -72,8 +70,8 @@ This method is recommended if you want to modify the cryoPARES source code.
 
 ## Usage
 
-**IMPORTANT:** CryoPARES keeps a file handler open for each `.mrcs` file referenced in the `.star` file. This can lead to a
-"Too many open files" error if the number of particle files is larger than the system's limit. 
+**IMPORTANT:** CryoPARES keeps a file handler open for each `.mrcs` file referenced in the `.star` file. This can lead 
+to a "Too many open files" error if the number of particle files is larger than the system's limit.
 Before running training or inference, it is highly recommended to increase the open file limit by running 
 the following command in your terminal:
 
@@ -98,11 +96,11 @@ python -m cryopares_train [ARGUMENTS] --config [CONFIG_OVERRIDES]
 
 *   `--symmetry`: The point group symmetry of the molecule (e.g., `C1`, `D7`).
 *   `--particles_star_fname`: Path to the input `.star` file with pre-aligned particles.
-*   `--particles_dir`: Optional root directory for the particle files. If the paths in the `.star` file are relative, this directory will be prepended to them. For example, if `--particles_dir` is `/path/to/particles` and a particle path in the `.star` file is `MotionCorr/job01/extract/particle_001.mrcs`, the final path will be `/path/to/particles/MotionCorr/job01/extract/particle_001.mrcs`. This is similar to RELION's project directory concept. If this argument is not provided, it is assumed that the particle files are in the same directory as the `.star` file.
+*   `--particles_dir`: Optional root directory for the particle files. If the paths in the `.star` file are relative, this directory will be prepended to them. For example, if `--particles_dir` is `/path/to/particles` and a particle path in the `.star` file is `MotionCorr/job01/extract/particle_001.mrcs`, the final path will be `/path/to/particles/MotionCorr/job01/extract/particle_001.mrcs`. This is similar to RELION's project directory concept. If this argument is not provided, it is assumed that the particle files are in the same directory as the `.star` file, or that they are in a relative path with respect the current working directory.
 *   `--train_save_dir`: Directory to save model checkpoints, logs, and other outputs.
 *   `--n_epochs`: Number of training epochs.
-*   `--batch_size`: Number of particles per batch.
-*   `--num_dataworkers`: Number of parallel data loading workers. One CPU each. Set it to 0 to read and process the data in the main thread
+*   `--batch_size`: Number of particles per batch. For performance reasons, try to make it as large as you can before running out of GPU memory.
+*   `--num_dataworkers`: Number of parallel data loading workers (per GPU). Set it to 0 to read and process the data in the main thread
 *   `--continue_checkpoint_dir`: Continue training from a previous run.
 *   `--finetune_checkpoint_dir`: Fine-tune a pre-trained model on a new dataset.
 
@@ -117,6 +115,8 @@ the last CLI argument provided. Several `KEY=VALUE` can be provided one after an
 *   **`train.learning_rate`**: The initial learning rate for the optimizer. (Default: `1e-3`)
 *   **`train.weight_decay`**: The weight decay for the optimizer. (Default: `1e-5`)
 *   **`train.accumulate_grad_batches`**: The number of batches to accumulate gradients over. This can be used to simulate a larger batch size. (Default: `16`)
+
+For comprehensive training guidance including monitoring with TensorBoard and avoiding overfitting/underfitting, see the **[Training Guide](./docs/training_guide.md)**. For a complete list of all configuration parameters, see the **[Configuration Guide](./docs/configuration_guide.md)**.
 
 ### Inference
 
@@ -161,6 +161,8 @@ To avoid overfitting and to ensure a fair evaluation, cryo-EM datasets are often
 *   **`inference.directional_zscore_thr`**: A crucial parameter for filtering particles. It is a threshold on the confidence score of the neural network's prediction. Particles with a score below this threshold can be discarded.
 *   **`projmatching.grid_distance_degs`**: The most important parameter for local refinement. It defines the angular search range (in degrees) around the neural network's predicted orientation (current_pose - grid_distance_degs ... current_pose + grid_distance_degs).
 *   **`projmatching.grid_step_degs`**: The step size for the angular search during refinement.
+
+For detailed API documentation with type hints, see the **[API Reference](./docs/api_reference.md)**.
 
 #### Daemon Mode
 
@@ -228,6 +230,33 @@ This provides a quick way to generate a volume without going through the trainin
 
 For detailed instructions, see the [Command-Line Interface documentation](./docs/cli.md).
 
+### Checkpoint Compactification
+
+After training, you can package your checkpoint into a compact ZIP file for easy distribution and storage. This reduces the checkpoint size from ~40 GB to ~10 GB by removing training logs, metrics, and intermediate files while keeping everything needed for inference.
+
+**Compactify a checkpoint:**
+```bash
+python -m cryoPARES.scripts.compactify_checkpoint \
+    --checkpoint_dir /path/to/training_output/version_0
+```
+
+This creates `version_0_compact.zip` containing only the essential files.
+
+**Use the compactified checkpoint for inference:**
+```bash
+cryopares_infer \
+    --particles_star_fname /path/to/particles.star \
+    --checkpoint_dir /path/to/version_0_compact.zip \
+    --results_dir /path/to/results
+```
+
+The ZIP file is used directly without extraction, making it ideal for:
+- **Sharing models** with collaborators
+- **Archiving** trained models efficiently
+- **Deploying** to inference servers with limited storage
+
+For more options (excluding reconstructions, custom names, etc.), see the [CLI documentation](./docs/cli.md#compactify_checkpoint).
+
 ### Configuration System
 
 CryoPARES uses a flexible configuration system that allows you to manage settings from multiple sources.
@@ -243,6 +272,8 @@ CryoPARES uses a flexible configuration system that allows you to manage setting
 *   **Direct Arguments:** Use standard command-line flags (e.g., `--batch_size 32`).
 
 **Precedence:** Direct command-line arguments override `--config` overrides, which override YAML files, which override the default configuration.
+
+For a complete reference of all configuration parameters, see the **[Configuration Guide](./docs/configuration_guide.md)**.
 
 ## Example Workflow
 
@@ -267,3 +298,14 @@ CryoPARES uses a flexible configuration system that allows you to manage setting
         --reference_map /path/to/initial_model.mrc \
         --config projmatching.grid_distance_degs=15 inference.directional_zscore_thr=2.0
     ```
+
+## Getting Help
+
+If you encounter issues:
+
+1. Check the **[Troubleshooting Guide](./docs/troubleshooting.md)** for common problems and solutions
+2. Review the **[Training Guide](./docs/training_guide.md)** for training best practices
+3. Consult the **[Configuration Guide](./docs/configuration_guide.md)** for parameter details
+4. See the **[API Reference](./docs/api_reference.md)** for programmatic usage
+
+For bugs or feature requests, please open an issue on [GitHub](https://github.com/rsanchezgarc/cryoPARES/issues).

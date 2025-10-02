@@ -30,6 +30,7 @@ from cryoPARES.reconstruction.reconstructor import Reconstructor
 from cryoPARES.utils.paths import get_most_recent_file
 from cryoPARES.scripts.computeFsc import compute_fsc
 from cryoPARES.utils.reconstructionUtils import get_vol
+from cryoPARES.utils.checkpointReader import CheckpointReader
 
 
 class SingleInferencer:
@@ -90,11 +91,20 @@ class SingleInferencer:
         self.particles_star_fname = particles_star_fname
         self.particles_dir = particles_dir
         assert top_k_poses_nnet >= top_k_poses_localref, "Error, top_k_poses_nnet >= top_k_poses_localref required"
+
+        # Support both directory and ZIP checkpoints
         self.checkpoint_dir = checkpoint_dir
+        if checkpoint_dir.endswith('.zip'):
+            assert os.path.isfile(checkpoint_dir), f"checkpoint_dir {checkpoint_dir} is not a valid ZIP file"
+        else:
+            assert os.path.isdir(checkpoint_dir), f"checkpoint_dir {checkpoint_dir} needs to be a directory"
+
+        # Initialize checkpoint reader
+        self._checkpoint_reader = CheckpointReader(checkpoint_dir)
+
         if n_first_particles is not None:
             assert subset_idxs is None, "Error, only n_first_particles or subset_idxs can be provided"
             subset_idxs = range(n_first_particles)
-        assert os.path.isdir(checkpoint_dir), f"checkpoint_dir {checkpoint_dir} needs to be a directory"
         main_config.datamanager.num_augmented_copies_per_batch = 1  # We have not implemented test-time augmentation
         main_config.datamanager.particlesdataset.store_data_in_memory = False
 
@@ -176,29 +186,37 @@ class SingleInferencer:
         :param rank: The rank of the current process in a distributed setup.
         """
 
+        # Try to load SO3 model (prefer TorchScript, fallback to checkpoint)
         try:
-            so3Model_fname = os.path.join(self.checkpoint_dir, self.model_halfset, "checkpoints", BEST_MODEL_SCRIPT_BASENAME)
-            so3Model = torch.jit.load(so3Model_fname)
-        except (ValueError, IOError):
+            model_path = f"{self.model_halfset}/checkpoints/{BEST_MODEL_SCRIPT_BASENAME}"
+            so3Model = self._checkpoint_reader.load_jit(model_path)
+        except (ValueError, IOError, FileNotFoundError):
             try:
-                so3Model_fname = os.path.join(self.checkpoint_dir, self.model_halfset, "checkpoints", BEST_CHECKPOINT_BASENAME)
+                model_path = f"{self.model_halfset}/checkpoints/{BEST_CHECKPOINT_BASENAME}"
+                # For PlModel.load_from_checkpoint, we need a real file path
+                so3Model_fname = self._checkpoint_reader.get_real_path(model_path)
                 so3Model = PlModel.load_from_checkpoint(so3Model_fname)
             except FileNotFoundError:
-                so3Model_fname = os.path.join(self.checkpoint_dir, self.model_halfset, "checkpoints", "last.ckpt")
+                model_path = f"{self.model_halfset}/checkpoints/last.ckpt"
+                so3Model_fname = self._checkpoint_reader.get_real_path(model_path)
                 so3Model = PlModel.load_from_checkpoint(so3Model_fname)
 
+        # Try to load directional normalizer
         try:
-            percentilemodel_fname = os.path.join(self.checkpoint_dir, self.model_halfset, "checkpoints",
-                                                 BEST_DIRECTIONAL_NORMALIZER)
-            percentilemodel = torch.load(percentilemodel_fname, weights_only=False)
+            normalizer_path = f"{self.model_halfset}/checkpoints/{BEST_DIRECTIONAL_NORMALIZER}"
+            percentilemodel = self._checkpoint_reader.load_torch(normalizer_path, weights_only=False)
         except FileNotFoundError:
             assert self.directional_zscore_thr is None, ("Error, if no percentilemodel available, you cannot set a "
                                                          "directional_zscore_thr")
-            warnings.warn(f"No percentilemodel found at ({percentilemodel_fname}). Directional normalized z-scores"
+            warnings.warn(f"No percentilemodel found at {normalizer_path}. Directional normalized z-scores"
                           f" won't be computed!!!")
             percentilemodel = None
+
+        # Get reference map
         if self.reference_map is None:
-            reference_map = os.path.join(self.checkpoint_dir, self.model_halfset, "reconstructions", "0.mrc")
+            # Need real path for mrcfile
+            reference_map_path = f"{self.model_halfset}/reconstructions/0.mrc"
+            reference_map = self._checkpoint_reader.get_real_path(reference_map_path)
         else:
             reference_map = self.reference_map
 
@@ -243,23 +261,25 @@ class SingleInferencer:
         """
         The symmetry of the model, loaded from the hyperparameters file.
         """
-        return self._get_symmetry(self.checkpoint_dir, self.model_halfset)
+        return self._get_symmetry(self._checkpoint_reader, self.model_halfset)
 
     @staticmethod
-    def _get_symmetry(checkpoint_dir, model_halfset):
+    def _get_symmetry(checkpoint_reader: CheckpointReader, model_halfset: str):
         """
         Retrieves the symmetry value from the `hparams.yaml` file in the checkpoint directory.
 
+        :param checkpoint_reader: CheckpointReader instance
+        :param model_halfset: Model half-set name
         :return: The symmetry value.
         :raises RuntimeError: If the symmetry cannot be loaded from the file.
         """
-        hparams = os.path.join(checkpoint_dir, model_halfset, "hparams.yaml")
+        hparams_path = f"{model_halfset}/hparams.yaml"
         try:
-            with open(hparams) as f:
-                symmetry = yaml.safe_load(f)["symmetry"]
+            hparams_text = checkpoint_reader.read_text(hparams_path)
+            symmetry = yaml.safe_load(hparams_text)["symmetry"]
             return symmetry
         except (FileNotFoundError, yaml.YAMLError, KeyError) as e:
-            raise RuntimeError(f"Failed to load symmetry from {hparams}: {e}")
+            raise RuntimeError(f"Failed to load symmetry from {hparams_path}: {e}")
 
     def _get_datamanager(self, rank: Optional[int] = None):
         """
@@ -385,6 +405,10 @@ class SingleInferencer:
                     print(f"Resolution at FSC=0.143 ('gold-standard'): {res_0143:.3f} Å")
                     print(f"Resolution at FSC=0.5: {res_05:.3f} Å")
             self._model = None
+
+        # Clean up checkpoint reader
+        self._checkpoint_reader.close()
+
         return all_out_list
 
     def clean_reconstructer_buffers(self):

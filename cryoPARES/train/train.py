@@ -49,7 +49,7 @@ class Trainer:
             num_dataworkers: Number of parallel data loading workers. One CPU each. Set it to 0 to read and process the data in the same thread
             image_size_px_for_nnet: The desired image size, in pixels, for the particles to be fed in the neural network. Local refinement uses the original image-size particles. Particles are first downsampled, and the padded/cropped to the desired image size.
             sampling_rate_angs_for_nnet: The desired sampling rate, in pixels, for the particles to be fed in the neural network. Local refinement uses the original sampling-rate particles. Particles are first downsampled, and the padded/cropped to the desired image size.
-            mask_radius_angs: The radius of the particle in Angstroms. Used to create a circular mask arround it.
+            mask_radius_angs: The radius of the particle in Angstroms. Used to create a circular mask around it.
             split_halfs: If True, it trains a model for each half of the data
             continue_checkpoint_dir: The path of a pre-trained model to continue training.
             finetune_checkpoint_dir: The path of a pre-trained model to do finetunning

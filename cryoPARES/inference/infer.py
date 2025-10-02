@@ -21,6 +21,7 @@ from cryoPARES.utils.paths import get_most_recent_file
 from cryoPARES.scripts.computeFsc import compute_fsc
 from cryoPARES.utils.reconstructionUtils import get_vol
 from cryoPARES.configManager.configParser import ConfigArgumentParser, ConfigOverrideSystem
+from cryoPARES.utils.checkpointReader import CheckpointReader
 
 
 # -----------------------------
@@ -576,9 +577,33 @@ def main():
                                   config_obj=main_config)
     parser.add_args_from_function(distributed_inference)
     args, config_args = parser.parse_args()
-    assert os.path.isdir(args.checkpoint_dir), f"Error, checkpoint_dir {args.checkpoint_dir} not found"
-    config_fname = get_most_recent_file(args.checkpoint_dir, 'configs_*.yml')
-    ConfigOverrideSystem.update_config_from_file(main_config, config_fname, drop_paths=['inference', 'projmatching'])
+
+    # Support both directory and ZIP checkpoints
+    if args.checkpoint_dir.endswith('.zip'):
+        assert os.path.isfile(args.checkpoint_dir), f"Error, checkpoint_dir {args.checkpoint_dir} not found"
+    else:
+        assert os.path.isdir(args.checkpoint_dir), f"Error, checkpoint_dir {args.checkpoint_dir} not found"
+
+    # Load config from checkpoint
+    with CheckpointReader(args.checkpoint_dir) as reader:
+        config_files = reader.glob('configs_*.yml')
+        if not config_files:
+            raise FileNotFoundError(f"No configs_*.yml found in {args.checkpoint_dir}")
+        # Get most recent config file
+        config_fname_rel = sorted(config_files)[-1]
+        config_text = reader.read_text(config_fname_rel)
+
+    # Update config from file content
+    import tempfile
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yml', delete=False) as f:
+        f.write(config_text)
+        temp_config_path = f.name
+
+    try:
+        ConfigOverrideSystem.update_config_from_file(main_config, temp_config_path, drop_paths=['inference', 'projmatching'])
+    finally:
+        os.unlink(temp_config_path)
+
     ConfigOverrideSystem.update_config_from_configstrings(main_config, config_args, verbose=True)
 
     distributed_inference(**vars(args))

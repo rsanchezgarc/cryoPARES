@@ -22,13 +22,6 @@ collection and analysis.
 For a detailed explanation of the method, please refer to our paper:
 [Supervised Deep Learning for Efficient Cryo-EM Image Alignment in Drug Discovery](https://www.biorxiv.org/content/10.1101/2025.03.04.641536v2)
 
-## Documentation
-
-- **[Training Guide](./docs/training_guide.md)** - Comprehensive guide on training models, monitoring with TensorBoard, and avoiding overfitting/underfitting
-- **[API Reference](./docs/api_reference.md)** - Detailed API documentation with type hints for all major classes and functions
-- **[Configuration Guide](./docs/configuration_guide.md)** - Complete reference for all configuration parameters
-- **[Troubleshooting Guide](./docs/troubleshooting.md)** - Solutions to common issues
-- **[CLI Reference](./docs/cli.md)** - Command-line interface documentation
 
 ## Installation
 
@@ -162,7 +155,7 @@ To avoid overfitting and to ensure a fair evaluation, cryo-EM datasets are often
 *   **`projmatching.grid_distance_degs`**: The most important parameter for local refinement. It defines the angular search range (in degrees) around the neural network's predicted orientation (current_pose - grid_distance_degs ... current_pose + grid_distance_degs).
 *   **`projmatching.grid_step_degs`**: The step size for the angular search during refinement.
 
-For detailed API documentation with type hints, see the **[API Reference](./docs/api_reference.md)**.
+For detailed API documentation with type hints, see the **[API Reference](https://rsanchezgarc.github.io/cryoPARES/api/)**.
 
 #### Daemon Mode
 
@@ -255,7 +248,23 @@ The ZIP file is used directly without extraction, making it ideal for:
 - **Archiving** trained models efficiently
 - **Deploying** to inference servers with limited storage
 
-For more options (excluding reconstructions, custom names, etc.), see the [CLI documentation](./docs/cli.md#compactify_checkpoint).
+
+## Documentation
+
+- **[Training Guide](./docs/training_guide.md)** - Comprehensive guide on training models, monitoring with TensorBoard, and avoiding overfitting/underfitting
+- **[API Reference](https://rsanchezgarc.github.io/cryoPARES/api/)** - Auto-generated API documentation with type hints (hosted on GitHub Pages)
+- **[Configuration Guide](./docs/configuration_guide.md)** - Complete reference for all configuration parameters
+- **[Troubleshooting Guide](./docs/troubleshooting.md)** - Solutions to common issues
+- **[CLI Reference](./docs/cli.md)** - Command-line interface documentation
+
+**Building Documentation Locally:**
+```bash
+cd docs
+pip install -r requirements.txt
+make html
+# Open _build/html/index.html in your browser
+```
+
 
 ### Configuration System
 
@@ -306,6 +315,6 @@ If you encounter issues:
 1. Check the **[Troubleshooting Guide](./docs/troubleshooting.md)** for common problems and solutions
 2. Review the **[Training Guide](./docs/training_guide.md)** for training best practices
 3. Consult the **[Configuration Guide](./docs/configuration_guide.md)** for parameter details
-4. See the **[API Reference](./docs/api_reference.md)** for programmatic usage
+4. See the **[API Reference](https://rsanchezgarc.github.io/cryoPARES/api/)** for programmatic usage
 
 For bugs or feature requests, please open an issue on [GitHub](https://github.com/rsanchezgarc/cryoPARES/issues).

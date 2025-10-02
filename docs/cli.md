@@ -301,7 +301,7 @@ The inference process creates:
 
 ### See Also
 
-- [API Reference](api_reference.md) - Detailed API documentation
+- [API Reference](https://rsanchezgarc.github.io/cryoPARES/api/) - Detailed API documentation
 - [Troubleshooting Guide](troubleshooting.md) - Common issues
 
 ---
@@ -568,4 +568,4 @@ CryoPARES automatically detects ZIP files and reads models directly from the arc
 ### See Also
 
 - [Training Guide](training_guide.md) - How to train models
-- [API Reference](api_reference.md) - Programmatic usage
+- [API Reference](https://rsanchezgarc.github.io/cryoPARES/api/) - Programmatic usage

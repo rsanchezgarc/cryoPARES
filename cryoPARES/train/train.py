@@ -45,7 +45,7 @@ class Trainer:
             train_save_dir: The root directory where models and logs are saved.
             particles_dir: The directory where the particles of the particlesStarFname are located. If not, it is assumed os.dirname(particlesStarFname)
             n_epochs: The number of epochs
-            batch_size: The batch size
+            batch_size: The batch size. Number of images to process simultaneously
             num_dataworkers: Number of parallel data loading workers. One CPU each. Set it to 0 to read and process the data in the same thread
             image_size_px_for_nnet: The desired image size, in pixels, for the particles to be fed in the neural network. Local refinement uses the original image-size particles. Particles are first downsampled, and the padded/cropped to the desired image size.
             sampling_rate_angs_for_nnet: The desired sampling rate, in pixels, for the particles to be fed in the neural network. Local refinement uses the original sampling-rate particles. Particles are first downsampled, and the padded/cropped to the desired image size.

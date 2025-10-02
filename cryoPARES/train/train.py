@@ -1,3 +1,4 @@
+import glob
 import json
 import os
 import shutil
@@ -11,10 +12,14 @@ import sys
 import os.path as osp
 import tempfile
 from typing import Optional, List, Literal
+from argParseFromDoc import generate_command_for_argparseFromDoc
+from sympy import partition
 
 from cryoPARES import constants
 from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
+from cryoPARES.constants import DATA_SPLITS_BASENAME
+from cryoPARES.scripts.gmm_hists import compare_prob_hists
 from cryoPARES.utils.checkpointUtils import get_best_checkpoint
 from cryoPARES.utils.paths import get_most_recent_file
 
@@ -23,17 +28,24 @@ class Trainer:
     @inject_defaults_from_config(main_config.train, update_config_with_args=True)
     def __init__(self, symmetry: str, particles_star_fname: List[str], train_save_dir: str,
                  particles_dir: Optional[List[str]] = None, n_epochs: int = CONFIG_PARAM(),
-                 batch_size: int = CONFIG_PARAM(), #CONFIG_PARAM status with update_config_with_args gets updated in config directly
-                 num_dataworkers: int = CONFIG_PARAM(config=main_config.datamanager), #CONFIG_PARAM status with update_config_with_args gets updated in config directly
-                 image_size_px_for_nnet: int = CONFIG_PARAM(config=main_config.datamanager.particlesdataset), #CONFIG_PARAM status with update_config_with_args gets updated in config directly
-                 sampling_rate_angs_for_nnet: float = CONFIG_PARAM(config=main_config.datamanager.particlesdataset), # CONFIG_PARAM status with update_config_with_args gets updated in config directly
-                 mask_radius_angs: Optional[float] = CONFIG_PARAM(config=main_config.datamanager.particlesdataset), # CONFIG_PARAM status with update_config_with_args gets updated in config directly
+                 batch_size: int = CONFIG_PARAM(),
+                 #CONFIG_PARAM status with update_config_with_args gets updated in config directly
+                 num_dataworkers: int = CONFIG_PARAM(config=main_config.datamanager),
+                 #CONFIG_PARAM status with update_config_with_args gets updated in config directly
+                 image_size_px_for_nnet: int = CONFIG_PARAM(config=main_config.datamanager.particlesdataset),
+                 #CONFIG_PARAM status with update_config_with_args gets updated in config directly
+                 sampling_rate_angs_for_nnet: float = CONFIG_PARAM(config=main_config.datamanager.particlesdataset),
+                 # CONFIG_PARAM status with update_config_with_args gets updated in config directly
+                 mask_radius_angs: Optional[float] = CONFIG_PARAM(config=main_config.datamanager.particlesdataset),
+                 # CONFIG_PARAM status with update_config_with_args gets updated in config directly
                  split_halfs: bool = True,
                  continue_checkpoint_dir: Optional[str] = None, finetune_checkpoint_dir: Optional[str] = None,
                  compile_model: bool = False,
                  val_check_interval: Optional[float] = None,
                  overfit_batches: Optional[int] = None,
                  map_fname_for_simulated_pretraining: Optional[List[str]] = None,
+                 junk_particles_star_fname: Optional[List[str]] = None,
+                 junk_particles_dir: Optional[List[str]] = None,
                  float32_matmul_precision: str = constants.float32_matmul_precision,
                  ):
         """
@@ -43,7 +55,7 @@ class Trainer:
             symmetry: The point symmetry of the reconstruction
             particles_star_fname: The starfile containing the pre-aligned particles
             train_save_dir: The root directory where models and logs are saved.
-            particles_dir: The directory where the particles of the particlesStarFname are located. If not, it is assumed os.dirname(particlesStarFname)
+            particles_dir: The directory where the particles of the particles_star_fname are located. If not, it is assumed os.dirname(particles_star_fname) or relative to the cwd
             n_epochs: The number of epochs
             batch_size: The batch size. Number of images to process simultaneously
             num_dataworkers: Number of parallel data loading workers. One CPU each. Set it to 0 to read and process the data in the same thread
@@ -57,6 +69,8 @@ class Trainer:
             val_check_interval: The fraction of an epoch after which the validation set will be evaluated
             overfit_batches: If provided, number of train and validation batches to use
             map_fname_for_simulated_pretraining: If provided, it will run a warmup training on simulations using this maps. They need to match the particlesStarFname order
+            junk_particles_star_fname: Optional starfile(s) containing junk particles to be used for zscore threshold estimation
+            junk_particles_dir: The directory where the particles of the junk_particles_star_fname are located. If not, it is assumed os.dirname(particles_star_fname) or relative to the cwd
             float32_matmul_precision: The precision used for matmul. Accuracy/speed tradeoff
         """
         self.symmetry = symmetry
@@ -72,11 +86,17 @@ class Trainer:
         self.val_check_interval = val_check_interval
         self.overfit_batches = overfit_batches
         self.map_fname_for_simulated_pretraining = map_fname_for_simulated_pretraining
+        self.junk_particles_star_fname = junk_particles_star_fname
+        self.junk_particles_dir = junk_particles_dir
+        if self.junk_particles_star_fname:
+            if self.junk_particles_dir:
+                assert len(self.junk_particles_star_fname) == len(self.junk_particles_dir), ("Error, the"
+                                                                                             "number of star filenames needs to match the number of junk particles dirs")
         if map_fname_for_simulated_pretraining is not None:
             for fname in map_fname_for_simulated_pretraining:
                 assert os.path.isfile(fname), f"Error, {fname} is not a file"
             assert len(map_fname_for_simulated_pretraining) == len(particles_star_fname), (f"Error,"
-                       f"the number of particle star files and maps for simulation needs to be the same")
+                                                                                           f"the number of particle star files and maps for simulation needs to be the same")
             assert not finetune_checkpoint_dir, ("Error, if using map_fname_for_simulated_pretraining, "
                                                  "finetune_checkpoint_dir is not a valid option")
         self.float32_matmul_precision = float32_matmul_precision
@@ -160,7 +180,6 @@ class Trainer:
         from cryoPARES.configManager.configParser import export_config_to_yaml
         export_config_to_yaml(main_config, fname)
 
-
     def _copy_code_files(self):
         from cryoPARES.utils.reproducibility import _copyCode
         from cryoPARES.utils.checkpointUtils import get_version_to_use
@@ -176,15 +195,15 @@ class Trainer:
         root_path = osp.dirname(osp.dirname(osp.dirname(module_path)))
         _copyCode(root_path, osp.join(copycodedir, "cryoPARES"))
 
-    def get_continue_checkpoint_fname(self, partition:Literal["allParticles", "half1", "half2"]):
+    def get_continue_checkpoint_fname(self, partition: Literal["allParticles", "half1", "half2"]):
         if self.continue_checkpoint_dir:
             fname = get_most_recent_file(os.path.join(self.continue_checkpoint_dir, partition, "checkpoints"), "*.ckpt")
-            warnings.warn( f"Error, checkpoint not found at {self.continue_checkpoint_dir}")
+            warnings.warn(f"Error, checkpoint not found at {self.continue_checkpoint_dir}")
             return fname
         else:
             return None
 
-    def get_finetune_checkpoint_fname(self, partition:Literal["allParticles", "half1", "half2"]):
+    def get_finetune_checkpoint_fname(self, partition: Literal["allParticles", "half1", "half2"]):
         if self.finetune_checkpoint_dir:
             fname = get_best_checkpoint(os.path.join(self.finetune_checkpoint_dir, partition, "checkpoints"), "*.ckpt")
             assert fname is not None, f"Error, checkpoint not found at {self.finetune_checkpoint_dir}"
@@ -213,11 +232,10 @@ class Trainer:
                 if self.map_fname_for_simulated_pretraining:
                     # TODO: Implement simulate_particles
                     from cryoPARES.simulation.simulateParticles import run_simulation
-                    from argParseFromDoc import generate_command_for_argparseFromDoc
                     sim_star_fnames = []
                     sim_dirs = []
                     for sim_idx, fname in enumerate(self.map_fname_for_simulated_pretraining):
-                        simulation_dir = os.path.join(tmpdir, "simulation%d"%sim_idx)
+                        simulation_dir = os.path.join(tmpdir, "simulation%d" % sim_idx)
                         os.makedirs(simulation_dir, exist_ok=True)
                         simulation_kwargs = dict(
                             volume=self.map_fname_for_simulated_pretraining[sim_idx],
@@ -230,7 +248,7 @@ class Trainer:
                             apply_ctf=True,
                             use_gpu=main_config.train.use_cuda,
                             gpus=",".join([str(x) for x in range(torch.cuda.device_count())]), #TODO: homogenize API to use list rather than str
-                            simulation_mode="central_slice",           #"noise_additive",
+                            simulation_mode="central_slice",  #"noise_additive",
                             snr=main_config.train.snr_for_simulation,  #None
                         )
                         cmd = generate_command_for_argparseFromDoc(
@@ -285,7 +303,22 @@ class Trainer:
                     overfit_batches=self.overfit_batches,
                     config_args=config_args
                 )
-
+                if self.junk_particles_star_fname:
+                    # if self.junk_particles_dir:
+                    junk_stars = self._infer_particles(self.junk_particles_star_fname, self.junk_particles_dir,
+                                                  partition, outdirbasename="junk")
+                    val_stars = glob.glob(osp.join(self.experiment_root, partition, DATA_SPLITS_BASENAME, "val",
+                                                   "*-particles.star"))
+                    if self.particles_dir is None:
+                        particles_dir = [os.path.dirname(x) for x in self.particles_star_fname]
+                    else:
+                        particles_dir = self.particles_dir
+                    val_stars = self._infer_particles(val_stars,
+                                                      particles_dir,
+                                                      partition, outdirbasename="val")
+                    compare_prob_hists(fname_good=val_stars, fname_bad=junk_stars, show_plots=False,
+                                       plot_fname= osp.join(self.experiment_root, partition,"directional_threhsold.png"),
+                                       symmetry=self.symmetry, compute_gmm=True)
         print("Training complete!")
 
     def _save_finetune_checkpoint_info(self):
@@ -299,6 +332,36 @@ class Trainer:
         with open(osp.join(self.experiment_root, finetune_checkpoint_base), "w") as f:
             f.write(f"finetuneCheckpoint: {self.finetune_checkpoint_dir}")
 
+    def _infer_particles(self, particles_star_fnames, particles_dirs, partition, outdirbasename):
+        from cryoPARES.inference.infer import distributed_inference
+        results_dir = osp.join(self.experiment_root, partition, "inference", outdirbasename)
+        if particles_dirs is None:
+            particles_dirs = [None] * len(particles_star_fnames)
+        for idx, (fname, dirname) in enumerate(zip(particles_star_fnames, particles_dirs)):
+            infer_kwars = dict(
+                particles_star_fname=fname,
+                particles_dir=dirname,
+                checkpoint_dir=self.experiment_root,
+                results_dir=results_dir + f"_{idx}",
+                data_halfset=partition,
+                model_halfset=partition,
+                skip_localrefinement=True,
+                skip_reconstruction=True,
+            )
+            cmd = generate_command_for_argparseFromDoc(
+                "cryoPARES.inference.infer",
+                fun=distributed_inference,
+                use_module=True,
+                python_executable=sys.executable,
+                **infer_kwars
+            )
+            print(cmd)
+            subprocess.run(
+                cmd.split(),
+                cwd=os.path.abspath(os.path.join(__file__, "..", "..", "..")), check=True
+            )
+        star_fnames = glob.glob(osp.join(results_dir+"_*", f"particles*_{partition}.star"))
+        return star_fnames
 def main():
     os.environ[constants.PROJECT_NAME + "__ENTRY_POINT"] = "train.py"
     print("---------------------------------------")
@@ -310,6 +373,7 @@ def main():
     parser.add_args_from_function(Trainer.__init__)
     args, config_args = parser.parse_args()
     Trainer(**vars(args)).run(config_args)
+
 
 if __name__ == "__main__":
     main()

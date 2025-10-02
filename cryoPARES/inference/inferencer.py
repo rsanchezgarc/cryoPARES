@@ -590,6 +590,9 @@ class SingleInferencer:
             # Update the DataFrame with the correctly ordered results
             particles_md.loc[ids_to_update_in_df, DIRECTIONAL_ZSCORE_NAME] = result_arrays["top1_directional_zscore"][
                 result_indices].numpy()
+            for angname in RELION_ANGLES_NAMES:
+                if angname in particles_md.columns:
+                    particles_md[angname+"_ori"] = particles_md[angname]
 
             for k in range(n_poses):
                 suffix = "" if k == 0 else f"_top{k+1}"

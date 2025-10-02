@@ -3,6 +3,8 @@ import os
 import shutil
 import subprocess
 import warnings
+from multiprocessing.util import sub_debug
+
 import psutil
 import torch
 import sys
@@ -226,9 +228,10 @@ class Trainer:
                             batch_size=self.batch_size,
                             num_workers=self.num_dataworkers,
                             apply_ctf=True,
-                            snr=main_config.train.snr_for_simulation,
                             use_gpu=main_config.train.use_cuda,
                             gpus=",".join([str(x) for x in range(torch.cuda.device_count())]), #TODO: homogenize API to use list rather than str
+                            simulation_mode="central_slice",           #"noise_additive",
+                            snr=main_config.train.snr_for_simulation,  #None
                         )
                         cmd = generate_command_for_argparseFromDoc(
                             "cryoPARES.simulation.simulateParticles",
@@ -268,7 +271,6 @@ class Trainer:
                     config_fname = get_most_recent_file(self.experiment_root, "configs_*.yml")
                     shutil.copy(config_fname, simulation_train_dir)
                 print(f"\nExecuting training for partition {partition}")
-                breakpoint()
                 execute_trainOnePartition(
                     symmetry=self.symmetry,
                     particles_star_fname=self.particles_star_fname,

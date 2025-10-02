@@ -37,5 +37,5 @@ class Train_config:
 
     expandable_segments_GPU_mem: bool = False #Set it to true if there are fragmentation problems
 
-    snr_for_simulation: float = 0.1
+    snr_for_simulation: float = 0.05
     n_epochs_simulation: int = 10

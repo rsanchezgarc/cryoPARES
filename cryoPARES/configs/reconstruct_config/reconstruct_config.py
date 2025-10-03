@@ -11,3 +11,5 @@ class Reconstruct_config:
     eps: float = 1e-3 #epsilon in the denominator. ~ tikhonov regularization
     weight_with_confidence: bool = False
     correct_ctf: bool = True
+
+    float32_matmul_precision: str = "high"

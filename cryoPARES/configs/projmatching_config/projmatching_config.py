@@ -21,3 +21,5 @@ class Projmatching_config:
 
     disable_compile_analyze_cc: bool = False
     compile_analyze_cc_mode: Optional[str] = "max-autotune" #None #"reduce-overhead" #"max-autotune"
+
+    float32_matmul_precision: str = "high"

@@ -21,3 +21,5 @@ class Inference_config:
     directional_zscore_thr: Optional[float] = None
 
     before_refiner_buffer_size: int = 16
+
+    float32_matmul_precision: str = "high"

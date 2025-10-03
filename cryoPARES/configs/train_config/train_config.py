@@ -32,6 +32,8 @@ class Train_config:
     batch_size_for_reconstruct: int = 64
     float32_matmul_precision_for_reconstruct: Optional[str] = "high"
 
+    float32_matmul_precision: str = "high"
+
     pl_plugin: Literal["LightningEnvironment", "none"] = "LightningEnvironment"  #Try none to submit to slurm
     num_computer_nodes: int = 1 #It has not been tried with values different from 1
 

@@ -533,7 +533,7 @@ def align_star(
         batch_size: int = 1024,
         use_cuda: bool = True,
         verbose: bool = True,
-        torch_matmul_precision: Literal["highest", "high", "medium"] = "high",
+        float32_matmul_precision: Literal["highest", "high", "medium"] = "high",
         gpu_id: Optional[int] = None,
         n_first_particles: Optional[int] = None,
         correct_ctf: bool = True,
@@ -554,7 +554,7 @@ def align_star(
     :param batch_size: Number of particles to process in each batch on each job.
     :param use_cuda: If True, use a CUDA-enabled GPU for processing.
     :param verbose: If True, print progress and informational messages.
-    :param torch_matmul_precision: Precision for torch.set_float32_matmul_precision ('highest', 'high', 'medium').
+    :param float32_matmul_precision: Precision for torch.set_float32_matmul_precision ('highest', 'high', 'medium').
     :param gpu_id: Specific GPU ID to use when use_cuda is True.
     :param n_first_particles: Process only the first N particles from the input STAR file.
     :param correct_ctf: If True, apply CTF correction during matching.
@@ -569,7 +569,7 @@ def align_star(
         mp.set_start_method("spawn")
     except RuntimeError:
         pass
-    torch.set_float32_matmul_precision(torch_matmul_precision)
+    torch.set_float32_matmul_precision(float32_matmul_precision)
     _num_dataworkers = 1 if num_dataworkers == 0 else num_dataworkers
     torch.set_num_interop_threads(_num_dataworkers)
     torch.set_num_threads(_num_dataworkers)

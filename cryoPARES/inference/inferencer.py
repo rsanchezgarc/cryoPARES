@@ -58,7 +58,6 @@ class SingleInferencer:
                  subset_idxs: Optional[List[int]] = None,
                  n_first_particles: Optional[int] = None,
                  show_debug_stats: bool = False,
-                 float32_matmul_precision: str = constants.float32_matmul_precision,
                  ):
         """
         Initializes the SingleInferencer for running inference on a set of particles.
@@ -84,10 +83,7 @@ class SingleInferencer:
         :param subset_idxs: A list of indices to process a subset of particles.
         :param n_first_particles: The number of first particles to process. Cannot be used with `subset_idxs`.
         :param show_debug_stats: Whether to print debug statistics, such as rotation errors if ground truth in the starfile.
-        :param float32_matmul_precision: The precision used in multiplications. Speed/accuracy tradeoff
         """
-
-        self.float32_matmul_precision = float32_matmul_precision
         self.particles_star_fname = particles_star_fname
         self.particles_dir = particles_dir
         assert top_k_poses_nnet >= top_k_poses_localref, "Error, top_k_poses_nnet >= top_k_poses_localref required"
@@ -370,7 +366,7 @@ class SingleInferencer:
         :return: A list of tuples, where each tuple contains the particle metadata and the reconstructed volume for each inference run.
         """
 
-        torch.set_float32_matmul_precision(self.float32_matmul_precision)
+        torch.set_float32_matmul_precision(main_config.inference.float32_matmul_precision)
 
         data_halfset_list, model_halfset_list = self.resolve_halfset_lists(self.data_halfset, self.model_halfset)
 

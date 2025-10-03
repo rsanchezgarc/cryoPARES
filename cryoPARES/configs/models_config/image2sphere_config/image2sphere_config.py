@@ -12,6 +12,8 @@ class Image2Sphere_config:
     label_smoothing: float = 0.05 #TODO: Move this to a future loss config
     enforce_symmetry: bool = True
     use_simCLR: bool = False
+    simCLR_temperature: float = 0.5  # Temperature parameter for contrastive loss
+    simCLR_loss_weight: float = 0.1  # Weight for contrastive loss relative to main loss
     average_neigs_for_pred: bool = False #Sligthly slower and slightly more accurate
     n_neigs_to_compute: int = 10 #Number of neigs used for averaging
 

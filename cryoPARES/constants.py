@@ -6,7 +6,6 @@ from starstack.constants import RELION_EULER_CONVENTION, RELION_ANGLES_NAMES, RE
 
 PROJECT_NAME: str = "cryoPARES"
 SCRIPT_ENTRY_POINT: str = PROJECT_NAME + "__ENTRY_POINT"
-float32_matmul_precision: str = "high"
 
 BATCH_IDS_NAME: str = "idd"
 BATCH_PARTICLES_NAME: str = "particle"

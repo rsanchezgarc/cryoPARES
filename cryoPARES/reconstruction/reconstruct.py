@@ -12,7 +12,6 @@ from progressBarDistributed import SharedMemoryProgressBar, SharedMemoryProgress
 from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.reconstruction.reconstructor import Reconstructor
-from cryoPARES.constants import float32_matmul_precision
 
 _RECONSTRUCTOR = None
 
@@ -91,7 +90,7 @@ def reconstruct_starfile(particles_star_fname: str,
                          eps: float = CONFIG_PARAM(),
                          min_denominator_value: Optional[float] = None,
                          use_only_n_first_batches: Optional[int] = None,
-                         float32_matmul_precision: Optional[str] = float32_matmul_precision,
+                         float32_matmul_precision: Optional[str] = CONFIG_PARAM(),
                          weight_with_confidence: bool = CONFIG_PARAM(),
                          halfmap_subset: Optional[Literal["1", "2"]] = None
                          ):

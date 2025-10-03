@@ -43,7 +43,6 @@ class DaemonInferencer(SingleInferencer):
                  skip_localrefinement: bool = CONFIG_PARAM(),
                  skip_reconstruction: bool = CONFIG_PARAM(),
                  show_debug_stats: bool = False,
-                 float32_matmul_precision: str = constants.float32_matmul_precision,
                  secs_between_partial_results_written: int = 5,
                  resubmit_poison_pill: bool = True
                  ):
@@ -70,7 +69,6 @@ class DaemonInferencer(SingleInferencer):
         :param skip_localrefinement: Whether to skip local refinement of the particle poses.
         :param skip_reconstruction: Whether to skip 3D reconstruction from the inferred poses.
         :param show_debug_stats: Whether to print debug statistics, such as rotation errors if ground truth in the starfile.
-        :param float32_matmul_precision: The precision used in multiplications. Speed/accuracy tradeoff
         :param secs_between_partial_results_written: Partial results are saved from RAM to disk every few seconds
         :param resubmit_poison_pill: If True, posion pills are re-submitted, to ensure that all workers will die
         """
@@ -95,8 +93,7 @@ class DaemonInferencer(SingleInferencer):
                          skip_reconstruction=skip_reconstruction,
                          subset_idxs=None,
                          n_first_particles=None,
-                         show_debug_stats=show_debug_stats,
-                         float32_matmul_precision=float32_matmul_precision)
+                         show_debug_stats=show_debug_stats)
 
         self.net_address = net_address
         self.net_port = net_port
@@ -200,7 +197,6 @@ if __name__ == "__main__":
     print(" ".join(sys.argv))
     print("---------------------------------------")
     from cryoPARES.configManager.configParser import ConfigArgumentParser
-    torch.set_float32_matmul_precision(constants.float32_matmul_precision)
 
     parser = ConfigArgumentParser(prog="inferWorker_cryoPARES", description="Run inference with cryoPARES model",
                                   config_obj=main_config)

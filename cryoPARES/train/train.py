@@ -28,16 +28,11 @@ class Trainer:
     @inject_defaults_from_config(main_config.train, update_config_with_args=True)
     def __init__(self, symmetry: str, particles_star_fname: List[str], train_save_dir: str,
                  particles_dir: Optional[List[str]] = None, n_epochs: int = CONFIG_PARAM(),
-                 batch_size: int = CONFIG_PARAM(),
-                 #CONFIG_PARAM status with update_config_with_args gets updated in config directly
-                 num_dataworkers: int = CONFIG_PARAM(config=main_config.datamanager),
-                 #CONFIG_PARAM status with update_config_with_args gets updated in config directly
-                 image_size_px_for_nnet: int = CONFIG_PARAM(config=main_config.datamanager.particlesdataset),
-                 #CONFIG_PARAM status with update_config_with_args gets updated in config directly
-                 sampling_rate_angs_for_nnet: float = CONFIG_PARAM(config=main_config.datamanager.particlesdataset),
-                 # CONFIG_PARAM status with update_config_with_args gets updated in config directly
-                 mask_radius_angs: Optional[float] = CONFIG_PARAM(config=main_config.datamanager.particlesdataset),
-                 # CONFIG_PARAM status with update_config_with_args gets updated in config directly
+                 batch_size: int = CONFIG_PARAM(), #CONFIG_PARAM status with update_config_with_args gets updated in config directly
+                 num_dataworkers: int = CONFIG_PARAM(config=main_config.datamanager), #CONFIG_PARAM status with update_config_with_args gets updated in config directly
+                 image_size_px_for_nnet: int = CONFIG_PARAM(config=main_config.datamanager.particlesdataset), #CONFIG_PARAM status with update_config_with_args gets updated in config directly
+                 sampling_rate_angs_for_nnet: float = CONFIG_PARAM(config=main_config.datamanager.particlesdataset), # CONFIG_PARAM status with update_config_with_args gets updated in config directly
+                 mask_radius_angs: Optional[float] = CONFIG_PARAM(config=main_config.datamanager.particlesdataset), # CONFIG_PARAM status with update_config_with_args gets updated in config directly
                  split_halfs: bool = True,
                  continue_checkpoint_dir: Optional[str] = None, finetune_checkpoint_dir: Optional[str] = None,
                  compile_model: bool = False,
@@ -46,7 +41,6 @@ class Trainer:
                  map_fname_for_simulated_pretraining: Optional[List[str]] = None,
                  junk_particles_star_fname: Optional[List[str]] = None,
                  junk_particles_dir: Optional[List[str]] = None,
-                 float32_matmul_precision: str = constants.float32_matmul_precision,
                  ):
         """
         Trainer a model on particle data.
@@ -71,7 +65,6 @@ class Trainer:
             map_fname_for_simulated_pretraining: If provided, it will run a warmup training on simulations using this maps. They need to match the particlesStarFname order
             junk_particles_star_fname: Optional starfile(s) containing junk particles to be used for zscore threshold estimation
             junk_particles_dir: The directory where the particles of the junk_particles_star_fname are located. If not, it is assumed os.dirname(particles_star_fname) or relative to the cwd
-            float32_matmul_precision: The precision used for matmul. Accuracy/speed tradeoff
         """
         self.symmetry = symmetry
         self.particles_star_fname = [osp.expanduser(fname) for fname in particles_star_fname]
@@ -99,7 +92,6 @@ class Trainer:
                                                                                            f"the number of particle star files and maps for simulation needs to be the same")
             assert not finetune_checkpoint_dir, ("Error, if using map_fname_for_simulated_pretraining, "
                                                  "finetune_checkpoint_dir is not a valid option")
-        self.float32_matmul_precision = float32_matmul_precision
 
         self._validate_inputs()
         self._setup_training_dir(train_save_dir)
@@ -218,7 +210,7 @@ class Trainer:
         :return:
         """
         from cryoPARES.train.runTrainOnePartition import execute_trainOnePartition, check_if_training_partion_done
-        torch.set_float32_matmul_precision(self.float32_matmul_precision)
+        torch.set_float32_matmul_precision(main_config.train.float32_matmul_precision)
 
         if self.finetune_checkpoint_dir is not None:
             self._save_finetune_checkpoint_info()
@@ -317,7 +309,7 @@ class Trainer:
                                                       particles_dir,
                                                       partition, outdirbasename="val")
                     compare_prob_hists(fname_good=val_stars, fname_bad=junk_stars, show_plots=False,
-                                       plot_fname= osp.join(self.experiment_root, partition,"directional_threhsold.png"),
+                                       plot_fname=osp.join(self.experiment_root, partition,"directional_threshold.png"),
                                        symmetry=self.symmetry, compute_gmm=True)
         print("Training complete!")
 

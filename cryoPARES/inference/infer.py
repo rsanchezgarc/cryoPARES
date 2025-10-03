@@ -25,6 +25,342 @@ from cryoPARES.utils.checkpointReader import CheckpointReader
 
 
 # -----------------------------
+# Orchestrator
+# -----------------------------
+
+@inject_defaults_from_config(main_config.inference, update_config_with_args=True)
+def distributed_inference(
+        particles_star_fname: str,
+        checkpoint_dir: str,
+        results_dir: str,
+        data_halfset: Literal["half1", "half2", "allParticles"] = "allParticles",
+        model_halfset: Literal["half1", "half2", "allCombinations", "matchingHalf"] = "matchingHalf",
+        particles_dir: Optional[str] = None,
+        batch_size: int = CONFIG_PARAM(),
+        n_jobs: Optional[int] = None,
+        num_dataworkers: int = CONFIG_PARAM(config=main_config.datamanager),
+        use_cuda: bool = CONFIG_PARAM(),
+        n_cpus_if_no_cuda: int = CONFIG_PARAM(),
+        compile_model: bool = False,
+        top_k_poses_nnet: int = CONFIG_PARAM(),
+        top_k_poses_localref: int = CONFIG_PARAM(config=main_config.projmatching),
+        reference_map: Optional[str] = None,
+        reference_mask: Optional[str] = None,
+        directional_zscore_thr: Optional[float] = CONFIG_PARAM(),
+        skip_localrefinement: bool = CONFIG_PARAM(),
+        skip_reconstruction: bool = CONFIG_PARAM(),
+        subset_idxs: Optional[List[int]] = None,
+        n_first_particles: Optional[int] = None,
+        check_interval_secs: float = 2.0
+):
+    """
+    Distributed inference across particles and devices, mirroring the **halfset selection logic**
+    used by :class:`cryoPARES.inference.inference.SingleInferencer`.
+
+    Parameters
+    ----------
+    particles_star_fname : str
+        Path to the input RELION particles `.star` file.
+    checkpoint_dir : str
+        Training directory containing half-set subfolders (`half1/`, `half2/`) with checkpoints/hparams.
+    results_dir : str
+        Output directory for aggregated STAR files and (optional) reconstructions.
+    data_halfset : {"half1", "half2", "allParticles"}, default "allParticles"
+        Which particle half-set(s) to process.
+    model_halfset : {"half1", "half2", "allCombinations", "matchingHalf"}, default "matchingHalf"
+        Model half-set policy:
+          - "half1"/"half2": use that model for all selected data halves.
+          - "allCombinations": iterate models ["half1","half2"] for each selected data half.
+          - "matchingHalf": for each data half, use the **same** model half (data "half1" → model "half1").
+    particles_dir : str, optional
+        Root directory for particle image paths; overrides paths in the STAR.
+    batch_size : int
+        Inference batch size.
+    n_jobs : int, optional
+        Number of worker processes. If CUDA is on and GPUs are present, defaults to #GPUs; else 1.
+        If set to 1, this function uses a **single-process** path and calls `SingleInferencer` directly.
+    num_dataworkers : int
+        PyTorch dataloader workers per process.
+    use_cuda : bool
+        Run on GPU if True, else CPU.
+    n_cpus_if_no_cuda : int
+        Max CPU threads per worker when CUDA is disabled.
+    compile_model : bool
+        Compile the model with `torch.compile` if True.
+    top_k_poses_nnet : int
+        Number of poses to predict witht the neural network.
+    top_k_poses_localref : int
+        The number of top predictions to return after local refinement.
+    reference_map : str, optional
+        Reference map (MRC) for FSC computation (if applicable).
+    reference_mask : str, optional
+        Reference mask (MRC) for masked FSC (if applicable).
+    directional_zscore_thr : float, optional
+        Z-score threshold for directional filtering.
+    skip_localrefinement : bool
+        Skip local pose refinement if True.
+    skip_reconstruction : bool
+        If True, do not accumulate or write reconstructions.
+    subset_idxs : list[int], optional
+        Particle subset (applied inside SingleInferencer; for "allParticles" it's interpreted per half).
+    n_first_particles: int, optional
+        The number of particles to process, if not all the particles want to be processed
+    check_interval_secs : float
+        Parent loop polling interval (seconds).
+
+    Notes
+    -----
+    - For **n_jobs == 1**, this function delegates completely to `SingleInferencer`, which internally
+      handles `data_halfset` and `model_halfset` (including "matchingHalf" and "allCombinations").
+    - For **n_jobs > 1**, particles are split by half-set and distributed across workers; model half
+      selection follows the resolved policy per half to avoid cross-half coupling.
+    """
+
+    torch.set_float32_matmul_precision(main_config.inference.float32_matmul_precision)
+
+    os.makedirs(results_dir, exist_ok=True)
+
+    # Determine default parallelism
+    if use_cuda and torch.cuda.is_available():
+        n_cuda_devices = torch.cuda.device_count()
+        if n_jobs is None or n_jobs <= 0:
+            n_jobs = n_cuda_devices if n_cuda_devices > 0 else 1
+    else:
+        n_cuda_devices = None
+        if n_jobs is None or n_jobs <= 0:
+            n_jobs = 1
+
+    # -------------------------
+    # FAST PATH: single process
+    # -------------------------
+    if n_jobs == 1:
+        print("Single-process mode")
+        inferencer = SingleInferencer(
+            particles_star_fname=particles_star_fname,
+            checkpoint_dir=checkpoint_dir,
+            results_dir=results_dir,  # let SingleInferencer write outputs
+            data_halfset=data_halfset,  # pass through as provided
+            model_halfset=model_halfset,  # pass through as provided
+            particles_dir=particles_dir,
+            batch_size=batch_size,
+            num_dataworkers=num_dataworkers,
+            use_cuda=use_cuda,
+            n_cpus_if_no_cuda=n_cpus_if_no_cuda,
+            compile_model=compile_model,
+            top_k_poses_nnet=top_k_poses_nnet,
+            top_k_poses_localref=top_k_poses_localref,
+            reference_map=reference_map,
+            reference_mask=reference_mask,
+            directional_zscore_thr=directional_zscore_thr,
+            skip_localrefinement=skip_localrefinement,
+            skip_reconstruction=skip_reconstruction,
+            subset_idxs=subset_idxs,  # interpreted inside per half
+            n_first_particles=n_first_particles,
+            show_debug_stats=False,
+        )
+        out = inferencer.run()
+        # Return whatever SingleInferencer returned; files are already written to results_dir
+        return out
+
+    # -------------------------
+    # MULTI-PROCESS PATH
+    # -------------------------
+    print(f"Multiprocess mode: spawning {n_jobs} worker(s).")
+    ctx = multiprocessing.get_context('spawn')
+    aggregated_results: Dict[str, Optional[pd.DataFrame]] = {}
+
+    # Track reconstructions per model-half to compute FSC
+    fsc_by_model: Dict[str, dict] = {}
+
+    # Build lists mirroring SingleInferencer.run() logic
+    if model_halfset == "allCombinations":
+        model_halfset_list: List[Optional[str]] = ["half1", "half2"]
+    elif model_halfset == "matchingHalf":
+        model_halfset_list = [None]
+    else:
+        model_halfset_list = [model_halfset]
+
+    if data_halfset == "allParticles":
+        data_halfset_list = ["half1", "half2"]
+    else:
+        data_halfset_list = [data_halfset]
+
+    for m_half in model_halfset_list:
+        fsc_by_model = {m_half:{"half1": None, "half2": None, "sampling_rate": None}}
+        for d_half in data_halfset_list:
+            resolved_model_halfset = d_half if m_half is None else m_half
+            print(f"\n=== Running data {d_half} with model {resolved_model_halfset} ===")
+
+            # Determine particle rows for this half via starfile
+            all_indices = _load_particles_indices_with_halfset(
+                particles_star_fname, d_half, subset_idxs=subset_idxs
+            )
+            n_particles_total = len(all_indices)
+            print(f"Total particles to process for data {d_half}: {n_particles_total}")
+
+            # Shared reconstructor buffers (optional)
+            shared_numerator = shared_weights = shared_ctfsq = None
+            numerator_shape = weights_shape = ctfsq_shape = None
+            reconstructor_parent = None
+
+            if not skip_reconstruction:
+                symmetry = SingleInferencer._get_symmetry(checkpoint_dir, resolved_model_halfset)
+                reconstructor_parent = SingleInferencer._get_reconstructor(particles_star_fname,
+                                                                           particles_dir,
+                                                                           symmetry=symmetry)
+                numerator_shape = reconstructor_parent.numerator.shape
+                weights_shape = reconstructor_parent.weights.shape
+                ctfsq_shape = reconstructor_parent.ctfsq.shape
+
+                shared_numerator, _ = create_shared_tensor(numerator_shape, ctx=ctx)
+                shared_weights, _ = create_shared_tensor(weights_shape, ctx=ctx)
+                shared_ctfsq, _ = create_shared_tensor(ctfsq_shape, ctx=ctx)
+
+            with ctx.Manager() as manager, SharedMemoryProgressBar(n_jobs) as pbar:
+                output_q = manager.Queue()
+                pbar_fname = pbar.shm_name
+
+                split_indices = np.array_split(all_indices, n_jobs)
+
+                processes = []
+                for worker_id, part_idxs in enumerate(split_indices):
+                    worker_device = None
+                    if torch.cuda.is_available():
+                        n_cuda = torch.cuda.device_count()
+                        if n_cuda > 0:
+                            worker_device = f"cuda:{worker_id % n_cuda}"
+                    if n_first_particles:
+                        part_idxs = part_idxs[:n_first_particles]
+                    inferencer_init_kwargs = dict(
+                        particles_star_fname=particles_star_fname,
+                        checkpoint_dir=checkpoint_dir,
+                        results_dir=None,
+                        data_halfset=d_half,
+                        model_halfset=resolved_model_halfset,
+                        particles_dir=particles_dir,
+                        batch_size=batch_size,
+                        num_dataworkers=num_dataworkers,
+                        use_cuda=use_cuda,
+                        n_cpus_if_no_cuda=n_cpus_if_no_cuda if not use_cuda else n_cpus_if_no_cuda,
+                        compile_model=compile_model,
+                        top_k_poses_nnet=top_k_poses_nnet,
+                        top_k_poses_localref=top_k_poses_localref,
+                        reference_map=reference_map,
+                        reference_mask=reference_mask,
+                        directional_zscore_thr=directional_zscore_thr,
+                        skip_localrefinement=skip_localrefinement,
+                        skip_reconstruction=skip_reconstruction,
+                        subset_idxs=list(map(int, part_idxs)),
+                        show_debug_stats=False,
+                    )
+
+                    p = ctx.Process(
+                        target=worker,
+                        args=(worker_id, output_q, pbar_fname,
+                              inferencer_init_kwargs, main_config,
+                              shared_numerator, shared_weights, shared_ctfsq, worker_device)
+                    )
+                    p.start()
+                    processes.append(p)
+
+                results: Dict[int, Any] = {}
+                try:
+                    while True:
+                        while not output_q.empty():
+                            worker_id, result = output_q.get_nowait()
+                            results[worker_id] = result
+                            print(f"Received results from worker {worker_id}")
+
+                        all_done = True
+                        for p in processes:
+                            if not p.is_alive() and p.exitcode not in (0, None):
+                                print(f"Worker {p.pid} died with exit code {p.exitcode}!", file=sys.stderr)
+                                for q in processes:
+                                    if q.is_alive():
+                                        print(f"Terminating worker {q.pid}...")
+                                        q.terminate()
+                                sys.exit(1)
+
+                            if p.is_alive():
+                                all_done = False
+
+                        if all_done:
+                            while not output_q.empty():
+                                worker_id, result = output_q.get_nowait()
+                                results[worker_id] = result
+                                print(f"Received final results from worker {worker_id}")
+                            break
+
+                        time.sleep(check_interval_secs)
+
+                    for p in processes:
+                        p.join()
+
+                except KeyboardInterrupt:
+                    print("Interrupted by user. Terminating workers...")
+                    for p in processes:
+                        if p.is_alive():
+                            p.terminate()
+                    sys.exit(1)
+                finally:
+                    for p in processes:
+                        p.join()
+            key = f"model_{resolved_model_halfset}__data_{d_half}"
+            if results:
+                print(f"Aggregating results from {len(results)} workers for {key}...")
+                aggregated_particles, aggregated_optics = _aggregate_worker_results(results)
+                aggregated_results[key] = aggregated_particles
+                if aggregated_particles is not None and results_dir is not None:
+                    basename = os.path.basename(particles_star_fname).removesuffix(".star")
+                    out_star = os.path.join(results_dir, basename + f"_{d_half}.star")
+                    star_payload = {"particles": aggregated_particles}
+                    if aggregated_optics is not None:
+                        star_payload["optics"] = aggregated_optics
+                    starfile.write(star_payload, out_star, overwrite=True)
+                    print(f"Saved aggregated STAR: {out_star}")
+            else:
+                aggregated_results[key] = None
+            if not skip_reconstruction and reconstructor_parent is not None:
+                print("Backprojection done. Reconstructing...")
+                final_numerator = torch.frombuffer(shared_numerator.get_obj(), dtype=torch.float32).reshape(numerator_shape)
+                final_weights = torch.frombuffer(shared_weights.get_obj(), dtype=torch.float32).reshape(weights_shape)
+                final_ctfsq = torch.frombuffer(shared_ctfsq.get_obj(), dtype=torch.float32).reshape(ctfsq_shape)
+
+                reconstructor_parent.numerator = final_numerator
+                reconstructor_parent.weights = final_weights
+                reconstructor_parent.ctfsq = final_ctfsq
+
+                out_mrc = os.path.join(results_dir, f"reconstruction_{d_half}.mrc")
+                reconstructor_parent.generate_volume(out_mrc)
+                print(f"Reconstruction saved for {d_half}: {out_mrc}")
+                fsc_by_model[m_half][d_half] = out_mrc
+                try:
+                    fsc_by_model[m_half]["sampling_rate"] = getattr(reconstructor_parent, "sampling_rate",
+                                                                    fsc_by_model[m_half]["sampling_rate"])
+                except Exception:
+                    pass
+
+        # Compute FSC when reconstructions for both halves exist
+        try:
+            for model_key, rec in fsc_by_model.items():
+                if rec.get("half1") and rec.get("half2") and rec.get("sampling_rate"):
+                    print(f"Computing FSC, " "" if model_key is None else f" for {model_key}...")
+                    vol1 = get_vol(rec["half1"], pixel_size=None)[0]
+                    vol2 = get_vol(rec["half2"], pixel_size=None)[0]
+                    mask_arr = None
+                    if reference_mask is not None:
+                        mask_arr = get_vol(reference_mask, pixel_size=None)[0]
+                    fsc, spatial_freq, resolution_A, (res_05, res_0143) = compute_fsc(
+                        vol1, vol2, rec["sampling_rate"], mask=mask_arr
+                    )
+                    print(f"[FSC] Resolution at 0.143: {res_0143:.3f} Å\n"
+                          f"                   at 0.5: {res_05:.3f} Å")
+        except Exception as e:
+            print(f"FSC computation failed: {e}")
+        return aggregated_results
+
+
+# -----------------------------
 # Helpers
 # -----------------------------
 
@@ -221,347 +557,6 @@ def _worker(worker_id,
                 shared_c_t += reconstructor.ctfsq.detach().cpu()
             inferencer.clean_reconstructer_buffers()
 
-# -----------------------------
-# Orchestrator
-# -----------------------------
-
-@inject_defaults_from_config(main_config.inference, update_config_with_args=True)
-def distributed_inference(
-        particles_star_fname: str,
-        checkpoint_dir: str,
-        results_dir: str,
-        data_halfset: Literal["half1", "half2", "allParticles"] = "allParticles",
-        model_halfset: Literal["half1", "half2", "allCombinations", "matchingHalf"] = "matchingHalf",
-        particles_dir: Optional[str] = None,
-        batch_size: int = CONFIG_PARAM(),
-        n_jobs: Optional[int] = None,
-        num_dataworkers: int = CONFIG_PARAM(config=main_config.datamanager),
-        use_cuda: bool = CONFIG_PARAM(),
-        n_cpus_if_no_cuda: int = CONFIG_PARAM(),
-        compile_model: bool = False,
-        top_k_poses_nnet: int = CONFIG_PARAM(),
-        top_k_poses_localref: int = CONFIG_PARAM(config=main_config.projmatching),
-        reference_map: Optional[str] = None,
-        reference_mask: Optional[str] = None,
-        directional_zscore_thr: Optional[float] = CONFIG_PARAM(),
-        skip_localrefinement: bool = CONFIG_PARAM(),
-        skip_reconstruction: bool = CONFIG_PARAM(),
-        subset_idxs: Optional[List[int]] = None,
-        n_first_particles: Optional[int] = None,
-        float32_matmul_precision: str = constants.float32_matmul_precision,
-        check_interval_secs: float = 2.0
-):
-    """
-    Distributed inference across particles and devices, mirroring the **halfset selection logic**
-    used by :class:`cryoPARES.inference.inference.SingleInferencer`.
-
-    Parameters
-    ----------
-    particles_star_fname : str
-        Path to the input RELION particles `.star` file.
-    checkpoint_dir : str
-        Training directory containing half-set subfolders (`half1/`, `half2/`) with checkpoints/hparams.
-    results_dir : str
-        Output directory for aggregated STAR files and (optional) reconstructions.
-    data_halfset : {"half1", "half2", "allParticles"}, default "allParticles"
-        Which particle half-set(s) to process.
-    model_halfset : {"half1", "half2", "allCombinations", "matchingHalf"}, default "matchingHalf"
-        Model half-set policy:
-          - "half1"/"half2": use that model for all selected data halves.
-          - "allCombinations": iterate models ["half1","half2"] for each selected data half.
-          - "matchingHalf": for each data half, use the **same** model half (data "half1" → model "half1").
-    particles_dir : str, optional
-        Root directory for particle image paths; overrides paths in the STAR.
-    batch_size : int
-        Inference batch size.
-    n_jobs : int, optional
-        Number of worker processes. If CUDA is on and GPUs are present, defaults to #GPUs; else 1.
-        If set to 1, this function uses a **single-process** path and calls `SingleInferencer` directly.
-    num_dataworkers : int
-        PyTorch dataloader workers per process.
-    use_cuda : bool
-        Run on GPU if True, else CPU.
-    n_cpus_if_no_cuda : int
-        Max CPU threads per worker when CUDA is disabled.
-    compile_model : bool
-        Compile the model with `torch.compile` if True.
-    top_k_poses_nnet : int
-        Number of poses to predict witht the neural network.
-    top_k_poses_localref : int
-        The number of top predictions to return after local refinement.
-    reference_map : str, optional
-        Reference map (MRC) for FSC computation (if applicable).
-    reference_mask : str, optional
-        Reference mask (MRC) for masked FSC (if applicable).
-    directional_zscore_thr : float, optional
-        Z-score threshold for directional filtering.
-    skip_localrefinement : bool
-        Skip local pose refinement if True.
-    skip_reconstruction : bool
-        If True, do not accumulate or write reconstructions.
-    subset_idxs : list[int], optional
-        Particle subset (applied inside SingleInferencer; for "allParticles" it’s interpreted per half).
-    n_first_particles: int, optional
-        The number of particles to process, if not all the particles want to be processed
-    float32_matmul_precision : str
-        Precision for `torch.set_float32_matmul_precision`.
-    check_interval_secs : float
-        Parent loop polling interval (seconds).
-
-    Notes
-    -----
-    - For **n_jobs == 1**, this function delegates completely to `SingleInferencer`, which internally
-      handles `data_halfset` and `model_halfset` (including "matchingHalf" and "allCombinations").
-    - For **n_jobs > 1**, particles are split by half-set and distributed across workers; model half
-      selection follows the resolved policy per half to avoid cross-half coupling.
-    """
-
-    if float32_matmul_precision is not None:
-        torch.set_float32_matmul_precision(float32_matmul_precision)
-
-    os.makedirs(results_dir, exist_ok=True)
-
-    # Determine default parallelism
-    if use_cuda and torch.cuda.is_available():
-        n_cuda_devices = torch.cuda.device_count()
-        if n_jobs is None or n_jobs <= 0:
-            n_jobs = n_cuda_devices if n_cuda_devices > 0 else 1
-    else:
-        n_cuda_devices = None
-        if n_jobs is None or n_jobs <= 0:
-            n_jobs = 1
-
-    # -------------------------
-    # FAST PATH: single process
-    # -------------------------
-    if n_jobs == 1:
-        print("Single-process mode")
-        inferencer = SingleInferencer(
-            particles_star_fname=particles_star_fname,
-            checkpoint_dir=checkpoint_dir,
-            results_dir=results_dir,  # let SingleInferencer write outputs
-            data_halfset=data_halfset,  # pass through as provided
-            model_halfset=model_halfset,  # pass through as provided
-            particles_dir=particles_dir,
-            batch_size=batch_size,
-            num_dataworkers=num_dataworkers,
-            use_cuda=use_cuda,
-            n_cpus_if_no_cuda=n_cpus_if_no_cuda,
-            compile_model=compile_model,
-            top_k_poses_nnet=top_k_poses_nnet,
-            top_k_poses_localref=top_k_poses_localref,
-            reference_map=reference_map,
-            reference_mask=reference_mask,
-            directional_zscore_thr=directional_zscore_thr,
-            skip_localrefinement=skip_localrefinement,
-            skip_reconstruction=skip_reconstruction,
-            subset_idxs=subset_idxs,  # interpreted inside per half
-            n_first_particles=n_first_particles,
-            show_debug_stats=False,
-            float32_matmul_precision=float32_matmul_precision,
-        )
-        out = inferencer.run()
-        # Return whatever SingleInferencer returned; files are already written to results_dir
-        return out
-
-    # -------------------------
-    # MULTI-PROCESS PATH
-    # -------------------------
-    print(f"Multiprocess mode: spawning {n_jobs} worker(s).")
-    ctx = multiprocessing.get_context('spawn')
-    aggregated_results: Dict[str, Optional[pd.DataFrame]] = {}
-
-    # Track reconstructions per model-half to compute FSC
-    fsc_by_model: Dict[str, dict] = {}
-
-    # Build lists mirroring SingleInferencer.run() logic
-    if model_halfset == "allCombinations":
-        model_halfset_list: List[Optional[str]] = ["half1", "half2"]
-    elif model_halfset == "matchingHalf":
-        model_halfset_list = [None]
-    else:
-        model_halfset_list = [model_halfset]
-
-    if data_halfset == "allParticles":
-        data_halfset_list = ["half1", "half2"]
-    else:
-        data_halfset_list = [data_halfset]
-
-    for m_half in model_halfset_list:
-        fsc_by_model = {m_half:{"half1": None, "half2": None, "sampling_rate": None}}
-        for d_half in data_halfset_list:
-            resolved_model_halfset = d_half if m_half is None else m_half
-            print(f"\n=== Running data {d_half} with model {resolved_model_halfset} ===")
-
-            # Determine particle rows for this half via starfile
-            all_indices = _load_particles_indices_with_halfset(
-                particles_star_fname, d_half, subset_idxs=subset_idxs
-            )
-            n_particles_total = len(all_indices)
-            print(f"Total particles to process for data {d_half}: {n_particles_total}")
-
-            # Shared reconstructor buffers (optional)
-            shared_numerator = shared_weights = shared_ctfsq = None
-            numerator_shape = weights_shape = ctfsq_shape = None
-            reconstructor_parent = None
-
-            if not skip_reconstruction:
-                symmetry = SingleInferencer._get_symmetry(checkpoint_dir, resolved_model_halfset)
-                reconstructor_parent = SingleInferencer._get_reconstructor(particles_star_fname,
-                                                                           particles_dir,
-                                                                           symmetry=symmetry)
-                numerator_shape = reconstructor_parent.numerator.shape
-                weights_shape = reconstructor_parent.weights.shape
-                ctfsq_shape = reconstructor_parent.ctfsq.shape
-
-                shared_numerator, _ = create_shared_tensor(numerator_shape, ctx=ctx)
-                shared_weights, _ = create_shared_tensor(weights_shape, ctx=ctx)
-                shared_ctfsq, _ = create_shared_tensor(ctfsq_shape, ctx=ctx)
-
-            with ctx.Manager() as manager, SharedMemoryProgressBar(n_jobs) as pbar:
-                output_q = manager.Queue()
-                pbar_fname = pbar.shm_name
-
-                split_indices = np.array_split(all_indices, n_jobs)
-
-                processes = []
-                for worker_id, part_idxs in enumerate(split_indices):
-                    worker_device = None
-                    if torch.cuda.is_available():
-                        n_cuda = torch.cuda.device_count()
-                        if n_cuda > 0:
-                            worker_device = f"cuda:{worker_id % n_cuda}"
-                    if n_first_particles:
-                        part_idxs = part_idxs[:n_first_particles]
-                    inferencer_init_kwargs = dict(
-                        particles_star_fname=particles_star_fname,
-                        checkpoint_dir=checkpoint_dir,
-                        results_dir=None,
-                        data_halfset=d_half,
-                        model_halfset=resolved_model_halfset,
-                        particles_dir=particles_dir,
-                        batch_size=batch_size,
-                        num_dataworkers=num_dataworkers,
-                        use_cuda=use_cuda,
-                        n_cpus_if_no_cuda=n_cpus_if_no_cuda if not use_cuda else n_cpus_if_no_cuda,
-                        compile_model=compile_model,
-                        top_k_poses_nnet=top_k_poses_nnet,
-                        top_k_poses_localref=top_k_poses_localref,
-                        reference_map=reference_map,
-                        reference_mask=reference_mask,
-                        directional_zscore_thr=directional_zscore_thr,
-                        skip_localrefinement=skip_localrefinement,
-                        skip_reconstruction=skip_reconstruction,
-                        subset_idxs=list(map(int, part_idxs)),
-                        show_debug_stats=False,
-                        float32_matmul_precision=float32_matmul_precision,
-                    )
-
-                    p = ctx.Process(
-                        target=worker,
-                        args=(worker_id, output_q, pbar_fname,
-                              inferencer_init_kwargs, main_config,
-                              shared_numerator, shared_weights, shared_ctfsq, worker_device)
-                    )
-                    p.start()
-                    processes.append(p)
-
-                results: Dict[int, Any] = {}
-                try:
-                    while True:
-                        while not output_q.empty():
-                            worker_id, result = output_q.get_nowait()
-                            results[worker_id] = result
-                            print(f"Received results from worker {worker_id}")
-
-                        all_done = True
-                        for p in processes:
-                            if not p.is_alive() and p.exitcode not in (0, None):
-                                print(f"Worker {p.pid} died with exit code {p.exitcode}!", file=sys.stderr)
-                                for q in processes:
-                                    if q.is_alive():
-                                        print(f"Terminating worker {q.pid}...")
-                                        q.terminate()
-                                sys.exit(1)
-
-                            if p.is_alive():
-                                all_done = False
-
-                        if all_done:
-                            while not output_q.empty():
-                                worker_id, result = output_q.get_nowait()
-                                results[worker_id] = result
-                                print(f"Received final results from worker {worker_id}")
-                            break
-
-                        time.sleep(check_interval_secs)
-
-                    for p in processes:
-                        p.join()
-
-                except KeyboardInterrupt:
-                    print("Interrupted by user. Terminating workers...")
-                    for p in processes:
-                        if p.is_alive():
-                            p.terminate()
-                    sys.exit(1)
-                finally:
-                    for p in processes:
-                        p.join()
-            key = f"model_{resolved_model_halfset}__data_{d_half}"
-            if results:
-                print(f"Aggregating results from {len(results)} workers for {key}...")
-                aggregated_particles, aggregated_optics = _aggregate_worker_results(results)
-                aggregated_results[key] = aggregated_particles
-                if aggregated_particles is not None and results_dir is not None:
-                    basename = os.path.basename(particles_star_fname).removesuffix(".star")
-                    out_star = os.path.join(results_dir, basename + f"_{d_half}.star")
-                    star_payload = {"particles": aggregated_particles}
-                    if aggregated_optics is not None:
-                        star_payload["optics"] = aggregated_optics
-                    starfile.write(star_payload, out_star, overwrite=True)
-                    print(f"Saved aggregated STAR: {out_star}")
-            else:
-                aggregated_results[key] = None
-            if not skip_reconstruction and reconstructor_parent is not None:
-                print("Backprojection done. Reconstructing...")
-                final_numerator = torch.frombuffer(shared_numerator.get_obj(), dtype=torch.float32).reshape(numerator_shape)
-                final_weights = torch.frombuffer(shared_weights.get_obj(), dtype=torch.float32).reshape(weights_shape)
-                final_ctfsq = torch.frombuffer(shared_ctfsq.get_obj(), dtype=torch.float32).reshape(ctfsq_shape)
-
-                reconstructor_parent.numerator = final_numerator
-                reconstructor_parent.weights = final_weights
-                reconstructor_parent.ctfsq = final_ctfsq
-
-                out_mrc = os.path.join(results_dir, f"reconstruction_{d_half}.mrc")
-                reconstructor_parent.generate_volume(out_mrc)
-                print(f"Reconstruction saved for {d_half}: {out_mrc}")
-                fsc_by_model[m_half][d_half] = out_mrc
-                try:
-                    fsc_by_model[m_half]["sampling_rate"] = getattr(reconstructor_parent, "sampling_rate",
-                                                                    fsc_by_model[m_half]["sampling_rate"])
-                except Exception:
-                    pass
-
-        # Compute FSC when reconstructions for both halves exist
-        try:
-            for model_key, rec in fsc_by_model.items():
-                if rec.get("half1") and rec.get("half2") and rec.get("sampling_rate"):
-                    print(f"Computing FSC, " "" if model_key is None else f" for {model_key}...")
-                    vol1 = get_vol(rec["half1"], pixel_size=None)[0]
-                    vol2 = get_vol(rec["half2"], pixel_size=None)[0]
-                    mask_arr = None
-                    if reference_mask is not None:
-                        mask_arr = get_vol(reference_mask, pixel_size=None)[0]
-                    fsc, spatial_freq, resolution_A, (res_05, res_0143) = compute_fsc(
-                        vol1, vol2, rec["sampling_rate"], mask=mask_arr
-                    )
-                    print(f"[FSC] Resolution at 0.143: {res_0143:.3f} Å\n"
-                          f"                   at 0.5: {res_05:.3f} Å")
-        except Exception as e:
-            print(f"FSC computation failed: {e}")
-        return aggregated_results
-
 
 def main():
     os.environ['MKL_THREADING_LAYER'] = 'GNU'
@@ -569,8 +564,6 @@ def main():
     print('---------------------------------------')
     print(' '.join(sys.argv))
     print('---------------------------------------')
-
-    torch.set_float32_matmul_precision(constants.float32_matmul_precision)
 
     parser = ConfigArgumentParser(prog='distrib_infer_cryoPARES',
                                   description='Run inference with cryoPARES model (distributed)',

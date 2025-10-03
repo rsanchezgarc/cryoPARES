@@ -204,7 +204,7 @@ def projmatching_starfile(
         batch_size: int = 1024,
         use_cuda: bool = True,
         verbose: bool = True,
-        torch_matmul_precision: Literal["highest", "high", "medium"] = "high",
+        float32_matmul_precision: Literal["highest", "high", "medium"] = "high",
         gpu_id: Optional[int] = None,
         n_first_particles: Optional[int] = None,
         correct_ctf: bool = True,
@@ -231,7 +231,7 @@ def projmatching_starfile(
         batch_size: Batch size per job.
         use_cuda: If True, use GPU(s).
         verbose: If True, log progress.
-        torch_matmul_precision: Precision mode for matmul.
+        float32_matmul_precision: Precision mode for matmul.
         gpu_id: Specific GPU ID (if any).
         n_first_particles: Limit processing to first N particles.
         correct_ctf: Apply CTF correction if True.
@@ -260,7 +260,7 @@ def projmatching_starfile(
             batch_size=batch_size,
             use_cuda=use_cuda,
             verbose=verbose,
-            torch_matmul_precision=torch_matmul_precision,
+            float32_matmul_precision=float32_matmul_precision,
             gpu_id=gpu_id,
             n_first_particles=n_first_particles,
             correct_ctf=correct_ctf,
@@ -268,7 +268,7 @@ def projmatching_starfile(
         )
         return
 
-    torch.set_float32_matmul_precision(torch_matmul_precision)
+    torch.set_float32_matmul_precision(float32_matmul_precision)
 
     mainLogger = getWorkerLogger(verbose)
 

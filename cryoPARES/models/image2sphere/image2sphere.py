@@ -36,7 +36,9 @@ class Image2Sphere(nn.Module):
                  num_augmented_copies_per_batch: Optional[int] = CONFIG_PARAM(config=main_config.datamanager),
                  enforce_symmetry: bool = CONFIG_PARAM(),
                  encoder: Optional[nn.Module] = None,
-                 use_simCLR: bool = False,
+                 use_simCLR: bool = CONFIG_PARAM(),
+                 simCLR_temperature: float = CONFIG_PARAM(),
+                 simCLR_loss_weight: float = CONFIG_PARAM(),
                  average_neigs_for_pred: bool = CONFIG_PARAM(),
                  example_batch: Optional[Dict[str, Any]] = None):
         super().__init__()
@@ -49,6 +51,8 @@ class Image2Sphere(nn.Module):
         self.label_smoothing = label_smoothing
         self.num_augmented_copies_per_batch = num_augmented_copies_per_batch #TODO: refactor SimCLR
         self.use_simCLR = use_simCLR
+        self.simCLR_temperature = simCLR_temperature
+        self.simCLR_loss_weight = simCLR_loss_weight
         self.n_neigs_to_compute = main_config.models.image2sphere.n_neigs_to_compute
 
         if example_batch is None:
@@ -239,8 +243,84 @@ class Image2Sphere(nn.Module):
         return probs, so3_grid.output_rotmats
 
 
-    def simCLR_like_loss(self, wD): #TODO: implement this
-        return NotImplementedError()
+    def simCLR_like_loss(self, wD, temperature=0.5):
+        """
+        Compute SimCLR-like contrastive loss using in-plane rotation invariant features.
+
+        The loss encourages different augmented views of the same particle to have similar
+        representations in the spherical harmonic feature space (which is invariant to in-plane rotations).
+
+        Args:
+            wD: Wigner-D coefficients of shape (B, 1, D) where B = num_particles * num_augmented_copies_per_batch
+            temperature: Temperature parameter for NT-Xent loss (controls concentration)
+
+        Returns:
+            Scalar contrastive loss value
+
+        Implementation details:
+            1. Extract spherical harmonic coefficients (m'=0 column) which are invariant to in-plane rotations
+            2. Reshape to group augmented copies: (num_particles, num_augmented_copies, feature_dim)
+            3. Compute NT-Xent (Normalized Temperature-scaled Cross Entropy) loss
+            4. Positive pairs: different augmented views of same particle
+            5. Negative pairs: views from different particles
+        """
+        if self.num_augmented_copies_per_batch is None or self.num_augmented_copies_per_batch <= 1:
+            # No augmented copies, contrastive loss not applicable
+            return 0.0
+
+        # Extract in-plane rotation invariant spherical harmonic features
+        # wD shape: (B, 1, D) -> sh_coeffs shape: (B, D')
+        sh_coeffs = extract_sh_coeffs_fast(wD, self.lmax).squeeze(1)
+
+        batch_size = sh_coeffs.shape[0]
+        num_aug = self.num_augmented_copies_per_batch
+
+        # Verify batch size is divisible by num_augmented_copies
+        if batch_size % num_aug != 0:
+            raise RuntimeError("Error, batch_size % num_aug == 0 required ")
+
+        num_particles = batch_size // num_aug
+        feature_dim = sh_coeffs.shape[1]
+
+        # Reshape to group augmented copies: (num_particles, num_aug, feature_dim)
+        sh_coeffs = sh_coeffs.view(num_particles, num_aug, feature_dim)
+
+        # L2 normalize for cosine similarity
+        sh_coeffs = nn.functional.normalize(sh_coeffs, p=2, dim=-1)
+
+        # Flatten back to (batch_size, feature_dim) for easier indexing
+        sh_coeffs_flat = sh_coeffs.view(batch_size, feature_dim)
+
+        # Compute similarity matrix: (batch_size, batch_size)
+        similarity_matrix = torch.matmul(sh_coeffs_flat, sh_coeffs_flat.t()) / temperature
+
+        # Create mask for positive pairs (same particle, different augmentation)
+        # Particles are arranged as [p0_aug0, p0_aug1, ..., p0_augN, p1_aug0, p1_aug1, ...]
+        particle_ids = torch.arange(batch_size, device=wD.device) // num_aug
+        positive_mask = (particle_ids.unsqueeze(0) == particle_ids.unsqueeze(1)).float()
+
+        # Remove self-similarity (diagonal)
+        positive_mask = positive_mask - torch.eye(batch_size, device=wD.device)
+
+        # Mask for all pairs except self (for denominator)
+        all_pairs_mask = 1.0 - torch.eye(batch_size, device=wD.device)
+
+        # Compute NT-Xent loss
+        # For numerical stability, subtract max before exp
+        similarity_matrix_stable = similarity_matrix - similarity_matrix.max(dim=1, keepdim=True)[0].detach()
+
+        # Numerator: sum of exp(sim) for positive pairs
+        exp_sim = torch.exp(similarity_matrix_stable)
+        positive_sim = (exp_sim * positive_mask).sum(dim=1)
+
+        # Denominator: sum of exp(sim) for all pairs except self
+        all_sim = (exp_sim * all_pairs_mask).sum(dim=1)
+
+        # Avoid log(0) by adding small epsilon
+        loss = -torch.log(positive_sim / (all_sim + 1e-8) + 1e-8)
+
+        # Average over batch
+        return loss.mean()
 
     def forward_and_loss(self, img, gt_rotmat, per_img_weight=None, top_k:int=1):
         '''Compute cross entropy loss using ground truth rotation, the correct label
@@ -255,7 +335,7 @@ class Image2Sphere(nn.Module):
         wD, rotMat_logits, pred_rotmat_ids, pred_rotmats, maxprobs = self.forward(img, top_k=top_k)
 
         if self.use_simCLR:
-            contrast_loss = self.simCLR_like_loss(wD)
+            contrast_loss = self.simCLR_loss_weight * self.simCLR_like_loss(wD, temperature=self.simCLR_temperature)
         else:
             contrast_loss = 0
 
@@ -292,7 +372,7 @@ class Image2Sphere(nn.Module):
         return (wD, rotMat_logits, pred_rotmat_ids, pred_rotmats, maxprobs), loss, error_rads
 
 
-@functools.lru_cache(maxsize=2)
+@functools.lru_cache(maxsize=5)
 def create_extraction_mask(lmax, device):
     """
     Create a boolean mask to extract middle columns (m'=0) from flattened Wigner-D matrices.

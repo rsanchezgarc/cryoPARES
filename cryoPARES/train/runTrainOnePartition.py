@@ -36,8 +36,7 @@ class TrainerPartition:
                  find_lr: bool = False, compile_model: bool = False, val_check_interval: Optional[float] = None,
                  num_dataworkers: int = CONFIG_PARAM(config=main_config.datamanager),
                  mask_radius_angs: Optional[float] = CONFIG_PARAM(config=main_config.datamanager.particlesdataset),
-                 overfit_batches: Optional[int] = None,
-                 float32_matmul_precision: str= constants.float32_matmul_precision):
+                 overfit_batches: Optional[int] = None):
         """Initialize trainer for a single partition.
 
         Args:
@@ -55,7 +54,6 @@ class TrainerPartition:
             num_dataworkers: The number of workers (one CPU process each, to be used to load data)
             mask_radius_angs: The radius of the particle in Angstroms. Used to create a circular mask arround it.
             overfit_batches: Number of batches to use if overfitting
-            float32_matmul_precision:
         """
         self.symmetry = symmetry
         self.particles_star_fname = particles_star_fname
@@ -69,14 +67,13 @@ class TrainerPartition:
         self.val_check_interval = val_check_interval
         self.n_epochs = n_epochs
         self.overfit_batches = overfit_batches
-        self.float32_matmul_precision = float32_matmul_precision
 
         self.train_config = main_config.train
         if self.n_epochs is not None:
             assert self.n_epochs >= 0
             self.train_config.n_epochs = self.n_epochs
 
-        torch.set_float32_matmul_precision(self.float32_matmul_precision)
+        torch.set_float32_matmul_precision(main_config.train.float32_matmul_precision)
         # Uncomment the next line to reduce fragmentation
         if main_config.train.expandable_segments_GPU_mem:
             os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"

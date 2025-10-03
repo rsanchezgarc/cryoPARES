@@ -2,7 +2,6 @@ import os
 import sys
 from functools import lru_cache
 from typing import List, Optional, Tuple, Union, Literal
-# TODO: Reconstruct with confidence seems to make things worse
 import numpy as np
 import torch
 import tqdm
@@ -12,8 +11,7 @@ from cryoPARES.constants import (
     RELION_SHIFTS_NAMES,
     RELION_EULER_CONVENTION,
     RELION_IMAGE_FNAME,
-    RELION_PRED_POSE_CONFIDENCE_NAME,
-    float32_matmul_precision
+    RELION_PRED_POSE_CONFIDENCE_NAME
 )
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
@@ -37,7 +35,7 @@ class Reconstructor(nn.Module):
         correct_ctf: bool = CONFIG_PARAM(),
         eps: float = CONFIG_PARAM(),
         min_denominator_value: Optional[float] = None,
-        weight_with_confidence: bool = CONFIG_PARAM(), #TODO: Not helping at the moment.
+        weight_with_confidence: bool = CONFIG_PARAM(),
         *args,
         **kwargs,
     ):
@@ -344,13 +342,17 @@ class Reconstructor(nn.Module):
             ctf = ctf.to(imgs.device)
             imgs = imgs * ctf
 
-            # Prepare channels: [real, imag, ctf^2]
-            # we only build alpha if confidence is provided (to avoid overhead).
+            # Prepare channels: [real, imag, ctf^2] (+ optional confidence channel for weighting)
             if confidence is not None:
                 confidence = torch.nan_to_num(confidence, nan=0.0,
                                               posinf=1.0, neginf=0.0).clamp(0.0, 1.5)
-                alpha = confidence.view(-1, 1, 1, 1).to(ctf.device)  # broadcast over channels and pixels
-                stacked = torch.stack([imgs.real, imgs.imag, ctf**2], dim=1) * alpha
+                alpha = confidence.view(-1, 1, 1).to(ctf.device)  # [B, 1, 1] for broadcasting over H, W
+                # Stack confidence-weighted data + ones*alpha as 4th channel for weighted geometric sampling
+                ones_weighted = torch.ones_like(imgs.real) * alpha
+                stacked = torch.stack([imgs.real * alpha,
+                                      imgs.imag * alpha,
+                                      ctf**2 * alpha,
+                                      ones_weighted], dim=1)
             else:
                 stacked = torch.stack([imgs.real, imgs.imag, ctf**2], dim=1)
 
@@ -362,17 +364,26 @@ class Reconstructor(nn.Module):
                 zyx_matrices=zyx_matrices,
             )
 
-            self.numerator += dft_ctf[:2, ...]
-            self.ctfsq += dft_ctf[-1, ...]
-            # Geometric sampling weights remain unscaled by confidence (standard practice)
-            self.weights += weights
+            if confidence is not None:
+                # Channels: [0]=real, [1]=imag, [2]=ctf^2, [3]=ones_weighted
+                self.numerator += dft_ctf[:2, ...]
+                self.ctfsq += dft_ctf[2, ...]
+                # Use real part of channel 3 (ones_weighted) as confidence-weighted geometric sampling
+                self.weights += dft_ctf[3, ...].real
+            else:
+                self.numerator += dft_ctf[:2, ...]
+                self.ctfsq += dft_ctf[-1, ...]
+                self.weights += weights
         else:
-            # Build [2, ...] channels (real, imag). If confidence is provided,
-            # scale only the data contribution, not the geometric weights.
+            # Build [2, ...] channels (real, imag) (+ optional confidence channel for weighting)
             if confidence is not None:
                 confidence = torch.nan_to_num(confidence, nan=0.0, posinf=1.0, neginf=0.0).clamp(0.0, 1.5)
-                alpha = confidence.view(-1, 1, 1, 1).to(imgs.device)  # broadcast
-                stacked = torch.stack([imgs.real, imgs.imag], dim=1) * alpha
+                alpha = confidence.view(-1, 1, 1).to(imgs.device)  # [B, 1, 1] for broadcasting over H, W
+                # Stack confidence-weighted data + ones*alpha as 3rd channel for weighted geometric sampling
+                ones_weighted = torch.ones_like(imgs.real) * alpha
+                stacked = torch.stack([imgs.real * alpha,
+                                      imgs.imag * alpha,
+                                      ones_weighted], dim=1)
             else:
                 stacked = torch.stack([imgs.real, imgs.imag], dim=1)
 
@@ -384,10 +395,16 @@ class Reconstructor(nn.Module):
                 zyx_matrices=zyx_matrices,
             )
 
-            # Accumulate numerator (real/imag) and geometric sampling weights.
-            # Note: ctfsq is unused in this branch.
-            self.numerator += dft_ri[:2, ...]
-            self.weights += weights
+            if confidence is not None:
+                # Channels: [0]=real, [1]=imag, [2]=ones_weighted
+                self.numerator += dft_ri[:2, ...]
+                # Use real part of channel 2 (ones_weighted) as confidence-weighted geometric sampling
+                self.weights += dft_ri[2, ...].real
+            else:
+                # Accumulate numerator (real/imag) and geometric sampling weights
+                # Note: ctfsq is unused in this branch
+                self.numerator += dft_ri[:2, ...]
+                self.weights += weights
 
     @staticmethod
     @lru_cache(maxsize=1)
@@ -535,7 +552,7 @@ class ReconstructionParticlesDataset(Dataset):
         if self.return_confidence:
             # Use 1.0 default if key missing
             conf = float(md_row.get(RELION_PRED_POSE_CONFIDENCE_NAME, 1.0))
-            confidence = torch.tensor(conf, dtype=torch.float32).unsqueeze(-1)
+            confidence = torch.tensor(conf, dtype=torch.float32)
             return iid, img, ctf, rotMat, hwShiftAngs, confidence
         else:
             return iid, img, ctf, rotMat, hwShiftAngs
@@ -553,7 +570,7 @@ def reconstruct_starfile(
     eps: float = CONFIG_PARAM(),
     min_denominator_value: Optional[float] = None,
     use_only_n_first_batches: Optional[int] = None,
-    float32_matmul_precision: Optional[str] = float32_matmul_precision,
+    float32_matmul_precision: Optional[str] = CONFIG_PARAM(),
     weight_with_confidence: bool = CONFIG_PARAM(),
     halfmap_subset: Optional[Literal["1", "2"]] = None
 ):

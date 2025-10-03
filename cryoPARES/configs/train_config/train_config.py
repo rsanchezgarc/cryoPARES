@@ -11,8 +11,8 @@ class Train_config:
         # Config parameters
         'n_epochs': 'Number of training epochs. More epochs allow better convergence, although it does not help beyond a certain point',
         'learning_rate': 'Initial learning rate for optimizer. Tune this for optimal convergence (typical range: 1e-4 to 1e-2)',
-        'batch_size': 'Number of particles per batch. Try to make it as large as possible before running out of GPU memory',
-        'accumulate_grad_batches': 'Number of batches to accumulate gradients over. Effective batch size = batch_size × accumulate_grad_batches',
+        'batch_size': 'Number of particles per batch. Try to make it as large as possible before running out of GPU memory. We advice using batch sizes of at least 32 images',
+        'accumulate_grad_batches': 'Number of batches to accumulate gradients over. Effective batch size = batch_size × accumulate_grad_batches. We advice to use effective batch sizes of  effective batch sizes of 512 to 2048 images',
         'weight_decay': 'L2 regularization weight decay for optimizer. Increase if overfitting occurs',
 
         # CLI-exposed parameters (not in config, but used in train.py)
@@ -23,10 +23,10 @@ class Train_config:
         'split_halfs': 'If True (default), trains two separate models on data half-sets for cross-validation. Use --NOT_split_halfs to train single model on all data',
         'continue_checkpoint_dir': 'Path to checkpoint directory to resume training from a previous run',
         'finetune_checkpoint_dir': 'Path to checkpoint directory to fine-tune a pre-trained model on new dataset',
-        'compile_model': 'Enable torch.compile for faster training (experimental, requires PyTorch 2.0+)',
-        'val_check_interval': 'Fraction of epoch between validation checks. Use smaller values (0.1-0.5) for large datasets to get quicker feedback',
+        'compile_model': 'Enable torch.compile for faster training (experimental)',
+        'val_check_interval': 'Fraction of epoch between validation checks. You generally don\'t want to touch it, but you can set it to smaller values (0.1-0.5) for large datasets to get quicker feedback',
         'overfit_batches': 'Number of batches to use for overfitting test (debugging feature to verify model can memorize small dataset)',
-        'map_fname_for_simulated_pretraining': 'Path(s) to reference map(s) for simulated projection warmup before training on real data. Must match number of particle star files',
+        'map_fname_for_simulated_pretraining': 'Path(s) to reference map(s) for simulated projection warmup before training on real data. The number of maps must match number of particle star files',
         'junk_particles_star_fname': 'Optional star file(s) with junk-only particles for estimating confidence z-score thresholds',
         'junk_particles_dir': 'Root directory for junk particle image paths (analogous to particles_dir)',
 
@@ -34,7 +34,7 @@ class Train_config:
         'partition': 'Data partition to train on: "half1", "half2", or "allParticles". Used for half-set cross-validation',
         'continue_checkpoint_fname': 'Path to specific checkpoint file to resume training from previous run',
         'finetune_checkpoint_fname': 'Path to specific checkpoint file to fine-tune pre-trained model on new data',
-        'find_lr': 'Enable automatic learning rate finder to suggest optimal learning rate (GPU only)',
+        'find_lr': 'Enable automatic learning rate finder to suggest optimal learning rate (single GPU only). Not recommended',
     }
 
     n_epochs: int = 100

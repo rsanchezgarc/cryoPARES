@@ -10,7 +10,7 @@ import torch
 from progressBarDistributed import SharedMemoryProgressBar, SharedMemoryProgressBarWorker
 from torch import multiprocessing
 
-from cryoPARES.configManager.inject_defaults import inject_defaults_from_config
+from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, inject_docs_from_config_params
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.constants import (
     BATCH_ORI_IMAGE_NAME,
@@ -188,6 +188,7 @@ def _worker(worker_id, pbar_fname, particles_idxs, matcher_init_kwargs,
 # --------------------------
 # Main entry
 # --------------------------
+@inject_docs_from_config_params
 @inject_defaults_from_config(main_config.projmatching, update_config_with_args=True)
 def projmatching_starfile(
         reference_vol: str,
@@ -217,25 +218,25 @@ def projmatching_starfile(
     jobs for parallel processing.
 
     Args:
-        reference_vol: Path to the reference volume file (.mrc).
-        particles_star_fname: Input STAR file with particle metadata.
-        out_fname: Output STAR file with aligned particle poses.
-        particles_dir: Root directory for particle image paths.
-        mask_radius_angs: Mask radius in Angstroms.
-        grid_distance_degs: Angular search range (degrees).
-        grid_step_degs: Angular step size (degrees).
-        return_top_k_poses: Number of top poses to save per particle.
-        filter_resolution_angst: Low-pass filter the reference before matching.
-        n_jobs: Number of parallel jobs.
-        num_dataworkers: Number of CPU workers per DataLoader.
-        batch_size: Batch size per job.
-        use_cuda: If True, use GPU(s).
-        verbose: If True, log progress.
-        float32_matmul_precision: Precision mode for matmul.
-        gpu_id: Specific GPU ID (if any).
-        n_first_particles: Limit processing to first N particles.
-        correct_ctf: Apply CTF correction if True.
-        halfmap_subset: Select subset '1' or '2' for half-map validation.
+        reference_vol: {reference_vol}
+        particles_star_fname: {particles_star_fname}
+        out_fname: {out_fname}
+        particles_dir: {particles_dir}
+        mask_radius_angs: {mask_radius_angs}
+        grid_distance_degs: {grid_distance_degs}
+        grid_step_degs: {grid_step_degs}
+        return_top_k_poses: {return_top_k_poses}
+        filter_resolution_angst: {filter_resolution_angst}
+        n_jobs: {n_jobs}
+        num_dataworkers: {num_dataworkers}
+        batch_size: {batch_size}
+        use_cuda: {use_cuda}
+        verbose: {verbose}
+        float32_matmul_precision: {float32_matmul_precision}
+        gpu_id: {gpu_id}
+        n_first_particles: {n_first_particles}
+        correct_ctf: {correct_ctf}
+        halfmap_subset: {halfmap_subset}
     """
 
     if out_fname is not None:

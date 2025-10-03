@@ -13,7 +13,7 @@ from torch import multiprocessing
 from progressBarDistributed import SharedMemoryProgressBar, SharedMemoryProgressBarWorker
 
 from cryoPARES import constants
-from cryoPARES.configManager.inject_defaults import CONFIG_PARAM, inject_defaults_from_config
+from cryoPARES.configManager.inject_defaults import CONFIG_PARAM, inject_defaults_from_config, inject_docs_from_config_params
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.reconstruction.reconstruct import create_shared_tensor
 from cryoPARES.inference.inferencer import SingleInferencer
@@ -28,6 +28,7 @@ from cryoPARES.utils.checkpointReader import CheckpointReader
 # Orchestrator
 # -----------------------------
 
+@inject_docs_from_config_params
 @inject_defaults_from_config(main_config.inference, update_config_with_args=True)
 def distributed_inference(
         particles_star_fname: str,
@@ -61,55 +62,51 @@ def distributed_inference(
     Parameters
     ----------
     particles_star_fname : str
-        Path to the input RELION particles `.star` file.
+        {particles_star_fname}
     checkpoint_dir : str
-        Training directory containing half-set subfolders (`half1/`, `half2/`) with checkpoints/hparams.
+        {checkpoint_dir}
     results_dir : str
-        Output directory for aggregated STAR files and (optional) reconstructions.
-    data_halfset : {"half1", "half2", "allParticles"}, default "allParticles"
-        Which particle half-set(s) to process.
-    model_halfset : {"half1", "half2", "allCombinations", "matchingHalf"}, default "matchingHalf"
-        Model half-set policy:
-          - "half1"/"half2": use that model for all selected data halves.
-          - "allCombinations": iterate models ["half1","half2"] for each selected data half.
-          - "matchingHalf": for each data half, use the **same** model half (data "half1" → model "half1").
+        {results_dir}
+    data_halfset : {{"half1", "half2", "allParticles"}}, default "allParticles"
+        {data_halfset}
+    model_halfset : {{"half1", "half2", "allCombinations", "matchingHalf"}}, default "matchingHalf"
+        {model_halfset}
     particles_dir : str, optional
-        Root directory for particle image paths; overrides paths in the STAR.
+        {particles_dir}
     batch_size : int
-        Inference batch size.
+        {batch_size}
     n_jobs : int, optional
-        Number of worker processes. If CUDA is on and GPUs are present, defaults to #GPUs; else 1.
-        If set to 1, this function uses a **single-process** path and calls `SingleInferencer` directly.
+        {n_jobs}
     num_dataworkers : int
-        PyTorch dataloader workers per process.
+        {num_dataworkers}
     use_cuda : bool
-        Run on GPU if True, else CPU.
+        {use_cuda}
     n_cpus_if_no_cuda : int
-        Max CPU threads per worker when CUDA is disabled.
+        {n_cpus_if_no_cuda}
     compile_model : bool
-        Compile the model with `torch.compile` if True.
+        {compile_model}
     top_k_poses_nnet : int
-        Number of poses to predict witht the neural network.
+        {top_k_poses_nnet}
     top_k_poses_localref : int
-        The number of top predictions to return after local refinement.
+        {top_k_poses_localref}
     grid_distance_degs : float
-        The size of the local refinement grid in degrees. Grid will go from (-grid_distance_degs to +grid_distance_degs)
+        {grid_distance_degs}
     reference_map : str, optional
-        Reference map (MRC) for FSC computation (if applicable).
+        {reference_map}
     reference_mask : str, optional
-        Reference mask (MRC) for masked FSC (if applicable).
+        {reference_mask}
     directional_zscore_thr : float, optional
-        Z-score threshold for directional filtering.
+        {directional_zscore_thr}
     skip_localrefinement : bool
-        Skip local pose refinement if True.
+        {skip_localrefinement}
     skip_reconstruction : bool
-        If True, do not accumulate or write reconstructions.
+        {skip_reconstruction}
     subset_idxs : list[int], optional
-        Particle subset (applied inside SingleInferencer; for "allParticles" it's interpreted per half).
+        {subset_idxs}
     n_first_particles: int, optional
-        The number of particles to process, if not all the particles want to be processed
+        {n_first_particles}
     check_interval_secs : float
-        Parent loop polling interval (seconds).
+        {check_interval_secs}
 
     Notes
     -----

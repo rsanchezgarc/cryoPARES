@@ -4,6 +4,34 @@ from typing import Optional, Literal
 
 @dataclass
 class Inference_config:
+    """Inference configuration parameters."""
+
+    # Centralized parameter documentation
+    PARAM_DOCS = {
+        # Config parameters
+        'batch_size': 'Number of particles per batch for inference',
+        'use_cuda': 'Enable GPU acceleration for inference. If False, runs on CPU only',
+        'n_cpus_if_no_cuda': 'Maximum CPU threads per worker when CUDA is disabled',
+        'top_k_poses_nnet': 'Number of top pose predictions to retrieve from neural network before local refinement',
+        'skip_localrefinement': 'Skip local pose refinement step and use only neural network predictions',
+        'skip_reconstruction': 'Skip 3D reconstruction step and output only predicted poses',
+        'directional_zscore_thr': 'Confidence z-score threshold for filtering particles. Particles with scores below this are discarded as low-confidence',
+
+        # CLI-exposed parameters (not in config, but used in distributed_inference)
+        'particles_star_fname': 'Path to input RELION particles .star file',
+        'checkpoint_dir': 'Path to training directory (or .zip file) containing half-set models with checkpoints and hyperparameters',
+        'results_dir': 'Output directory for inference results including predicted poses and optional reconstructions',
+        'data_halfset': 'Which particle half-set(s) to process: "half1", "half2", or "allParticles"',
+        'model_halfset': 'Model half-set selection policy: "half1", "half2", "allCombinations", or "matchingHalf" (uses matching data/model pairs)',
+        'particles_dir': 'Root directory for particle image paths. If provided, overrides paths in the .star file',
+        'n_jobs': 'Number of worker processes. Defaults to number of GPUs if CUDA enabled, otherwise 1',
+        'compile_model': 'Compile model with torch.compile for faster inference (experimental, requires PyTorch 2.0+)',
+        'reference_map': 'Path to reference map (.mrc) for FSC computation during validation',
+        'reference_mask': 'Path to reference mask (.mrc) for masked FSC calculation',
+        'subset_idxs': 'List of particle indices to process (for debugging or partial processing)',
+        'n_first_particles': 'Process only the first N particles from dataset',
+        'check_interval_secs': 'Polling interval in seconds for parent loop in distributed processing',
+    }
 
     batch_size: int = 64
     use_cuda: bool = True

@@ -9,7 +9,7 @@ from torch import multiprocessing
 import torch
 from progressBarDistributed import SharedMemoryProgressBar, SharedMemoryProgressBarWorker
 
-from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
+from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, inject_docs_from_config_params, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.reconstruction.reconstructor import Reconstructor
 
@@ -77,6 +77,7 @@ def create_shared_tensor(shape, dtype=torch.float32, ctx=None):
     shared_array = ctx.Array(typecode, size)
     return shared_array, shape
 
+@inject_docs_from_config_params
 @inject_defaults_from_config(main_config.reconstruct, update_config_with_args=True)
 def reconstruct_starfile(particles_star_fname: str,
                          symmetry: str,
@@ -95,23 +96,23 @@ def reconstruct_starfile(particles_star_fname: str,
                          halfmap_subset: Optional[Literal["1", "2"]] = None
                          ):
     """
+    Reconstruct a 3D volume from particle images with known poses.
 
-    :param particles_star_fname: The particles to reconstruct
-    :param symmetry: The symmetry of the volume (e.g. C1, D2, ...)
-    :param output_fname: The name of the output filename
-    :param particles_dir: The particles directory (root of the starfile fnames)
-    :param n_jobs: The number of workers to split the reconstruction process
-    :param num_dataworkers: Num workers for data loading
-    :param batch_size: The number of particles to be simultaneusly backprojected
-    :param use_cuda: if NOT, it will not use cuda devices
-    :param correct_ctf: if NOT, it will not correct CTF
-    :param eps: The regularization constant (ideally, this is 1/SNR)
-    :param min_denominator_value: Used to prevent division by 0
-    :param use_only_n_first_batches: Use only the n first batches to reconstruct
-    :param float32_matmul_precision: Set it to high or medium for speed up at a precision cost
-    :param weight_with_confidence: If True, read and apply per-particle confidence. If False (default),
-                           do NOT fetch/pass confidence (zero overhead).
-    :param halfmap_subset: The random subset of particles to use
+    :param particles_star_fname: {particles_star_fname}
+    :param symmetry: {symmetry}
+    :param output_fname: {output_fname}
+    :param particles_dir: {particles_dir}
+    :param n_jobs: {n_jobs}
+    :param num_dataworkers: {num_dataworkers}
+    :param batch_size: {batch_size}
+    :param use_cuda: {use_cuda}
+    :param correct_ctf: {correct_ctf}
+    :param eps: {eps}
+    :param min_denominator_value: {min_denominator_value}
+    :param use_only_n_first_batches: {use_only_n_first_batches}
+    :param float32_matmul_precision: {float32_matmul_precision}
+    :param weight_with_confidence: {weight_with_confidence}
+    :param halfmap_subset: {halfmap_subset}
     """
 
     if n_jobs == 1:

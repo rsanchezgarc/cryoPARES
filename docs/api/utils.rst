@@ -63,18 +63,18 @@ Angle Metrics
    :undoc-members:
    :show-inheritance:
 
-SO(3) Operations
-~~~~~~~~~~~~~~~~
-
-.. automodule:: cryoPARES.geometry.so3Grid
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 Symmetry
 ~~~~~~~~
 
 .. automodule:: cryoPARES.geometry.symmetry
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Grid Utilities
+~~~~~~~~~~~~~~
+
+.. automodule:: cryoPARES.geometry.grids
    :members:
    :undoc-members:
    :show-inheritance:

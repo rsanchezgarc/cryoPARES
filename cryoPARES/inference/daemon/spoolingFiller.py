@@ -19,7 +19,7 @@ def monitor_directory(directory: str, pattern: str = "*.star", interval: int = 1
     Monitor a directory for new files matching the pattern and yield their paths.
 
     :param directory: Directory to monitor
-    :param pattern: File pattern to match (default: *.star)
+    :param pattern: File pattern to match (default: \*.star)
     :param interval: Time interval (seconds) between directory checks
     """
     processed_files = set()

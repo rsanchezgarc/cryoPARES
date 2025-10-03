@@ -277,7 +277,6 @@ def compare_prob_hists(
 
     score_good = _scores(parts_good, score_name)
     score_bad  = _scores(parts_bad,  score_name)
-
     print(f"GOOD n={len(parts_good)}; BAD n={len(parts_bad)}; BG n={len(parts_bg)}")
     if len(parts_bg) and len(parts_good):
         q = np.quantile(parts_bg[score_name], 1 - len(parts_good) / max(1, len(parts_bg)))

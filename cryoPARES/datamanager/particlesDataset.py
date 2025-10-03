@@ -262,8 +262,8 @@ class ParticlesDataset(Dataset, ABC):
         img = self.resizeImage(img)
         img = self._normalize(img) #I changed the order of the normalization call, in cesped it was before ctf correction
 
-        degEuler = torch.FloatTensor([md_row[name] for name in RELION_ANGLES_NAMES])
-        xyShiftAngs = torch.FloatTensor([md_row[name] for name in RELION_SHIFTS_NAMES])
+        degEuler = torch.FloatTensor([md_row.get(name, 0) for name in RELION_ANGLES_NAMES])
+        xyShiftAngs = torch.FloatTensor([md_row.get(name, 0) for name in RELION_SHIFTS_NAMES])
         confidence = torch.FloatTensor([md_row.get(RELION_ORI_POSE_CONFIDENCE_NAME, 1)])
 
         return iid, img, (degEuler, xyShiftAngs, confidence), md_row.to_dict(), (img_ori, ctf_ori)

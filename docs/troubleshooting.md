@@ -206,37 +206,45 @@ RuntimeError: CUDA out of memory. Tried to allocate X.XX GiB
 --batch_size 16
 ```
 
-2. **Reduce image size:**
-```bash
---config datamanager.particlesDataset.image_size_px_for_nnet=96
-```
-
-3. **Increase gradient accumulation:**
+You can compensate, up to a certain point, the batch reduction by increasing accumulate_gra_batches to
+keep the effective batch size (batch_size x accumulate_grad_batches) constant
 ```bash
 --config train.accumulate_grad_batches=32
 # Maintains effective batch size while reducing memory
 ```
 
-4. **Reduce model complexity:**
+2. **Reduce image size:**
 ```bash
---config models.image2sphere.lmax=6
+--config datamanager.particlesDataset.image_size_px_for_nnet=96
+```
+and/or
+```bash
+--config datamanager.particlesDataset.sampling_rate_angs_for_nnet=2.0
+```
+Note that larger sampling rate implies smaller images.
+Don't try to reduce the image size at inference, it won't work, as the checkpoint is prepared for the training size
+
+
+3. **Reduce model complexity:**
+
+There are several parameters that severely contribute to the model size. Decrease them to have a smaller 
+network.
+```bash
+--config models.image2sphere.lmax=10 #Default is 12
 ```
 
-5. **Use smaller encoder:**
 ```bash
---config models.image2sphere.imageencoder.resnet.resnetName="resnet18"
+--config  models.image2sphere.so3components.i2sprojector.sphere_fdim=256 #Default is 512
 ```
 
-6. **Enable gradient checkpointing** (if implemented):
 ```bash
---config models.use_gradient_checkpointing=True
+--config  models.image2sphere.so3components.s2conv.f_out=32 #Default is 64
 ```
 
-7. **Clear cache periodically:**
-```python
-import torch
-torch.cuda.empty_cache()
+```bash
+--config models.image2sphere.imageencoder.out_channels=256
 ```
+
 
 ### Out of memory during inference
 
@@ -244,19 +252,9 @@ torch.cuda.empty_cache()
 
 1. **Reduce inference batch size:**
 ```bash
---batch_size 512
+--batch_size 16
 ```
 
-2. **Use CPU for very large datasets:**
-```bash
---config inference.use_cuda=False
-```
-
-3. **Process in chunks:**
-```bash
-# Process first 10,000 particles
---n_first_particles 10000
-```
 
 ### RAM exhausted when loading data
 
@@ -277,10 +275,6 @@ MemoryError: Unable to allocate array
 --num_dataworkers 2
 ```
 
-3. **Process smaller subsets:**
-Use `--subset_idxs` or `--n_first_particles`
-
----
 
 ## Training Issues
 
@@ -306,16 +300,13 @@ loss: nan, geo_degs: nan
 3. **Bad data:**
 Check for corrupted particles or extreme values in .star file
 
-4. **Mixed precision issues:**
-```bash
---config float32_matmul_precision="highest"
-```
+
 
 ### Training doesn't improve
 
 **Symptoms:**
 - Loss plateaus immediately
-- `val_geo_degs` > 10° after many epochs
+- `val_geo_degs` > 30° after many epochs
 
 **Diagnostic steps:**
 
@@ -347,7 +338,7 @@ Wrong symmetry can make training impossible.
 
 5. **Increase model capacity:**
 ```bash
---config models.image2sphere.lmax=10
+--config models.image2sphere.lmax=14
 ```
 
 ### Validation loss higher than training loss
@@ -365,7 +356,7 @@ Wrong symmetry can make training impossible.
 
 2. **Reduce model complexity:**
 ```bash
---config models.image2sphere.lmax=6
+--config models.image2sphere.lmax=10
 ```
 
 3. **More training data:**

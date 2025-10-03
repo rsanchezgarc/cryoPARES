@@ -27,6 +27,10 @@ class CONFIG_PARAM:
             self._config = config
         self._name = name
 
+        # Auto-populate doc from config's PARAM_DOCS if not already provided
+        if self.doc is None and hasattr(config, 'PARAM_DOCS'):
+            self.doc = config.PARAM_DOCS.get(name)
+
     def validate(self, value: Any) -> bool:
         if self.validator is None:
             return True
@@ -148,6 +152,68 @@ def _check_type_match(expected_type: Any, actual_value: Any) -> bool:
     if expected_origin in (list, tuple):
         return isinstance(actual_value, (list, tuple))
     return isinstance(actual_value, expected_origin)
+
+
+def inject_docs_from_config_params(func):
+    """
+    Decorator to inject parameter documentation from CONFIG_PARAMs and PARAM_DOCS into function docstrings.
+
+    This decorator should be applied AFTER inject_defaults_from_config, as it relies on
+    the _argname_to_configname attribute created by that decorator.
+
+    Usage:
+        @inject_docs_from_config_params
+        @inject_defaults_from_config(config)
+        def my_function(param1: int = CONFIG_PARAM(), param2: str = "default"):
+            '''
+            My function.
+
+            :param param1: {param1}
+            :param param2: {param2}
+            '''
+            pass
+
+    The {param1} placeholder will be replaced with the documentation from CONFIG_PARAM.doc,
+    which is automatically populated from the config's PARAM_DOCS dictionary.
+
+    The {param2} placeholder will be looked up in the config's PARAM_DOCS dictionary directly,
+    allowing non-CONFIG_PARAM parameters to also use centralized documentation.
+    """
+    if not hasattr(func, '_argname_to_configname'):
+        # Function not decorated with inject_defaults_from_config, nothing to do
+        return func
+
+    if func.__doc__:
+        docs_dict = {}
+
+        # First, collect docs from CONFIG_PARAMs
+        for param_name, config_param in func._argname_to_configname.items():
+            if isinstance(config_param, CONFIG_PARAM) and config_param.doc:
+                docs_dict[param_name] = config_param.doc
+
+        # Second, look up remaining parameters from the config's PARAM_DOCS
+        # Get the config object from the wrapper's stored reference
+        if hasattr(func, '_inject_default_config'):
+            config = func._inject_default_config
+            sig = inspect.signature(func)
+
+            for param_name in sig.parameters:
+                # Skip if we already have docs from CONFIG_PARAM
+                if param_name in docs_dict:
+                    continue
+
+                # Try to find docs in the config's PARAM_DOCS
+                if hasattr(config, 'PARAM_DOCS') and param_name in config.PARAM_DOCS:
+                    docs_dict[param_name] = config.PARAM_DOCS[param_name]
+
+        if docs_dict:
+            try:
+                func.__doc__ = func.__doc__.format(**docs_dict)
+            except KeyError as e:
+                # Missing placeholder in docstring - that's okay, just skip formatting
+                pass
+
+    return func
 
 
 def inject_defaults_from_config(default_config: Any, update_config_with_args: bool = False):
@@ -309,6 +375,7 @@ def inject_defaults_from_config(default_config: Any, update_config_with_args: bo
 
         wrapper.__signature__ = sig.replace(parameters=new_params)
         wrapper._argname_to_configname = argname_to_configname #This is used to keep track of the parameters that had configs as defaults
+        wrapper._inject_default_config = default_config  # Store config reference for inject_docs_from_config_params
         return wrapper
 
     return decorator

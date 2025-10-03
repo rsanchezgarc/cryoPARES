@@ -4,7 +4,6 @@ import os
 import shutil
 import subprocess
 import warnings
-from multiprocessing.util import sub_debug
 
 import psutil
 import torch
@@ -13,10 +12,9 @@ import os.path as osp
 import tempfile
 from typing import Optional, List, Literal
 from argParseFromDoc import generate_command_for_argparseFromDoc
-from sympy import partition
 
 from cryoPARES import constants
-from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
+from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, inject_docs_from_config_params, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.constants import DATA_SPLITS_BASENAME
 from cryoPARES.scripts.gmm_hists import compare_prob_hists
@@ -25,6 +23,7 @@ from cryoPARES.utils.paths import get_most_recent_file
 
 
 class Trainer:
+    @inject_docs_from_config_params
     @inject_defaults_from_config(main_config.train, update_config_with_args=True)
     def __init__(self, symmetry: str, particles_star_fname: List[str], train_save_dir: str,
                  particles_dir: Optional[List[str]] = None, n_epochs: int = CONFIG_PARAM(),
@@ -43,28 +42,28 @@ class Trainer:
                  junk_particles_dir: Optional[List[str]] = None,
                  ):
         """
-        Trainer a model on particle data.
+        Train a model on particle data.
 
         Args:
-            symmetry: The point symmetry of the reconstruction
-            particles_star_fname: The starfile containing the pre-aligned particles
-            train_save_dir: The root directory where models and logs are saved.
-            particles_dir: The directory where the particles of the particles_star_fname are located. If not, it is assumed os.dirname(particles_star_fname) or relative to the cwd
-            n_epochs: The number of epochs
-            batch_size: The batch size. Number of images to process simultaneously
-            num_dataworkers: Number of parallel data loading workers. One CPU each. Set it to 0 to read and process the data in the same thread
-            image_size_px_for_nnet: The desired image size, in pixels, for the particles to be fed in the neural network. Local refinement uses the original image-size particles. Particles are first downsampled, and the padded/cropped to the desired image size.
-            sampling_rate_angs_for_nnet: The desired sampling rate, in pixels, for the particles to be fed in the neural network. Local refinement uses the original sampling-rate particles. Particles are first downsampled, and the padded/cropped to the desired image size.
-            mask_radius_angs: The radius of the particle in Angstroms. Used to create a circular mask around it.
-            split_halfs: If True, it trains a model for each half of the data
-            continue_checkpoint_dir: The path of a pre-trained model to continue training.
-            finetune_checkpoint_dir: The path of a pre-trained model to do finetunning
-            compile_model: If True, torch will try to compile the model to make training faster.
-            val_check_interval: The fraction of an epoch after which the validation set will be evaluated
-            overfit_batches: If provided, number of train and validation batches to use
-            map_fname_for_simulated_pretraining: If provided, it will run a warmup training on simulations using this maps. They need to match the particlesStarFname order
-            junk_particles_star_fname: Optional starfile(s) containing junk particles to be used for zscore threshold estimation
-            junk_particles_dir: The directory where the particles of the junk_particles_star_fname are located. If not, it is assumed os.dirname(particles_star_fname) or relative to the cwd
+            symmetry: {symmetry}
+            particles_star_fname: {particles_star_fname}
+            train_save_dir: {train_save_dir}
+            particles_dir: {particles_dir}
+            n_epochs: {n_epochs}
+            batch_size: {batch_size}
+            num_dataworkers: {num_dataworkers}
+            image_size_px_for_nnet: {image_size_px_for_nnet}
+            sampling_rate_angs_for_nnet: {sampling_rate_angs_for_nnet}
+            mask_radius_angs: {mask_radius_angs}
+            split_halfs: {split_halfs}
+            continue_checkpoint_dir: {continue_checkpoint_dir}
+            finetune_checkpoint_dir: {finetune_checkpoint_dir}
+            compile_model: {compile_model}
+            val_check_interval: {val_check_interval}
+            overfit_batches: {overfit_batches}
+            map_fname_for_simulated_pretraining: {map_fname_for_simulated_pretraining}
+            junk_particles_star_fname: {junk_particles_star_fname}
+            junk_particles_dir: {junk_particles_dir}
         """
         self.symmetry = symmetry
         self.particles_star_fname = [osp.expanduser(fname) for fname in particles_star_fname]

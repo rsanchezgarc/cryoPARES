@@ -19,7 +19,7 @@ from pytorch_lightning.callbacks import (
 from lightning_fabric.utilities.seed import seed_everything
 
 from cryoPARES import constants
-from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
+from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, inject_docs_from_config_params, CONFIG_PARAM
 from cryoPARES.constants import DATA_SPLITS_BASENAME, TRAINING_DONE_TEMPLATE
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.reconstruction.reconstructor import reconstruct_starfile
@@ -28,6 +28,7 @@ from cryoPARES.configManager.configParser import ConfigArgumentParser, ConfigOve
 
 
 class TrainerPartition:
+    @inject_docs_from_config_params
     @inject_defaults_from_config(main_config.train, update_config_with_args=True)
     def __init__(self, symmetry: str, particles_star_fname: List[str], train_save_dir: str,
                  particles_dir: Optional[List[str]] = None, n_epochs: int = CONFIG_PARAM(),
@@ -40,20 +41,20 @@ class TrainerPartition:
         """Initialize trainer for a single partition.
 
         Args:
-            symmetry: The point symmetry of the reconstruction
-            particles_star_fname: The starfile containing the pre-aligned particles
-            train_save_dir: Root directory for models and logs
-            particles_dir: Directory containing particles (defaults to dirname of star file)
-            n_epochs: Number of epochs to train
-            partition: Partition to train (half1, half2, or allParticles)
-            continue_checkpoint_fname: Path to continue training from checkpoint
-            finetune_checkpoint_fname: Path to load weights but train new instance
-            find_lr: Use automatic learning rate finder (GPU only)
-            compile_model: Use torch 2.0 compilation
-            val_check_interval: Fraction of epoch between validations
-            num_dataworkers: The number of workers (one CPU process each, to be used to load data)
-            mask_radius_angs: The radius of the particle in Angstroms. Used to create a circular mask arround it.
-            overfit_batches: Number of batches to use if overfitting
+            symmetry: {symmetry}
+            particles_star_fname: {particles_star_fname}
+            train_save_dir: {train_save_dir}
+            particles_dir: {particles_dir}
+            n_epochs: {n_epochs}
+            partition: {partition}
+            continue_checkpoint_fname: {continue_checkpoint_fname}
+            finetune_checkpoint_fname: {finetune_checkpoint_fname}
+            find_lr: {find_lr}
+            compile_model: {compile_model}
+            val_check_interval: {val_check_interval}
+            num_dataworkers: {num_dataworkers}
+            mask_radius_angs: {mask_radius_angs}
+            overfit_batches: {overfit_batches}
         """
         self.symmetry = symmetry
         self.particles_star_fname = particles_star_fname

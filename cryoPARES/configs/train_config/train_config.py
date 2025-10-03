@@ -4,6 +4,39 @@ from typing import Optional, Literal
 
 @dataclass
 class Train_config:
+    """Training configuration parameters."""
+
+    # Centralized parameter documentation (both config and CLI-exposed params)
+    PARAM_DOCS = {
+        # Config parameters
+        'n_epochs': 'Number of training epochs. More epochs allow better convergence, although it does not help beyond a certain point',
+        'learning_rate': 'Initial learning rate for optimizer. Tune this for optimal convergence (typical range: 1e-4 to 1e-2)',
+        'batch_size': 'Number of particles per batch. Try to make it as large as possible before running out of GPU memory',
+        'accumulate_grad_batches': 'Number of batches to accumulate gradients over. Effective batch size = batch_size × accumulate_grad_batches',
+        'weight_decay': 'L2 regularization weight decay for optimizer. Increase if overfitting occurs',
+
+        # CLI-exposed parameters (not in config, but used in train.py)
+        'symmetry': 'Point group symmetry of the molecule (e.g., C1, D7, I, O, T)',
+        'particles_star_fname': 'Path(s) to RELION 3.1+ format .star file(s) containing pre-aligned particles. Can accept multiple files',
+        'train_save_dir': 'Output directory where model checkpoints, logs, and training artifacts will be saved',
+        'particles_dir': 'Root directory for particle image paths. If paths in .star file are relative, this directory is prepended (similar to RELION project directory concept)',
+        'split_halfs': 'If True (default), trains two separate models on data half-sets for cross-validation. Use --NOT_split_halfs to train single model on all data',
+        'continue_checkpoint_dir': 'Path to checkpoint directory to resume training from a previous run',
+        'finetune_checkpoint_dir': 'Path to checkpoint directory to fine-tune a pre-trained model on new dataset',
+        'compile_model': 'Enable torch.compile for faster training (experimental, requires PyTorch 2.0+)',
+        'val_check_interval': 'Fraction of epoch between validation checks. Use smaller values (0.1-0.5) for large datasets to get quicker feedback',
+        'overfit_batches': 'Number of batches to use for overfitting test (debugging feature to verify model can memorize small dataset)',
+        'map_fname_for_simulated_pretraining': 'Path(s) to reference map(s) for simulated projection warmup before training on real data. Must match number of particle star files',
+        'junk_particles_star_fname': 'Optional star file(s) with junk-only particles for estimating confidence z-score thresholds',
+        'junk_particles_dir': 'Root directory for junk particle image paths (analogous to particles_dir)',
+
+        # TrainerPartition-specific parameters
+        'partition': 'Data partition to train on: "half1", "half2", or "allParticles". Used for half-set cross-validation',
+        'continue_checkpoint_fname': 'Path to specific checkpoint file to resume training from previous run',
+        'finetune_checkpoint_fname': 'Path to specific checkpoint file to fine-tune pre-trained model on new data',
+        'find_lr': 'Enable automatic learning rate finder to suggest optimal learning rate (GPU only)',
+    }
+
     n_epochs: int = 100
     learning_rate: float = 1e-3
     batch_size: int = 64

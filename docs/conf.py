@@ -5,6 +5,8 @@
 
 import os
 import sys
+from docutils.parsers.rst import Directive, directives
+from docutils import nodes
 
 # Add the project root to the path so Sphinx can find the modules
 sys.path.insert(0, os.path.abspath('..'))
@@ -26,9 +28,20 @@ extensions = [
     'sphinx.ext.viewcode',          # Add links to highlighted source code
     'sphinx.ext.intersphinx',       # Link to other project's documentation
     'sphinx.ext.autosummary',       # Generate autodoc summaries
-    'sphinx_autodoc_typehints',     # Better rendering of type hints
-    'myst_parser',                  # Support for Markdown files
 ]
+
+# Try to import optional extensions
+try:
+    import sphinx_autodoc_typehints
+    extensions.append('sphinx_autodoc_typehints')
+except ImportError:
+    pass
+
+try:
+    import myst_parser
+    extensions.append('myst_parser')
+except ImportError:
+    pass
 
 # Napoleon settings - support both Google and Sphinx style docstrings
 napoleon_google_docstring = True
@@ -52,7 +65,8 @@ autodoc_default_options = {
     'member-order': 'bysource',
     'special-members': '__init__',
     'undoc-members': True,
-    'exclude-members': '__weakref__'
+    'exclude-members': '__weakref__',
+    'inherited-members': False  # Don't include inherited members from base classes
 }
 
 # Type hints
@@ -70,17 +84,19 @@ intersphinx_mapping = {
 }
 
 # MyST parser settings - support both .rst and .md
-source_suffix = {
-    '.rst': 'restructuredtext',
-    '.md': 'markdown',
-}
-
-# Markdown extensions
-myst_enable_extensions = [
-    'colon_fence',
-    'deflist',
-    'fieldlist',
-]
+if 'myst_parser' in extensions:
+    source_suffix = {
+        '.rst': 'restructuredtext',
+        '.md': 'markdown',
+    }
+    # Markdown extensions
+    myst_enable_extensions = [
+        'colon_fence',
+        'deflist',
+        'fieldlist',
+    ]
+else:
+    source_suffix = '.rst'
 
 templates_path = ['_templates']
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
@@ -117,3 +133,27 @@ html_css_files = []
 # Logo and favicon (add if you have them)
 # html_logo = '_static/logo.png'
 # html_favicon = '_static/favicon.ico'
+
+# -- Custom handlers for PyTorch Lightning docstring compatibility -------------
+
+def paramref_role(name, rawtext, text, lineno, inliner, options={}, content=[]):
+    """Handle :paramref: role from PyTorch Lightning docstrings."""
+    node = nodes.literal(rawtext, text)
+    return [node], []
+
+class TestCodeDirective(Directive):
+    """Handle .. testcode:: directive from PyTorch Lightning docstrings."""
+    has_content = True
+    option_spec = {}
+
+    def run(self):
+        # Just create a literal block for test code
+        code = '\n'.join(self.content)
+        literal = nodes.literal_block(code, code)
+        literal['language'] = 'python'
+        return [literal]
+
+def setup(app):
+    """Register custom roles and directives."""
+    app.add_role('paramref', paramref_role)
+    app.add_directive('testcode', TestCodeDirective)

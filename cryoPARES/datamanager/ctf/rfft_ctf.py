@@ -39,7 +39,8 @@ def compute_ctf_rfft(image_size, sampling_rate, dfu, dfv, dfang, volt, cs, w,
                      phase_shift, bfactor, fftshift: bool, device: torch.device):
 
     """Compute CTF using RFFT frequency grid
-        Input:
+
+    Input:
         image_size: the side of the image
         sampling_rate: In A/pixel
         dfu (float or Bx1 tensor): DefocusU (Angstrom)
@@ -82,7 +83,8 @@ def correct_ctf(image, sampling_rate, dfu, dfv, dfang, volt, cs, w, phase_shift=
         mode (Choice["phase_flip", "wiener"]): how to correct the ctf
         fftshift (bool): If true, fftshift will be applied (and the returned ctf will be also fftshifted)
         wiener_parameter (float):
-    Output
+
+    Output:
         ctf, corrected_image: ctf is rfft, can be fftshifted or not. corrected_image is a real space image
     '''
 
@@ -112,7 +114,8 @@ def correct_ctf(image, sampling_rate, dfu, dfv, dfang, volt, cs, w, phase_shift=
 def corrupt_with_ctf(image, sampling_rate, dfu, dfv, dfang, volt, cs, w, phase_shift=0, bfactor=None, fftshift=True):
     '''
     Corrupt an image applying CTF using RFFT
-    Output
+
+    Output:
         ctf, image_corrupted: ctf is rfft, can be fftshifted or not. corrected_image is a real space image
     '''
     ctf = compute_ctf_rfft(image.shape[-1], sampling_rate, dfu, dfv, dfang, volt, cs, w, phase_shift, bfactor,

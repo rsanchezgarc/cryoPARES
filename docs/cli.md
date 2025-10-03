@@ -12,78 +12,41 @@ This document provides instructions for using the command-line tools included wi
 
 ---
 
+<!-- AUTO_GENERATED:train_cli:START -->
 ## `cryopares_train`
 
-Train a new CryoPARES model on pre-aligned particle data.
+Train a CryoPARES model on pre-aligned particle data.
 
 ### Usage
 
 ```bash
-python -m cryopares_train [options] --config [CONFIG_OVERRIDES]
+cryopares_train [OPTIONS]
 ```
 
-Or using the installed script:
+### Parameters
 
-```bash
-cryopares_train [options] --config [CONFIG_OVERRIDES]
-```
-
-### Required Arguments
-
-- **`--symmetry SYMMETRY`**
-  Point group symmetry of the molecule (e.g., `C1`, `D7`, `T`, `O`, `I`)
-
-- **`--particles_star_fname PARTICLES_STAR_FNAME`**
-  Path to the RELION .star file containing pre-aligned particles
-  Can be a single file or multiple files (space-separated)
-
-- **`--train_save_dir TRAIN_SAVE_DIR`**
-  Directory where model checkpoints and logs will be saved
-  Creates `version_0/`, `version_1/`, etc. subdirectories
-
-### Optional Arguments
-
-- **`--particles_dir PARTICLES_DIR`**
-  Root directory for particle files. If paths in .star file are relative, this is prepended.
-  Default: Directory containing the .star file
-
-- **`--n_epochs N_EPOCHS`**
-  Number of training epochs
-  Default: `10`
-
-- **`--batch_size BATCH_SIZE`**
-  Number of particles per batch
-  Default: `32`
-
-- **`--num_dataworkers NUM_DATAWORKERS`**
-  Number of parallel data loading workers
-  Default: `4`
-  Set to `0` for single-threaded loading (useful for debugging)
-
-- **`--split_halfs`**
-  Train separate models for each half-set (recommended)
-  Default: `True`
-
-- **`--continue_checkpoint_dir CONTINUE_CHECKPOINT_DIR`**
-  Path to checkpoint directory to continue training from
-  Format: `/path/to/train_save_dir/version_0`
-  Mutually exclusive with `--finetune_checkpoint_dir`
-
-- **`--finetune_checkpoint_dir FINETUNE_CHECKPOINT_DIR`**
-  Path to checkpoint directory to fine-tune from
-  Starts from pre-trained weights but resets optimizer
-  Mutually exclusive with `--continue_checkpoint_dir`
-
-- **`--compile_model`**
-  Compile model with `torch.compile` for potential speedup
-  Requires PyTorch 2.0+
-
-- **`--val_check_interval VAL_CHECK_INTERVAL`**
-  Fraction of epoch between validation checks
-  Default: `None` (validate once per epoch)
-
-- **`--overfit_batches OVERFIT_BATCHES`**
-  Number of batches to overfit on (for debugging/testing)
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `--symmetry` | str | **Required** | Point group symmetry of the molecule (e.g., C1, D7, I, O, T) |
+| `--particles_star_fname` | List[str] | **Required** | Path(s) to RELION 3.1+ format .star file(s) containing pre-aligned particles. Can accept multiple files |
+| `--train_save_dir` | str | **Required** | Output directory where model checkpoints, logs, and training artifacts will be saved |
+| `--particles_dir` | Optional[List[str]] | None | Root directory for particle image paths. If paths in .star file are relative, this directory is prepended (similar to RELION project directory concept) |
+| `--n_epochs` | int | `100` | Number of training epochs. More epochs allow better convergence, although it does not help beyond a certain point |
+| `--batch_size` | int | `64` | Number of particles per batch. Try to make it as large as possible before running out of GPU memory. We advice using batch sizes of at least 32 images |
+| `--num_dataworkers` | int | `8` | Number of parallel data loading workers per GPU. Each worker is a separate CPU process. Set to 0 to load data in the main thread (useful for debugging) |
+| `--image_size_px_for_nnet` | int | `160` | Target image size in pixels for neural network input. After rescaling to target sampling rate, images are cropped or padded to this size |
+| `--sampling_rate_angs_for_nnet` | float | `1.5` | Target sampling rate in Angstroms/pixel for neural network input. Particle images are first rescaled to this sampling rate before processing |
+| `--mask_radius_angs` | Optional[float] | None | Radius of circular mask in Angstroms applied to particle images. If not provided, defaults to half the box size |
+| `--split_halfs` | bool | `True` | If True (default), trains two separate models on data half-sets for cross-validation. Use --NOT_split_halfs to train single model on all data |
+| `--continue_checkpoint_dir` | Optional[str] | None | Path to checkpoint directory to resume training from a previous run |
+| `--finetune_checkpoint_dir` | Optional[str] | None | Path to checkpoint directory to fine-tune a pre-trained model on new dataset |
+| `--compile_model` | bool | `False` | Enable torch.compile for faster training (experimental) |
+| `--val_check_interval` | Optional[float] | None | Fraction of epoch between validation checks. You generally don't want to touch it, but you can set it to smaller values (0.1-0.5) for large datasets to get quicker feedback |
+| `--overfit_batches` | Optional[int] | None | Number of batches to use for overfitting test (debugging feature to verify model can memorize small dataset) |
+| `--map_fname_for_simulated_pretraining` | Optional[List[str]] | None | Path(s) to reference map(s) for simulated projection warmup before training on real data. The number of maps must match number of particle star files |
+| `--junk_particles_star_fname` | Optional[List[str]] | None | Optional star file(s) with junk-only particles for estimating confidence z-score thresholds |
+| `--junk_particles_dir` | Optional[List[str]] | None | Root directory for junk particle image paths (analogous to particles_dir) |
+<!-- AUTO_GENERATED:train_cli:END -->
 
 - **`--map_fname_for_simulated_pretraining MAP_FNAME`**
   Reference map(s) for simulated pre-training
@@ -173,69 +136,45 @@ cryopares_train \
 
 ---
 
+<!-- AUTO_GENERATED:inference_cli:START -->
 ## `cryopares_infer`
 
-Run inference on new particle datasets using a trained model.
+Run inference on new particles using a trained model.
 
 ### Usage
 
 ```bash
-cryopares_infer [options] --config [CONFIG_OVERRIDES]
+cryopares_infer [OPTIONS]
 ```
 
-### Required Arguments
+### Parameters
 
-- **`--particles_star_fname PARTICLES_STAR_FNAME`**
-  Path to .star file with particles to process
-  Particles do not need to be pre-aligned
-
-- **`--checkpoint_dir CHECKPOINT_DIR`**
-  Path to trained model checkpoint directory
-  Format: `/path/to/train_save_dir/version_0`
-
-- **`--results_dir RESULTS_DIR`**
-  Output directory for inference results
-  Creates aligned .star file and reconstructed map
-
-### Optional Arguments
-
-- **`--particles_dir PARTICLES_DIR`**
-  Root directory for particle files
-  Default: Directory containing the .star file
-
-- **`--data_halfset {half1,half2,allParticles}`**
-  Which data half-set to process
-  Default: `allParticles`
-
-- **`--model_halfset {half1,half2,allCombinations,matchingHalf}`**
-  Which model to use for inference
-  Default: `matchingHalf` (recommended)
-
-- **`--batch_size BATCH_SIZE`**
-  Batch size for inference
-  Default: `1024`
-  Can be much larger than training batch size
-
-- **`--num_dataworkers NUM_DATAWORKERS`**
-  Number of data loading workers
-  Default: `4`
-
-- **`--reference_map REFERENCE_MAP`**
-  Path to reference map (.mrc) for local refinement
-  If not provided, uses half-maps from training
-
-- **`--reference_mask REFERENCE_MASK`**
-  Path to mask for FSC calculation
-  Optional
-
-- **`--compile_model`**
-  Compile model for potential speedup
-
-- **`--n_first_particles N`**
-  Process only first N particles (for testing)
-
-- **`--subset_idxs INDICES`**
-  Process specific particle indices
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `--particles_star_fname` | str | **Required** | Path to input STAR file with particle metadata |
+| `--checkpoint_dir` | str | **Required** | Path to training directory (or .zip file) containing half-set models with checkpoints and hyperparameters |
+| `--results_dir` | str | **Required** | Output directory for inference results including predicted poses and optional reconstructions |
+| `--data_halfset` | 'half1', 'half2', 'allParticles' | `allParticles` | Which particle half-set(s) to process: "half1", "half2", or "allParticles" |
+| `--model_halfset` | 'half1', 'half2', 'allCombinations', 'matchingHalf' | `matchingHalf` | Model half-set selection policy: "half1", "half2", "allCombinations", or "matchingHalf" (uses matching data/model pairs) |
+| `--particles_dir` | Optional[str] | None | Root directory for particle image paths. If provided, overrides paths in the .star file |
+| `--batch_size` | int | `64` | Number of particles to process simultaneously per job |
+| `--n_jobs` | Optional[int] | None | Number of parallel worker processes for distributed projection matching |
+| `--num_dataworkers` | int | `8` | Number of parallel data loading workers per GPU. Each worker is a separate CPU process. Set to 0 to load data in the main thread (useful for debugging) |
+| `--use_cuda` | bool | `True` | Enable GPU acceleration. If False, runs on CPU only |
+| `--n_cpus_if_no_cuda` | int | `4` | Maximum CPU threads per worker when CUDA is disabled |
+| `--compile_model` | bool | `False` | Compile model with torch.compile for faster inference (experimental, requires PyTorch 2.0+) |
+| `--top_k_poses_nnet` | int | `1` | Number of top pose predictions to retrieve from neural network before local refinement |
+| `--top_k_poses_localref` | int | `1` | Number of best matching poses to keep after local refinement |
+| `--grid_distance_degs` | float | `6.0` | Maximum angular distance in degrees for local refinement search. Grid ranges from -grid_distance_degs to +grid_distance_degs around predicted pose |
+| `--reference_map` | Optional[str] | None | Path to reference map (.mrc) for FSC computation during validation |
+| `--reference_mask` | Optional[str] | None | Path to reference mask (.mrc) for masked FSC calculation |
+| `--directional_zscore_thr` | Optional[float] | None | Confidence z-score threshold for filtering particles. Particles with scores below this are discarded as low-confidence |
+| `--skip_localrefinement` | bool | `False` | Skip local pose refinement step and use only neural network predictions |
+| `--skip_reconstruction` | bool | `False` | Skip 3D reconstruction step and output only predicted poses |
+| `--subset_idxs` | Optional[List[int]] | None | List of particle indices to process (for debugging or partial processing) |
+| `--n_first_particles` | Optional[int] | None | Process only the first N particles from dataset (for testing or validation) |
+| `--check_interval_secs` | float | `2.0` | Polling interval in seconds for parent loop in distributed processing |
+<!-- AUTO_GENERATED:inference_cli:END -->
 
 ### Configuration Overrides
 
@@ -306,152 +245,41 @@ The inference process creates:
 
 ---
 
+<!-- AUTO_GENERATED:projmatching_cli:START -->
 ## `cryopares_projmatching`
 
-Align particles to a reference volume using projection matching. This performs local refinement by searching around existing particle orientations in the .star file.
+Align particles to a reference volume using projection matching.
 
 ### Usage
-
-```
-cryopares_reconstruct [options]
-```
-
-### Options
-
-```
-usage: reconstruct_starfile [-h] --particles_star_fname PARTICLES_STAR_FNAME
-                            --symmetry SYMMETRY --output_fname OUTPUT_FNAME
-                            [--particles_dir PARTICLES_DIR] [--n_jobs N_JOBS]
-                            [--num_dataworkers NUM_DATAWORKERS]
-                            [--batch_size BATCH_SIZE] [--NOT_use_cuda]
-                            [--NOT_correct_ctf] [--eps EPS]
-                            [--min_denominator_value MIN_DENOMINATOR_VALUE]
-                            [--use_only_n_first_batches USE_ONLY_N_FIRST_BATCHES]
-                            [--float32_matmul_precision FLOAT32_MATMUL_PRECISION]
-                            [--weight_with_confidence]
-                            [--halfmap_subset {1,2}]
-
-options:
-  -h, --help            show this help message and exit
-  --particles_star_fname PARTICLES_STAR_FNAME
-                        The particles to reconstruct Default=None
-  --symmetry SYMMETRY   The symmetry of the volume (e.g. C1, D2, ...)
-                        Default=None
-  --output_fname OUTPUT_FNAME
-                        The name of the output filename Default=None
-  --particles_dir PARTICLES_DIR
-                        The particles directory (root of the starfile fnames)
-                        Default=None
-  --n_jobs N_JOBS       The number of workers to split the reconstruction
-                        process Default=1
-  --num_dataworkers NUM_DATAWORKERS
-                        Num workers for data loading Default=1
-  --batch_size BATCH_SIZE
-                        The number of particles to be simultaneusly
-                        backprojected Default=128
-  --NOT_use_cuda        if NOT, it will not use cuda devices Action:
-                        store_false for variable use_cuda
-  --NOT_correct_ctf     if NOT, it will not correct CTF Action: store_false
-                        for variable correct_ctf
-  --eps EPS             The regularization constant (ideally, this is 1/SNR)
-                        Default=0.001
-  --min_denominator_value MIN_DENOMINATOR_VALUE
-                        Used to prevent division by 0 Default=None
-  --use_only_n_first_batches USE_ONLY_N_FIRST_BATCHES
-                        Use only the n first batches to reconstruct
-                        Default=None
-  --float32_matmul_precision FLOAT32_MATMUL_PRECISION
-                        Set it to high or medium for speed up at a precision
-                        cost Default=high
-  --weight_with_confidence
-                        If True, read and apply per-particle confidence. If
-                        False (default), do NOT fetch/pass confidence (zero
-                        overhead). Action: store_true for variable
-                        weight_with_confidence
-  --halfmap_subset {1,2}
-                        The random subset of particles to use Default=None
-```
-
-### Example
 
 ```bash
-cryopares_reconstruct \
-    --particles_star_fname /path/to/your/particles.star \
-    --symmetry C1 \
-    --output_fname /path/to/your/reconstruction.mrc
+cryopares_projmatching [OPTIONS]
 ```
 
-## `cryopares_projmatching`
+### Parameters
 
-This tool aligns particles from a STAR file to a reference volume using projection matching.
-
-### Usage
-
-```
-cryopares_projmatching [options]
-```
-
-### Options
-
-```
-usage: projmatching_starfile [-h] --reference_vol REFERENCE_VOL
-                             --particles_star_fname PARTICLES_STAR_FNAME
-                             --out_fname OUT_FNAME
-                             [--particles_dir PARTICLES_DIR]
-                             [--mask_radius_angs MASK_RADIUS_ANGS]
-                             [--grid_distance_degs GRID_DISTANCE_DEGS]
-                             [--grid_step_degs GRID_STEP_DEGS]
-                             [--top_k_poses_nnet TOP_K_POSES_NNET]
-                             [--filter_resolution_angst FILTER_RESOLUTION_ANGST]
-                             [--n_jobs N_JOBS]
-                             [--num_dataworkers NUM_DATAWORKERS]
-                             [--batch_size BATCH_SIZE] [--NOT_use_cuda]
-                             [--NOT_verbose]
-                             [--torch_matmul_precision {highest,high,medium}]
-                             [--gpu_id GPU_ID]
-                             [--n_first_particles N_FIRST_PARTICLES]
-                             [--NOT_correct_ctf]
-                             [--halfmap_subset {1,2}]
-
-options:
-  -h, --help            show this help message and exit
-  --reference_vol REFERENCE_VOL
-                        Path to the reference volume file (.mrc).
-  --particles_star_fname PARTICLES_STAR_FNAME
-                        Input STAR file with particle metadata.
-  --out_fname OUT_FNAME
-                        Output STAR file with aligned particle poses.
-  --particles_dir PARTICLES_DIR
-                        Root directory for particle image paths.
-  --mask_radius_angs MASK_RADIUS_ANGS
-                        Mask radius in Angstroms.
-  --grid_distance_degs GRID_DISTANCE_DEGS
-                        Angular search range (degrees). Default=8.0
-  --grid_step_degs GRID_STEP_DEGS
-                        Angular step size (degrees). Default=2.0
-  --top_k_poses_nnet TOP_K_POSES_NNET
-                        Number of top poses to predict by the neural network. Default=1
-  --filter_resolution_angst FILTER_RESOLUTION_ANGST
-                        Low-pass filter the reference before matching.
-  --n_jobs N_JOBS       Number of parallel jobs. Default=1
-  --num_dataworkers NUM_DATAWORKERS
-                        Number of CPU workers per DataLoader. Default=1
-  --batch_size BATCH_SIZE
-                        Batch size per job. Default=1024
-  --NOT_use_cuda        if NOT, it will not use cuda devices Action:
-                        store_false for variable use_cuda
-  --NOT_verbose         if NOT, it will not log progress Action: store_false
-                        for variable verbose
-  --torch_matmul_precision {highest,high,medium}
-                        Precision mode for matmul. Default=high
-  --gpu_id GPU_ID       Specific GPU ID (if any).
-  --n_first_particles N_FIRST_PARTICLES
-                        Limit processing to first N particles.
-  --NOT_correct_ctf     if NOT, it will not apply CTF correction Action:
-                        store_false for variable correct_ctf
-  --halfmap_subset {1,2}
-                        Select subset '1' or '2' for half-map validation.
-```
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `--reference_vol` | str | **Required** | Path to reference 3D volume (.mrc file) for generating projection templates |
+| `--particles_star_fname` | str | **Required** | Path to input STAR file with particle metadata |
+| `--out_fname` | str | **Required** | Path for output STAR file with aligned particle poses |
+| `--particles_dir` | Optional[str] | **Required** | Root directory for particle image paths. If provided, overrides paths in the .star file |
+| `--mask_radius_angs` | Optional[float] | None | Radius of circular mask in Angstroms applied to particle images |
+| `--grid_distance_degs` | float | `8.0` | Maximum angular distance in degrees for local refinement search. Grid ranges from -grid_distance_degs to +grid_distance_degs around predicted pose |
+| `--grid_step_degs` | float | `2.0` | Angular step size in degrees for grid search during local refinement |
+| `--return_top_k_poses` | int | `1` | Number of top matching poses to save per particle |
+| `--filter_resolution_angst` | Optional[float] | None | Low-pass filter resolution in Angstroms applied to reference volume before matching |
+| `--n_jobs` | int | `1` | Number of parallel worker processes for distributed projection matching |
+| `--num_dataworkers` | int | `1` | Number of CPU workers per PyTorch DataLoader for data loading |
+| `--batch_size` | int | `1024` | Number of particles to process simultaneously per job |
+| `--use_cuda` | bool | `True` | Enable GPU acceleration. If False, runs on CPU only |
+| `--verbose` | bool | `True` | Enable progress logging and status messages |
+| `--float32_matmul_precision` | 'highest', 'high', 'medium' | `high` | PyTorch float32 matrix multiplication precision mode (highest/high/medium). Higher is more accurate but slower |
+| `--gpu_id` | Optional[int] | None | Specific GPU device ID to use (if multiple GPUs available) |
+| `--n_first_particles` | Optional[int] | None | Process only the first N particles from dataset (for testing or validation) |
+| `--correct_ctf` | bool | `True` | Apply CTF correction during processing |
+| `--halfmap_subset` | Optional['1', '2' | None | Select half-map subset (1 or 2) for half-map validation |
+<!-- AUTO_GENERATED:projmatching_cli:END -->
 
 ### Example
 
@@ -461,6 +289,49 @@ cryopares_projmatching \
     --particles_star_fname /path/to/your/particles.star \
     --out_fname /path/to/your/aligned_particles.star \
     --grid_distance_degs 10
+```
+
+---
+
+<!-- AUTO_GENERATED:reconstruct_cli:START -->
+## `cryopares_reconstruct`
+
+Reconstruct a 3D volume from particles with known poses.
+
+### Usage
+
+```bash
+cryopares_reconstruct [OPTIONS]
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `--particles_star_fname` | str | **Required** | Path to input STAR file with particle metadata and poses to reconstruct |
+| `--symmetry` | str | **Required** | Point group symmetry of the volume for reconstruction (e.g., C1, D2, I, O, T) |
+| `--output_fname` | str | **Required** | Path for output reconstructed 3D volume (.mrc file) |
+| `--particles_dir` | Optional[str] | None | Root directory for particle image paths. If provided, overrides paths in the .star file |
+| `--n_jobs` | int | `1` | Number of parallel worker processes for distributed reconstruction |
+| `--num_dataworkers` | int | `1` | Number of CPU workers per PyTorch DataLoader for data loading |
+| `--batch_size` | int | `128` | Number of particles to backproject simultaneously per job |
+| `--use_cuda` | bool | `True` | Enable GPU acceleration for reconstruction. If False, runs on CPU only |
+| `--correct_ctf` | bool | `True` | Apply CTF correction during reconstruction |
+| `--eps` | float | `0.001` | Regularization constant for reconstruction (ideally set to 1/SNR). Prevents division by zero and stabilizes reconstruction |
+| `--min_denominator_value` | Optional[float] | None | Minimum value for denominator to prevent numerical instabilities during reconstruction |
+| `--use_only_n_first_batches` | Optional[int] | None | Reconstruct using only first N batches (for testing or quick validation) |
+| `--float32_matmul_precision` | Optional[str] | `high` | PyTorch float32 matrix multiplication precision mode (highest/high/medium). Higher is more accurate but slower |
+| `--weight_with_confidence` | bool | `False` | Apply per-particle confidence weighting during backprojection. If True, particles with higher confidence contribute more to reconstruction |
+| `--halfmap_subset` | Optional['1', '2' | None | Select half-map subset (1 or 2) for half-map reconstruction and validation |
+<!-- AUTO_GENERATED:reconstruct_cli:END -->
+
+### Example
+
+```bash
+cryopares_reconstruct \
+    --particles_star_fname /path/to/your/particles.star \
+    --symmetry C1 \
+    --output_fname /path/to/your/reconstruction.mrc
 ```
 
 ---

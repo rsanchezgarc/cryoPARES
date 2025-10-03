@@ -3,10 +3,10 @@ import numpy as np
 from cryoPARES.constants import RELION_EULER_CONVENTION
 from scipy.spatial.transform import Rotation
 from scipy.optimize import minimize
-import argparse
 import os
 import warnings
 import matplotlib.pyplot as plt
+from typing import Optional
 
 
 def load_starfile(filename, particles_key="particles"):
@@ -257,10 +257,29 @@ def plot_combined_errors(angular_errors, shift_errors, output_prefix=None):
     plt.show()
 
 
-def analyze_angular_differences(starfile1, starfile2, symmetry, align_frames=False,
-                                plot_angular=False, plot_shifts=False, plot_combined=False,
-                                plot_all=False, save_plots=None):
-    """Analyze angular differences between two starfiles considering symmetry."""
+def analyze_angular_differences(starfile1: str,
+                                starfile2: str,
+                                sym: str,
+                                align_frames: bool = False,
+                                plot_angular: bool = False,
+                                plot_shifts: bool = False,
+                                plot_combined: bool = False,
+                                plot_all: bool = False,
+                                save_plots: Optional[str] = None):
+    """
+    Compare angular assignments between two RELION starfiles.
+
+    :param starfile1: First starfile
+    :param starfile2: Second starfile
+    :param sym: Symmetry group (C1, C2, C3, ..., D2, D3, ..., T, O, I)
+    :param align_frames: Try to find optimal alignment between reference frames
+    :param plot_angular: Show scatter plot of angular errors vs particle index
+    :param plot_shifts: Show scatter plots of shift errors
+    :param plot_combined: Show scatter plot of angular vs shift errors
+    :param plot_all: Show all scatter plots
+    :param save_plots: Save plots with this prefix (e.g., "experiment1" -> "experiment1_angular_errors.png")
+    """
+    symmetry = sym.upper()
     # Load starfiles
     df1 = load_starfile(starfile1)
     df2 = load_starfile(starfile2)
@@ -344,61 +363,36 @@ def analyze_angular_differences(starfile1, starfile2, symmetry, align_frames=Fal
     if shifts_available and (plot_all or plot_combined):
         plot_combined_errors(angular_diffs, shift_errors, save_plots)
 
+    # Print statistics
+    print(f"Found {stats['n_particles']} matching particles.")
+    print(f"\nAnalyzing angular differences with {symmetry} symmetry:")
+    print(f"Mean: {stats['mean']:.2f}°")
+    print(f"Standard Deviation: {stats['std']:.2f}°")
+    print(f"Median: {stats['median']:.2f}°")
+    print(f"IQR: {stats['iqr']:.2f}°")
+    print(f"\nPercentage of particles with angular error:")
+    print(f"< 5°: {stats['percent_below_5']:.1f}%")
+    print(f"< 10°: {stats['percent_below_10']:.1f}%")
+
+    if stats['shifts_available']:
+        print(f"\nShift errors (Å):")
+        print(f"Mean: {stats['shift_mean']:.2f}")
+        print(f"Standard Deviation: {stats['shift_std']:.2f}")
+        print(f"Median: {stats['shift_median']:.2f}")
+        print(f"IQR: {stats['shift_iqr']:.2f}")
+    else:
+        print("\nShift information not available in both starfiles.")
+
+    if align_frames and stats['transform_matrix'] is not None:
+        print("\nOptimal transformation matrix:")
+        print(stats['transform_matrix'])
+
     return stats
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Compare angular assignments between two RELION starfiles')
-    parser.add_argument('starfile1', help='First starfile')
-    parser.add_argument('starfile2', help='Second starfile')
-    parser.add_argument('--sym', required=True,
-                        help='Symmetry group (C1, C2, C3, ..., D2, D3, ..., T, O, I)')
-    parser.add_argument('--align-frames', action='store_true',
-                        help='Try to find optimal alignment between reference frames')
-
-    # Visualization options
-    parser.add_argument('--plot-angular', action='store_true',
-                        help='Show scatter plot of angular errors vs particle index.')
-    parser.add_argument('--plot-shifts', action='store_true', help='Show scatter plots of shift errors.')
-    parser.add_argument('--plot-combined', action='store_true', help='Show scatter plot of angular vs shift errors.')
-    parser.add_argument('--plot-all', action='store_true', help='Show all scatter plots.')
-    parser.add_argument('--save-plots', type=str,
-                        help='Save plots with this prefix (e.g., "experiment1" -> "experiment1_angular_errors.png")')
-
-    args = parser.parse_args()
-
-    try:
-        stats = analyze_angular_differences(
-            args.starfile1, args.starfile2, args.sym.upper(), args.align_frames,
-            args.plot_angular, args.plot_shifts, args.plot_combined, args.plot_all, args.save_plots
-        )
-
-        print(f"Found {stats['n_particles']} matching particles.")
-        print(f"\nAnalyzing angular differences with {args.sym} symmetry:")
-        print(f"Mean: {stats['mean']:.2f}°")
-        print(f"Standard Deviation: {stats['std']:.2f}°")
-        print(f"Median: {stats['median']:.2f}°")
-        print(f"IQR: {stats['iqr']:.2f}°")
-        print(f"\nPercentage of particles with angular error:")
-        print(f"< 5°: {stats['percent_below_5']:.1f}%")
-        print(f"< 10°: {stats['percent_below_10']:.1f}%")
-
-        if stats['shifts_available']:
-            print(f"\nShift errors (Å):")
-            print(f"Mean: {stats['shift_mean']:.2f}")
-            print(f"Standard Deviation: {stats['shift_std']:.2f}")
-            print(f"Median: {stats['shift_median']:.2f}")
-            print(f"IQR: {stats['shift_iqr']:.2f}")
-        else:
-            print("\nShift information not available in both starfiles.")
-
-        if args.align_frames and stats['transform_matrix'] is not None:
-            print("\nOptimal transformation matrix:")
-            print(stats['transform_matrix'])
-
-    except Exception as e:
-        print(f"Error: {str(e)}")
-        exit(1)
+    from argParseFromDoc import parse_function_and_call
+    parse_function_and_call(analyze_angular_differences)
 
 
 if __name__ == "__main__":

@@ -265,7 +265,7 @@ cryopares_projmatching [OPTIONS]
 | `--out_fname` | str | **Required** | Path for output STAR file with aligned particle poses |
 | `--particles_dir` | Optional[str] | **Required** | Root directory for particle image paths. If provided, overrides paths in the .star file |
 | `--mask_radius_angs` | Optional[float] | None | Radius of circular mask in Angstroms applied to particle images |
-| `--grid_distance_degs` | float | `8.0` | Maximum angular distance in degrees for local refinement search. Grid ranges from -grid_distance_degs to +grid_distance_degs around predicted pose |
+| `--grid_distance_degs` | float | `6.0` | Maximum angular distance in degrees for local refinement search. Grid ranges from -grid_distance_degs to +grid_distance_degs around predicted pose |
 | `--grid_step_degs` | float | `2.0` | Angular step size in degrees for grid search during local refinement |
 | `--return_top_k_poses` | int | `1` | Number of top matching poses to save per particle |
 | `--filter_resolution_angst` | Optional[float] | None | Low-pass filter resolution in Angstroms applied to reference volume before matching |

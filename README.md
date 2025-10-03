@@ -139,7 +139,7 @@ You can override configuration parameters using `--config KEY=VALUE`. Multiple k
 
 *   **`train.learning_rate`**: Initial learning rate. (Default: `1e-3`). It needs to be tuned to get the best performance.
 *   **`train.weight_decay`**: Weight decay for optimizer, that regularizes the model. (Default: `1e-5`). Make it larger if you are suffer from overfitting.
-*   **`train.accumulate_grad_batches`**: Gradient accumulation batches to simulate larger batch sizes. (Default: `16`). The effecive batch size is batch_size * accumulate_grad_batches. We recommend to train with effective batches of size 512 < x < 2024. 
+*   **`train.accumulate_grad_batches`**: Gradient accumulation batches to simulate larger batch sizes. (Default: `16`). The effecive batch size is batch_size * accumulate_grad_batches. We recommend to train with effective batches of size 512 < x < 2048. 
 *   **`models.image2sphere.lmax`**: Maximum spherical harmonic degree. The larger, the more expresive the network is (Default: `12`). Reduce it if you see overfitting.
 *   **`datamanager.num_augmented_copies_per_batch`**: Number of augmented copies per particle. Each copy undergoes a different data augmentation. The batch_size needs to be selected to be divisible by this number. Large batches with large num_augmented_copies_per_batch values help stabilizing training, but require a lot of GPU memory (Default: `4`)
 
@@ -310,7 +310,7 @@ cryopares_projmatching [ARGUMENTS]
 
 *   `--mask_radius_angs`: Radius of circular mask in Angstroms applied to particle images
 
-*   `--grid_distance_degs`: Maximum angular distance in degrees for local refinement search. Grid ranges from -grid_distance_degs to +grid_distance_degs around predicted pose (Default: `8.0`)
+*   `--grid_distance_degs`: Maximum angular distance in degrees for local refinement search. Grid ranges from -grid_distance_degs to +grid_distance_degs around predicted pose (Default: `6.0`)
 
 *   `--grid_step_degs`: Angular step size in degrees for grid search during local refinement (Default: `2.0`)
 

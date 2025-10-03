@@ -50,6 +50,7 @@ class SingleInferencer:
                  compile_model: bool = False,
                  top_k_poses_nnet: int = CONFIG_PARAM(),
                  top_k_poses_localref: int = CONFIG_PARAM(config=main_config.projmatching),
+                 grid_distance_degs: float = CONFIG_PARAM(config=main_config.projmatching),
                  reference_map: Optional[str] = None,
                  reference_mask: Optional[str] = None, #Only used for FSC estimation
                  directional_zscore_thr: Optional[float] = CONFIG_PARAM(),
@@ -75,6 +76,7 @@ class SingleInferencer:
         :param compile_model: Whether to compile the model using `torch.compile` for potential speed-up.
         :param top_k_poses_nnet: The number of top predictions to predict with the nn for each particle.
         :param top_k_poses_localref: The number of top predictions to return after local refinement.
+        :param grid_distance_degs: The size of the local refinement grid in degrees. Grid will go from -grid_distance_degs to +grid_distance_degs
         :param reference_map: Path to the reference map for local refinement. If not provided, it will be loaded from the checkpoint.
         :param reference_mask: Path to the mask of the reference map. Used only for FSC calculation.
         :param directional_zscore_thr: The threshold for the directional Z-score to filter particles.

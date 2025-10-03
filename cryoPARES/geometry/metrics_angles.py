@@ -21,7 +21,7 @@ def rotation_magnitude(rot):
     """
     Compute rotation magnitude in radians.
 
-    :param rot: tensor of shape (\*,3,3)
+    :param rot: tensor of shape (...,3,3)
     :return: The rotation magnitude in radians
     """
     trace = rot.diagonal(dim1=-1, dim2=-2).sum(-1)
@@ -34,7 +34,7 @@ def nearest_rotmat_idx(src, targets):
     Uses negative trace of the dot product to avoid arccos operation.
 
     :param src: tensor of shape (B, 3, 3)
-    :param targets: tensor of shape (\*, 3, 3)
+    :param targets: tensor of shape (..., 3, 3)
     :return:
         - dot_trace: The value of the trace of the selected nearest rotmat idxs
         - idxs: The idxs of the nearest rotation matrices
@@ -48,9 +48,9 @@ def rotation_error_rads(rotA, rotB):
     """
     Compute rotation error in radians between two rotation matrices.
 
-    :param rotA: tensor of shape (\*,3,3). Rotation matrix
-    :param rotB: tensor of shape (\*,3,3). Rotation matrix
-    :return: rotation error in radians, tensor of shape (\*)
+    :param rotA: tensor of shape (...,3,3). Rotation matrix
+    :param rotB: tensor of shape (...,3,3). Rotation matrix
+    :return: rotation error in radians, tensor of shape (...)
     """
 
     trace = _compute_dot_trace(rotA, rotB)
@@ -61,11 +61,11 @@ def rotation_error_with_sym(rotA, rotB, symmetry=None):
     """
     Compute rotation error in radians between two rotation matrices with symmetry.
 
-    :param rotA: tensor of shape (\*,3,3). Rotation matrix
-    :param rotB: tensor of shape (\*,3,3). Rotation matrix
+    :param rotA: tensor of shape (...,3,3). Rotation matrix
+    :param rotB: tensor of shape (...,3,3). Rotation matrix
     :param symmetry: string or None. Symmetry group (e.g., 'I', 'O', 'T', 'D7', etc.)
                     If None, computes standard rotation error without symmetry
-    :return: rotation error in radians, tensor of shape (\*)
+    :return: rotation error in radians, tensor of shape (...)
     """
 
     if symmetry is None:

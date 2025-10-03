@@ -44,6 +44,7 @@ def distributed_inference(
         compile_model: bool = False,
         top_k_poses_nnet: int = CONFIG_PARAM(),
         top_k_poses_localref: int = CONFIG_PARAM(config=main_config.projmatching),
+        grid_distance_degs: float = CONFIG_PARAM(config=main_config.projmatching),
         reference_map: Optional[str] = None,
         reference_mask: Optional[str] = None,
         directional_zscore_thr: Optional[float] = CONFIG_PARAM(),
@@ -91,6 +92,8 @@ def distributed_inference(
         Number of poses to predict witht the neural network.
     top_k_poses_localref : int
         The number of top predictions to return after local refinement.
+    grid_distance_degs : float
+        The size of the local refinement grid in degrees. Grid will go from (-grid_distance_degs to +grid_distance_degs)
     reference_map : str, optional
         Reference map (MRC) for FSC computation (if applicable).
     reference_mask : str, optional
@@ -149,6 +152,7 @@ def distributed_inference(
             compile_model=compile_model,
             top_k_poses_nnet=top_k_poses_nnet,
             top_k_poses_localref=top_k_poses_localref,
+            grid_distance_degs=grid_distance_degs,
             reference_map=reference_map,
             reference_mask=reference_mask,
             directional_zscore_thr=directional_zscore_thr,

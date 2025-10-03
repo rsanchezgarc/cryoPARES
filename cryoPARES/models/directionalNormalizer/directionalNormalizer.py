@@ -71,6 +71,7 @@ class DirectionalPercentileNormalizer(nn.Module):
 
         This mapping assumes the SO(3) grid structure from so3_healpix_grid_equiangular
         where the full orientation space is organized as:
+
         - n_cones cone directions (alpha, beta pairs)
         - For each cone, n_psi in-plane rotations (gamma angles)
         - The SO(3) index increases sequentially, with all in-plane rotations

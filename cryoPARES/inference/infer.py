@@ -186,6 +186,7 @@ def distributed_inference(
     else:
         data_halfset_list = [data_halfset]
 
+    checkpoint_reader = CheckpointReader(checkpoint_dir)
     for m_half in model_halfset_list:
         fsc_by_model = {m_half:{"half1": None, "half2": None, "sampling_rate": None}}
         for d_half in data_halfset_list:
@@ -205,7 +206,7 @@ def distributed_inference(
             reconstructor_parent = None
 
             if not skip_reconstruction:
-                symmetry = SingleInferencer._get_symmetry(checkpoint_dir, resolved_model_halfset)
+                symmetry = SingleInferencer._get_symmetry(checkpoint_reader, resolved_model_halfset)
                 reconstructor_parent = SingleInferencer._get_reconstructor(particles_star_fname,
                                                                            particles_dir,
                                                                            symmetry=symmetry)

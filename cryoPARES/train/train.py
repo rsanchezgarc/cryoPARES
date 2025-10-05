@@ -338,6 +338,7 @@ class Trainer:
                 model_halfset=partition,
                 skip_localrefinement=True,
                 skip_reconstruction=True,
+                n_first_particles=None if self.overfit_batches in [1, None] else self.overfit_batches*self.batch_size,
             )
             cmd = generate_command_for_argparseFromDoc(
                 "cryoPARES.inference.infer",

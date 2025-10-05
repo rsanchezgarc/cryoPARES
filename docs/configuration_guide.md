@@ -439,6 +439,33 @@ Higher `hp_order` = finer angular resolution but slower and more memory
 | `use_cuda` | bool | True | Use GPU |
 | `torch_matmul_precision` | str | "high" | Precision mode |
 
+### Compilation Modes (Advanced)
+
+**Path prefix:** `projmatching.*`
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `compile_projectVol_mode` | str | "default" | torch.compile mode for volume projection |
+| `compile_analyze_cc_mode` | str | "default" | torch.compile mode for cross-correlation analysis |
+| `disable_compile_projectVol` | bool | False | Disable compilation of projection function |
+| `disable_compile_analyze_cc` | bool | False | Disable compilation of CC analysis |
+
+**Performance Optimization:** If you are **NOT** using `directional_zscore_thr` for particle filtering, you can optionally use `"max-autotune"` compilation mode for a ~10-20% speed boost:
+
+```bash
+# Optional: Faster inference when NOT using directional_zscore_thr
+--config \
+    projmatching.compile_projectVol_mode="max-autotune" \
+    projmatching.compile_analyze_cc_mode="max-autotune"
+```
+
+**Note:** `"max-autotune"` mode is incompatible with `directional_zscore_thr` because particle filtering creates variable batch sizes, which cause CUDA graph memory errors. The default `"default"` mode works in all scenarios.
+
+Available compilation modes:
+- `"default"`: Standard compilation, works with variable batch sizes (recommended)
+- `"reduce-overhead"`: Optimized for repeated calls, works with variable batch sizes
+- `"max-autotune"`: Maximum optimization, **only use when NOT filtering with directional_zscore_thr**
+
 ### Example
 
 ```bash

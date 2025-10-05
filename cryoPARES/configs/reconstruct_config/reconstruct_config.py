@@ -29,7 +29,7 @@ class Reconstruct_config:
     }
 
     disable_compile_insert_central_slices_rfft_3d_multichannel: bool = False
-    compile_insert_central_slices_rfft_3d_multichanne_mode: Optional[str] ="max-autotune"
+    compile_insert_central_slices_rfft_3d_multichanne_mode: Optional[str] = "default" #"max-autotune" does not work with dynamic size batches (zscore)
 
     eps: float = 1e-3 #epsilon in the denominator. ~ tikhonov regularization
     weight_with_confidence: bool = False

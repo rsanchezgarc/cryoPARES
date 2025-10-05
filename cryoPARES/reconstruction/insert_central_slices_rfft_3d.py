@@ -215,6 +215,7 @@ def _worker_insert_central_slices_rfft_3d_multichannel(
 _compiled_worker_insert_central_slices_rfft_3d_multichannel = torch.compile(
     _worker_insert_central_slices_rfft_3d_multichannel,
     fullgraph=True,
+    dynamic=True,
     mode=main_config.reconstruct.compile_insert_central_slices_rfft_3d_multichanne_mode,
 )
 

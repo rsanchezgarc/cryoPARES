@@ -42,12 +42,12 @@ class Projmatching_config:
     top_k_poses_localref: int = 1
 
     disable_compile_projectVol: bool = False
-    compile_projectVol_mode: Optional[str] = "max-autotune"
+    compile_projectVol_mode: Optional[str] = "default" #"max-autotune" does not work with dynamic size batches (zscore)
 
     disable_compile_correlate_dft_2d: bool = True #at the moment, inductor does not support complex numbers
-    compile_correlate_dft_2d_mode: Optional[str] = "max-autotune"
+    compile_correlate_dft_2d_mode: Optional[str] = "default"
 
     disable_compile_analyze_cc: bool = False
-    compile_analyze_cc_mode: Optional[str] = "max-autotune" #None #"reduce-overhead" #"max-autotune"
+    compile_analyze_cc_mode: Optional[str] = "default"  #"max-autotune" does not work with dynamic size batches (zscore)
 
     float32_matmul_precision: str = "high"

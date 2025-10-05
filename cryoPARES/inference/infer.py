@@ -172,21 +172,8 @@ def distributed_inference(
 
     # Track reconstructions per model-half to compute FSC
     fsc_by_model: Dict[str, dict] = {}
-
-    # Build lists mirroring SingleInferencer.run() logic
-    if model_halfset == "allCombinations":
-        model_halfset_list: List[Optional[str]] = ["half1", "half2"]
-    elif model_halfset == "matchingHalf":
-        model_halfset_list = [None]
-    else:
-        model_halfset_list = [model_halfset]
-
-    if data_halfset == "allParticles":
-        data_halfset_list = ["half1", "half2"]
-    else:
-        data_halfset_list = [data_halfset]
-
     checkpoint_reader = CheckpointReader(checkpoint_dir)
+    data_halfset_list, model_halfset_list = SingleInferencer.resolve_halfset_lists(data_halfset, model_halfset)
     for m_half in model_halfset_list:
         fsc_by_model = {m_half:{"half1": None, "half2": None, "sampling_rate": None}}
         for d_half in data_halfset_list:

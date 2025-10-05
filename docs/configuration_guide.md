@@ -235,7 +235,7 @@ Effective batch size = `batch_size × accumulate_grad_batches`
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `num_dataworkers` | int | 4 | Number of parallel data loading workers |
+| `num_dataworkers` | int | 8 | Number of parallel data loading workers |
 | `num_augmented_copies_per_batch` | int | 1 | Augmentation multiplier |
 
 ### Particle Dataset Parameters
@@ -246,8 +246,8 @@ Effective batch size = `batch_size × accumulate_grad_batches`
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `sampling_rate_angs_for_nnet` | float | 2.0 | Target sampling rate (Å/px) |
-| `image_size_px_for_nnet` | int | 128 | Target image size (pixels) |
+| `sampling_rate_angs_for_nnet` | float | 1.5 | Target sampling rate (Å/px) |
+| `image_size_px_for_nnet` | int | 160 | Target image size (pixels) |
 | `mask_radius_angs` | float | None | Circular mask radius (Å) |
 | `apply_mask_to_img` | bool | True | Apply mask to images |
 
@@ -409,7 +409,7 @@ Higher `hp_order` = finer angular resolution but slower and more memory
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `grid_distance_degs` | float | 8.0 | Angular search range (degrees) |
+| `grid_distance_degs` | float | 6.0 | Angular search range (degrees) |
 | `grid_step_degs` | float | 2.0 | Angular step size (degrees) |
 | `top_k_poses_localref` | int | 1 | Number of top poses to return |
 

@@ -10,7 +10,7 @@ import torch
 from progressBarDistributed import SharedMemoryProgressBar, SharedMemoryProgressBarWorker
 from torch import multiprocessing
 
-from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, inject_docs_from_config_params
+from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, inject_docs_from_config_params, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.constants import (
     BATCH_ORI_IMAGE_NAME,
@@ -196,8 +196,8 @@ def projmatching_starfile(
         out_fname: str,
         particles_dir: Optional[str],
         mask_radius_angs: Optional[float] = None,
-        grid_distance_degs: float = 8.0,
-        grid_step_degs: float = 2.0,
+        grid_distance_degs: float = CONFIG_PARAM(),
+        grid_step_degs: float = CONFIG_PARAM(),
         return_top_k_poses: int = 1,
         filter_resolution_angst: Optional[float] = None,
         n_jobs: int = 1,

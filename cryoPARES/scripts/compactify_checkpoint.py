@@ -13,7 +13,6 @@ import zipfile
 import shutil
 from pathlib import Path
 from typing import Optional, List, Tuple
-import argparse
 import yaml
 
 
@@ -159,27 +158,24 @@ def format_size(size_bytes: int) -> str:
 def compactify_checkpoint(
     checkpoint_dir: str,
     output_path: Optional[str] = None,
-    include_reconstructions: bool = True,
-    compression_level: int = zipfile.ZIP_DEFLATED,
-    verbose: bool = True
+    exclude_reconstructions: bool = False,
+    skip_compression: bool = False,
+    quiet: bool = False
 ) -> str:
     """
     Compactify a checkpoint directory into a ZIP archive.
 
-    Args:
-        checkpoint_dir: Path to checkpoint directory (version_X)
-        output_path: Output ZIP file path (default: checkpoint_dir_name_compact.zip)
-        include_reconstructions: Include reconstruction files (can use external reference instead)
-        compression_level: ZIP compression level (zipfile.ZIP_STORED or zipfile.ZIP_DEFLATED)
-        verbose: Print progress information
-
-    Returns:
-        Path to created ZIP file
-
-    Raises:
-        ValueError: If checkpoint directory is invalid
-        FileNotFoundError: If required files are missing
+    :param checkpoint_dir: Path to checkpoint directory (e.g., /path/to/train_output/version_0)
+    :param output_path: Output ZIP file path. Default: <checkpoint_dir_name>_compact.zip
+    :param exclude_reconstructions: Exclude reconstruction files (reduces size, but requires --reference_map during inference)
+    :param skip_compression: Store files without compression (faster but larger file size)
+    :param quiet: Suppress progress messages
+    :return: Path to created ZIP file
     """
+    # Convert parameters to internal format
+    include_reconstructions = not exclude_reconstructions
+    compression_level = zipfile.ZIP_STORED if skip_compression else zipfile.ZIP_DEFLATED
+    verbose = not quiet
     checkpoint_dir = Path(checkpoint_dir).resolve()
 
     if not checkpoint_dir.exists():
@@ -247,81 +243,8 @@ def compactify_checkpoint(
 
 def main():
     """Command-line interface for checkpoint compactification."""
-    parser = argparse.ArgumentParser(
-        description="Compactify a CryoPARES checkpoint for distribution and inference",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Basic usage
-  python -m cryoPARES.scripts.compactify_checkpoint --checkpoint_dir /path/to/version_0
-
-  # Custom output name
-  python -m cryoPARES.scripts.compactify_checkpoint \\
-      --checkpoint_dir /path/to/version_0 \\
-      --output_path my_model_compact.zip
-
-  # Exclude reconstructions (smaller size, requires external reference for inference)
-  python -m cryoPARES.scripts.compactify_checkpoint \\
-      --checkpoint_dir /path/to/version_0 \\
-      --no-reconstructions
-
-  # No compression (faster but larger file)
-  python -m cryoPARES.scripts.compactify_checkpoint \\
-      --checkpoint_dir /path/to/version_0 \\
-      --no-compression
-        """
-    )
-
-    parser.add_argument(
-        '--checkpoint_dir',
-        type=str,
-        required=True,
-        help='Path to checkpoint directory (e.g., /path/to/train_output/version_0)'
-    )
-
-    parser.add_argument(
-        '--output_path',
-        type=str,
-        default=None,
-        help='Output ZIP file path. Default: <checkpoint_dir_name>_compact.zip'
-    )
-
-    parser.add_argument(
-        '--no-reconstructions',
-        action='store_true',
-        help='Exclude reconstruction files (reduces size, but requires --reference_map during inference)'
-    )
-
-    parser.add_argument(
-        '--no-compression',
-        action='store_true',
-        help='Store files without compression (faster but larger file size)'
-    )
-
-    parser.add_argument(
-        '--quiet',
-        action='store_true',
-        help='Suppress progress messages'
-    )
-
-    args = parser.parse_args()
-
-    try:
-        compression = zipfile.ZIP_STORED if args.no_compression else zipfile.ZIP_DEFLATED
-
-        output_path = compactify_checkpoint(
-            checkpoint_dir=args.checkpoint_dir,
-            output_path=args.output_path,
-            include_reconstructions=not args.no_reconstructions,
-            compression_level=compression,
-            verbose=not args.quiet
-        )
-
-        sys.exit(0)
-
-    except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+    from argParseFromDoc import parse_function_and_call
+    parse_function_and_call(compactify_checkpoint)
 
 
 if __name__ == '__main__':

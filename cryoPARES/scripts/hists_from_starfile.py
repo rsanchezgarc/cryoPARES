@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-import argparse
 import sys
 import math
 import pandas as pd
@@ -8,27 +7,44 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import PercentFormatter
 import starfile
+from typing import Optional, List
 
 
 def plot_star_histograms(
-        star_file_path: str,
-        column_names: list,
-        output_path: str = None,
+        input: str,
+        cols: List[str],
+        output: Optional[str] = None,
         nbins: str = 'auto',
-        clip_percentile: list = None,
-        clip_value: list = None
+        clip_percentile: Optional[List[float]] = None,
+        clip_value: Optional[List[float]] = None
 ):
     """
-    Loads a STAR file and plots histograms with a secondary percentage axis.
+    Load a STAR file and display histograms of selected metadata columns.
 
-    Args:
-        star_file_path (str): Path to the input STAR file.
-        column_names (list): A list of column names to plot.
-        output_path (str, optional): Path to save the plot image.
-        nbins (str or int): Number of bins for the histogram.
-        clip_percentile (list, optional): Pairs of [lower, upper] percentiles for clipping.
-        clip_value (list, optional): Pairs of [lower, upper] values for clipping.
+    :param input: Path to the input STAR file
+    :param cols: One or more metadata column names to plot
+    :param output: Optional path to save the output plot image
+    :param nbins: Number of bins for the histogram (e.g., 500). Default: 'auto'
+    :param clip_percentile: Clip data to percentile range. Provide pairs of (lower, upper) values. Example for one column: 1,99. Example for two columns: 1,99,5,95
+    :param clip_value: Clip data to an absolute value range. Provide pairs of (lower, upper) values. Example: -1000,1000
     """
+    # Validation: ensure mutually exclusive options
+    if clip_percentile is not None and clip_value is not None:
+        print(f"❌ Error: Cannot use both --clip_percentile and --clip_value simultaneously", file=sys.stderr)
+        sys.exit(1)
+
+    # Validate clipping arguments match number of columns
+    num_cols = len(cols)
+    if clip_percentile and len(clip_percentile) != 2 * num_cols:
+        print(f"❌ Error: --clip_percentile requires 2 values per column. You provided {len(clip_percentile)} values for {num_cols} column(s).", file=sys.stderr)
+        sys.exit(1)
+    if clip_value and len(clip_value) != 2 * num_cols:
+        print(f"❌ Error: --clip_value requires 2 values per column. You provided {len(clip_value)} values for {num_cols} column(s).", file=sys.stderr)
+        sys.exit(1)
+
+    star_file_path = input
+    column_names = cols
+    output_path = output
     # --- File Loading ---
     try:
         data = starfile.read(star_file_path, always_dict=True)
@@ -116,49 +132,8 @@ def plot_star_histograms(
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Load a STAR file and display histograms of selected metadata columns. 📊",
-        formatter_class=argparse.RawTextHelpFormatter
-    )
-    # --- Input/Output Arguments ---
-    parser.add_argument('-i', '--input', required=True, type=str, help="Path to the input STAR file.")
-    parser.add_argument('-c', '--cols', required=True, nargs='+', type=str,
-                        help="One or more metadata column names to plot.")
-    parser.add_argument('-o', '--output', type=str, default=None, help="Optional: Path to save the output plot image.")
-
-    # --- Plotting Control Arguments ---
-    parser.add_argument('--nbins', type=str, default='auto',
-                        help="Number of bins for the histogram (e.g., 500). Default: 'auto'.")
-
-    clipping_group = parser.add_mutually_exclusive_group()
-    clipping_group.add_argument(
-        '--clip_percentile',
-        nargs='+', type=float,
-        help="Clip data to percentile range. Provide pairs of (lower, upper) values.\n"
-             "Example for one column: --clip_percentile 1 99\n"
-             "Example for two columns: --clip_percentile 1 99 5 95"
-    )
-    clipping_group.add_argument(
-        '--clip_value',
-        nargs='+', type=float,
-        help="Clip data to an absolute value range. Provide pairs of (lower, upper) values.\n"
-             "Example: --clip_value -1000 1000"
-    )
-    args = parser.parse_args()
-
-    # --- Validate Clipping Arguments ---
-    num_cols = len(args.cols)
-    if args.clip_percentile and len(args.clip_percentile) != 2 * num_cols:
-        parser.error(
-            f"--clip_percentile requires 2 values per column. You provided {len(args.clip_percentile)} values for {num_cols} column(s).")
-    if args.clip_value and len(args.clip_value) != 2 * num_cols:
-        parser.error(
-            f"--clip_value requires 2 values per column. You provided {len(args.clip_value)} values for {num_cols} column(s).")
-
-    plot_star_histograms(
-        args.input, args.cols, args.output,
-        args.nbins, args.clip_percentile, args.clip_value
-    )
+    from argParseFromDoc import parse_function_and_call
+    parse_function_and_call(plot_star_histograms)
 
 
 if __name__ == "__main__":

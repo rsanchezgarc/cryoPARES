@@ -2,8 +2,8 @@ import numpy as np
 import mrcfile
 from numpy import fft
 import matplotlib.pyplot as plt
-import argparse
 from scipy.ndimage import zoom as rs_zoom, gaussian_filter, zoom
+from typing import Optional, Literal
 
 
 # ----------------------------- Crossing logic ----------------------------- #
@@ -211,7 +211,7 @@ def compute_fsc(
         assert vol1.shape == mask.shape, "Mask must have the same shape as the maps."
         vol1 = np.multiply(vol1, mask)
         vol2 = np.multiply(vol2, mask)
-        print("Volumes were masked!")
+        print("Mask applied to volumes!")
 
     # --- 1. Compute Fourier Transforms and shift origin to center ---
     ft1 = fft.fftshift(fft.fftn(vol1))
@@ -266,82 +266,77 @@ def compute_fsc(
 
 # ------------------------------- CLI wrapper ------------------------------ #
 
-def cli():
-    parser = argparse.ArgumentParser(
-        description="Calculate Fourier Shell Correlation (FSC) between two MRC maps.",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-    )
-    parser.add_argument("map1", help="Path to the first input .mrc file (reference map for shape & sampling).")
-    parser.add_argument("map2", help="Path to the second input .mrc file.")
-    parser.add_argument("--mask", default=None, help="Optional path to a .mrc mask file (same grid as map1).")
+def calculate_fsc_from_files(
+    map1: str,
+    map2: str,
+    mask: Optional[str] = None,
+    resize_maps: bool = False,
+    resize_mode: Literal["auto", "fourier-first", "realspace-only"] = "auto",
+    interp_order: int = 3,
+    anti_alias: bool = True,
+    show_plot: bool = False,
+    save_plot: Optional[str] = None,
+    save_csv: Optional[str] = None,
+    resolution_from_A: float = 15.0,
+    persistence_bins: int = 3,
+    rebound_window: int = 6,
+    threshold_eps: float = 1e-3
+):
+    """
+    Calculate Fourier Shell Correlation (FSC) between two MRC maps.
 
-    # Resizing / resampling options
-    parser.add_argument("--resize_maps", action="store_true",
-                        help="If maps differ in voxel size and/or shape, align map 2 to map 1.")
-    parser.add_argument("--resize_mode", choices=["auto", "fourier-first", "realspace-only"],
-                        default="auto",
-                        help="Strategy to make map 2 match map 1 (see help text).")
-    parser.add_argument("--interp_order", type=int, default=3,
-                        help="Spline order for real-space interpolation (0..5).")
-    parser.add_argument("--no_anti_alias", action="store_true",
-                        help="Disable Gaussian anti-alias prefilter when downsampling.")
-
-    # Plot / outputs
-    parser.add_argument("--show_plot", action="store_true", help="Display the FSC plot interactively.")
-    parser.add_argument("--save_plot", default=None, help="Path to save the FSC plot image (e.g., fsc_plot.png).")
-    parser.add_argument("--save_csv", default=None,
-                        help="Path to save the FSC data as CSV (e.g., fsc_data.csv).")
-
-    # Crossing logic
-    parser.add_argument("--resolution_from_A", type=float, default=15.0,
-                        help="Gate for bounce checking: if the first crossing is worse than this, "
-                             "it must pass the anti-bounce rule to be accepted.")
-    parser.add_argument("--persistence_bins", type=int, default=3,
-                        help="Require this many consecutive bins below the threshold when crossing occurs "
-                             "worse than the gate.")
-    parser.add_argument("--rebound_window", type=int, default=6,
-                        help="Look-ahead window (bins) to ensure no immediate rebound above the threshold.")
-    parser.add_argument("--threshold_eps", type=float, default=1e-3,
-                        help="Small epsilon around FSC threshold to avoid jittery misclassification.")
-
-    args = parser.parse_args()
+    :param map1: Path to the first input .mrc file (reference map for shape & sampling)
+    :param map2: Path to the second input .mrc file
+    :param mask: Optional path to a .mrc mask file (same grid as map1)
+    :param resize_maps: If maps differ in voxel size and/or shape, align map 2 to map 1
+    :param resize_mode: Strategy to make map 2 match map 1
+    :param interp_order: Spline order for real-space interpolation (0..5)
+    :param anti_alias: Disable Gaussian anti-alias prefilter when downsampling
+    :param show_plot: Display the FSC plot interactively
+    :param save_plot: Path to save the FSC plot image (e.g., fsc_plot.png)
+    :param save_csv: Path to save the FSC data as CSV (e.g., fsc_data.csv)
+    :param resolution_from_A: Gate for bounce checking - if the first crossing is worse than this, it must pass the anti-bounce rule to be accepted
+    :param persistence_bins: Require this many consecutive bins below the threshold when crossing occurs worse than the gate
+    :param rebound_window: Look-ahead window (bins) to ensure no immediate rebound above the threshold
+    :param threshold_eps: Small epsilon around FSC threshold to avoid jittery misclassification
+    """
 
     # --- Load Data ---
-    print(f"Loading map 1: {args.map1}")
+    print(f"Loading map 1: {map1}")
     try:
-        with mrcfile.open(args.map1) as mrc:
+        with mrcfile.open(map1) as mrc:
             vol1 = mrc.data.copy().astype(np.float32)
             voxel_size1 = float(mrc.voxel_size.x.item())
             if voxel_size1 == 0:
                 raise ValueError("Voxel size in map 1 header is 0. Please set it to a correct non-zero value.")
     except Exception as e:
-        print(f"Error loading {args.map1}: {e}")
+        print(f"Error loading {map1}: {e}")
         return
 
-    print(f"Loading map 2: {args.map2}")
+    print(f"Loading map 2: {map2}")
     try:
-        with mrcfile.open(args.map2) as mrc:
+        with mrcfile.open(map2) as mrc:
             vol2 = mrc.data.copy().astype(np.float32)
             voxel_size2 = float(mrc.voxel_size.x.item())
             if voxel_size2 == 0:
                 print("   Warning: Voxel size in map 2 header is 0. Assuming map 1's voxel size for comparisons.")
                 voxel_size2 = voxel_size1
     except Exception as e:
-        print(f"Error loading {args.map2}: {e}")
+        print(f"Error loading {map2}: {e}")
         return
 
     mask_data = None
-    if args.mask:
-        print(f"Loading mask: {args.mask}")
+    if mask:
+        print(f"Loading mask: {mask}")
         try:
-            with mrcfile.open(args.mask) as mrc:
+            with mrcfile.open(mask) as mrc:
                 mask_data = mrc.data.copy().astype(np.float32)
         except Exception as e:
-            print(f"Error loading mask {args.mask}: {e}")
+            print(f"Error loading mask {mask}: {e}")
             return
 
     # --- Grid alignment (if requested) ---
-    if args.resize_maps:
+    if resize_maps:
         if (vol1.shape != vol2.shape) or (not np.isclose(voxel_size1, voxel_size2, rtol=1e-6, atol=1e-6)):
             print("Aligning map 2 to map 1 grid (sampling rate and box size)...")
             vol2 = match_grid_to_reference(
@@ -349,9 +344,9 @@ def cli():
                 voxel_size2,
                 ref_shape=vol1.shape,
                 ref_voxel_size=voxel_size1,
-                mode=args.resize_mode,
-                interp_order=args.interp_order,
-                anti_alias=(not args.no_anti_alias)
+                mode=resize_mode,
+                interp_order=interp_order,
+                anti_alias=anti_alias
             )
             print(f"New map 2 shape: {vol2.shape}; voxel size now {voxel_size1:.4f} Å/px")
         else:
@@ -377,10 +372,10 @@ def cli():
             voxel_size,
             mask=mask_data,
             allow_resize=False,  # grid is already aligned above
-            resolution_from_A=args.resolution_from_A,
-            persistence_bins=args.persistence_bins,
-            rebound_window=args.rebound_window,
-            threshold_eps=args.threshold_eps
+            resolution_from_A=resolution_from_A,
+            persistence_bins=persistence_bins,
+            rebound_window=rebound_window,
+            threshold_eps=threshold_eps
         )
     except ValueError as e:
         print(f"   Error during FSC computation: {e}")
@@ -389,22 +384,22 @@ def cli():
     print("Calculation complete.")
 
     # --- Report Resolution ---
-    print(f"Bounce-check gate (resolution_from_A): {args.resolution_from_A:.2f} Å")
+    print(f"Bounce-check gate (resolution_from_A): {resolution_from_A:.2f} Å")
     print(f"Resolution at FSC=0.143 ('gold-standard'): {res_0143:.3f} Å")
     print(f"Resolution at FSC=0.5                    : {res_05:.3f} Å")
 
     # --- Save CSV Data ---
-    if args.save_csv:
-        print(f"Saving data to {args.save_csv}...")
+    if save_csv:
+        print(f"Saving data to {save_csv}...")
         data_to_save = np.vstack((spatial_freq, resolution_A, fsc)).T
         np.savetxt(
-            args.save_csv, data_to_save, delimiter=',',
+            save_csv, data_to_save, delimiter=',',
             header='SpatialFrequency_invA,Resolution_A,FSC', comments=''
         )
         print("Data saved successfully.")
 
     # --- Plotting ---
-    if args.show_plot or args.save_plot:
+    if show_plot or save_plot:
         print("Generating plot...")
         plt.style.use('seaborn-v0_8-whitegrid')
         fig, ax1 = plt.subplots(figsize=(10, 6))
@@ -433,28 +428,28 @@ def cli():
             bbox=dict(facecolor="white", edgecolor="none", pad=2)
         )
         # Vertical line to show cutoff/gate resolution
-        resolution_threshold_freq = 1.0 / args.resolution_from_A
+        resolution_threshold_freq = 1.0 / resolution_from_A
         # if resolution_threshold_freq <= np.max(spatial_freq):
             # ax1.axvline(x=resolution_threshold_freq, color='orange', linestyle=':', linewidth=1, alpha=0.7)
-            # ax1.text(resolution_threshold_freq, 0.92, f' {args.resolution_from_A:.1f} Å gate',
+            # ax1.text(resolution_threshold_freq, 0.92, f' {resolution_from_A:.1f} Å gate',
             #          va='center', ha='left', color='orange', backgroundcolor='white', rotation=90, fontsize=9)
 
         # Annotate accepted crossings
         res05_plot, idx05 = first_crossing_with_bounce_check(
             fsc, resolution_A,
             threshold=0.5,
-            cutoff_res_A=args.resolution_from_A,
-            persistence=args.persistence_bins,
-            rebound_window=args.rebound_window,
-            eps=args.threshold_eps
+            cutoff_res_A=resolution_from_A,
+            persistence=persistence_bins,
+            rebound_window=rebound_window,
+            eps=threshold_eps
         )
         res0143_plot, idx0143 = first_crossing_with_bounce_check(
             fsc, resolution_A,
             threshold=0.143,
-            cutoff_res_A=args.resolution_from_A,
-            persistence=args.persistence_bins,
-            rebound_window=args.rebound_window,
-            eps=args.threshold_eps
+            cutoff_res_A=resolution_from_A,
+            persistence=persistence_bins,
+            rebound_window=rebound_window,
+            eps=threshold_eps
         )
 
         def mark(idx, txt, y=0.06):
@@ -478,15 +473,20 @@ def cli():
         fig.suptitle("Fourier Shell Correlation", fontsize=16)
         fig.tight_layout(rect=[0, 0, 1, 0.96])
 
-        if args.save_plot:
-            print(f"Saving plot to {args.save_plot}...")
-            plt.savefig(args.save_plot, dpi=300, bbox_inches='tight')
+        if save_plot:
+            print(f"Saving plot to {save_plot}...")
+            plt.savefig(save_plot, dpi=300, bbox_inches='tight')
             print("Plot saved successfully.")
 
-        if args.show_plot:
+        if show_plot:
             print("Displaying plot...")
             plt.show()
 
 
+def main():
+    from argParseFromDoc import parse_function_and_call
+    parse_function_and_call(calculate_fsc_from_files)
+
+
 if __name__ == "__main__":
-    cli()
+    main()

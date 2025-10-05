@@ -87,25 +87,51 @@ python -m cryopares_train [ARGUMENTS] [--config [CONFIG_OVERRIDES]]
 
 **Key Arguments:**
 
-*   `--symmetry`: The point group symmetry of the molecule (e.g., `C1`, `D3`). **Required.**
-*   `--particles_star_fname`: Path to the input `.star` file(s) with pre-aligned particles. Can accept multiple files. RELION 3.1+ format. **Required.**
-*   `--train_save_dir`: Directory to save model checkpoints, logs, and other outputs. **Required.**
-*   `--particles_dir`: Optional root directory for the particle files. If the paths in the `.star` file are relative, this directory will be prepended to them. Can accept multiple directories (one per star file). This is similar to RELION's project directory concept. If your _rlImageNames from the current working directory, then you don't need to provide this argument
-*   `--n_epochs`: Number of training epochs. (Default: `100`)
-*   `--batch_size`: Number of particles per batch. Try to make it as large as possible before running out of GPU memory. (Default: `64`)
-*   `--num_dataworkers`: Number of parallel data loading workers per GPU. For debugging, set it to `0` to load data in the main thread. (Default: `8`)
-*   `--image_size_px_for_nnet`: The desired image size in pixels for the neural network input. Particles are rescaled then cropped/padded to this size. (Default: `160` pixels). Smaller image sizes lead to faster neural nets, but too small images can lead to worse results.
-*   `--sampling_rate_angs_for_nnet`: The desired sampling rate in Angstroms/pixel for neural network input. Particles are first rescaled to this sampling rate. (Default: `1.5` A/px). Smaller image sizes lead to faster neural nets, but too small images can lead to worse results.
-*   `--mask_radius_angs`: Radius of the circular mask in Angstroms. If not provided, defaults to half the box size.
-*   `--NOT_split_halfs`: By default, training creates two models (one for each data half). Use this flag to train a single model on all data.
-*   `--continue_checkpoint_dir`: Path to a checkpoint directory to continue training from a previous run.
-*   `--finetune_checkpoint_dir`: Path to a checkpoint directory to fine-tune a pre-trained model on new data.
-*   `--compile_model`: Enable torch.compile for faster training (experimental).
-*   `--val_check_interval`: Fraction of an epoch between validation checks. Set it to something like 0.5 or 0.1 if your dataset is large and you require quicker feedback
-*   `--overfit_batches`: Number of batches to use for overfitting test (debugging feature).
-*   `--map_fname_for_simulated_pretraining`: Path(s) to reference map(s) for simulated pretraining warmup.
-*   `--junk_particles_star_fname`: Optional star file(s) with junk-only particles for z-score threshold estimation.
-*   `--junk_particles_dir`: Directory for junk particles (similar to `--particles_dir`).
+<!-- AUTO_GENERATED:train_parameters:START -->
+**Required Parameters:**
+
+*   `--symmetry`: Point group symmetry of the molecule (e.g., C1, D7, I, O, T)
+
+*   `--particles_star_fname`: Path(s) to RELION 3.1+ format .star file(s) containing pre-aligned particles. Can accept multiple files
+
+*   `--train_save_dir`: Output directory where model checkpoints, logs, and training artifacts will be saved
+
+
+**Optional Parameters:**
+
+*   `--particles_dir`: Root directory for particle image paths. If paths in .star file are relative, this directory is prepended (similar to RELION project directory concept)
+
+*   `--n_epochs`: Number of training epochs. More epochs allow better convergence, although it does not help beyond a certain point (Default: `100`)
+
+*   `--batch_size`: Number of particles per batch. Try to make it as large as possible before running out of GPU memory. We advice using batch sizes of at least 32 images (Default: `64`)
+
+*   `--num_dataworkers`: Number of parallel data loading workers per GPU. Each worker is a separate CPU process. Set to 0 to load data in the main thread (useful for debugging) (Default: `8`)
+
+*   `--image_size_px_for_nnet`: Target image size in pixels for neural network input. After rescaling to target sampling rate, images are cropped or padded to this size (Default: `160`)
+
+*   `--sampling_rate_angs_for_nnet`: Target sampling rate in Angstroms/pixel for neural network input. Particle images are first rescaled to this sampling rate before processing (Default: `1.5`)
+
+*   `--mask_radius_angs`: Radius of circular mask in Angstroms applied to particle images. If not provided, defaults to half the box size
+
+*   `--split_halfs`: If True (default), trains two separate models on data half-sets for cross-validation. Use --NOT_split_halfs to train single model on all data (Default: `True`)
+
+*   `--continue_checkpoint_dir`: Path to checkpoint directory to resume training from a previous run
+
+*   `--finetune_checkpoint_dir`: Path to checkpoint directory to fine-tune a pre-trained model on new dataset
+
+*   `--compile_model`: Enable torch.compile for faster training (experimental) (Default: `False`)
+
+*   `--val_check_interval`: Fraction of epoch between validation checks. You generally don't want to touch it, but you can set it to smaller values (0.1-0.5) for large datasets to get quicker feedback
+
+*   `--overfit_batches`: Number of batches to use for overfitting test (debugging feature to verify model can memorize small dataset)
+
+*   `--map_fname_for_simulated_pretraining`: Path(s) to reference map(s) for simulated projection warmup before training on real data. The number of maps must match number of particle star files
+
+*   `--junk_particles_star_fname`: Optional star file(s) with junk-only particles for estimating confidence z-score thresholds
+
+*   `--junk_particles_dir`: Root directory for junk particle image paths (analogous to particles_dir)
+
+<!-- AUTO_GENERATED:train_parameters:END -->
 
 **Additional relevant Parameters (via --config):**
 
@@ -113,7 +139,7 @@ You can override configuration parameters using `--config KEY=VALUE`. Multiple k
 
 *   **`train.learning_rate`**: Initial learning rate. (Default: `1e-3`). It needs to be tuned to get the best performance.
 *   **`train.weight_decay`**: Weight decay for optimizer, that regularizes the model. (Default: `1e-5`). Make it larger if you are suffer from overfitting.
-*   **`train.accumulate_grad_batches`**: Gradient accumulation batches to simulate larger batch sizes. (Default: `16`). The effecive batch size is batch_size * accumulate_grad_batches. We recommend to train with effective batches of size 512 < x < 2024. 
+*   **`train.accumulate_grad_batches`**: Gradient accumulation batches to simulate larger batch sizes. (Default: `16`). The effecive batch size is batch_size * accumulate_grad_batches. We recommend to train with effective batches of size 512 < x < 2048. 
 *   **`models.image2sphere.lmax`**: Maximum spherical harmonic degree. The larger, the more expresive the network is (Default: `12`). Reduce it if you see overfitting.
 *   **`datamanager.num_augmented_copies_per_batch`**: Number of augmented copies per particle. Each copy undergoes a different data augmentation. The batch_size needs to be selected to be divisible by this number. Large batches with large num_augmented_copies_per_batch values help stabilizing training, but require a lot of GPU memory (Default: `4`)
 
@@ -134,27 +160,59 @@ cryopares_infer [ARGUMENTS] --config [CONFIG_OVERRIDES]
 
 **Key Arguments:**
 
-*   `--particles_star_fname`: Path to the input `.star` file of particles needing pose assignment. **Required.**
-*   `--checkpoint_dir`: Path to the directory containing the trained model (or a `.zip` file). **Required.**
-*   `--results_dir`: Directory where output `.star` files and reconstructions will be saved. **Required.**
-*   `--particles_dir`: Optional root directory for particle files. If paths in the `.star` file are relative, this directory will be prepended. Similar to RELION's project directory concept.
-*   `--batch_size`: Number of particles per batch. (Default: `64`)
-*   `--n_jobs`: Number of worker processes. Defaults to number of GPUs if CUDA is enabled, otherwise `1`.
-*   `--num_dataworkers`: Number of PyTorch dataloader workers per process. (Default: `8`)
-*   `--NOT_use_cuda`: Use this flag to run on CPU instead of GPU.
-*   `--n_cpus_if_no_cuda`: Maximum CPU threads per worker when CUDA is disabled. (Default: `4`)
-*   `--compile_model`: Enable torch.compile for faster inference (experimental).
-*   `--top_k_poses_nnet`: Number of top pose predictions from the neural network. (Default: `1`)
-*   `--top_k_poses_localref`: Number of top poses to keep after local refinement. (Default: `1`)
-*   `--grid_distance_degs`: Angular search range in degrees for local refinement around the neural network prediction. (Default: `6.0`)
-*   `--reference_map`: Path to reference `.mrc` file for local refinement and reconstruction. If not provided, uses half-maps from training.
-*   `--reference_mask`: Path to reference mask `.mrc` file for masked FSC calculation.
-*   `--directional_zscore_thr`: Z-score threshold for directional filtering of particles. Particles below this threshold are discarded.
-*   `--skip_localrefinement`: Skip the local pose refinement step.
-*   `--skip_reconstruction`: Skip reconstruction and only output pose predictions.
-*   `--subset_idxs`: Process only a subset of particles by index.
-*   `--n_first_particles`: Process only the first N particles.
-*   `--check_interval_secs`: Polling interval in seconds for distributed processing. (Default: `2.0`)
+<!-- AUTO_GENERATED:inference_parameters:START -->
+**Required Parameters:**
+
+*   `--particles_star_fname`: Path to input STAR file with particle metadata
+
+*   `--checkpoint_dir`: Path to training directory (or .zip file) containing half-set models with checkpoints and hyperparameters
+
+*   `--results_dir`: Output directory for inference results including predicted poses and optional reconstructions
+
+
+**Optional Parameters:**
+
+*   `--data_halfset`: Which particle half-set(s) to process: "half1", "half2", or "allParticles" (Default: `allParticles`)
+
+*   `--model_halfset`: Model half-set selection policy: "half1", "half2", "allCombinations", or "matchingHalf" (uses matching data/model pairs) (Default: `matchingHalf`)
+
+*   `--particles_dir`: Root directory for particle image paths. If provided, overrides paths in the .star file
+
+*   `--batch_size`: Number of particles to process simultaneously per job (Default: `64`)
+
+*   `--n_jobs`: Number of parallel worker processes for distributed projection matching
+
+*   `--num_dataworkers`: Number of parallel data loading workers per GPU. Each worker is a separate CPU process. Set to 0 to load data in the main thread (useful for debugging) (Default: `8`)
+
+*   `--use_cuda`: Enable GPU acceleration. If False, runs on CPU only (Default: `True`)
+
+*   `--n_cpus_if_no_cuda`: Maximum CPU threads per worker when CUDA is disabled (Default: `4`)
+
+*   `--compile_model`: Compile model with torch.compile for faster inference (experimental, requires PyTorch 2.0+) (Default: `False`)
+
+*   `--top_k_poses_nnet`: Number of top pose predictions to retrieve from neural network before local refinement (Default: `1`)
+
+*   `--top_k_poses_localref`: Number of best matching poses to keep after local refinement (Default: `1`)
+
+*   `--grid_distance_degs`: Maximum angular distance in degrees for local refinement search. Grid ranges from -grid_distance_degs to +grid_distance_degs around predicted pose (Default: `6.0`)
+
+*   `--reference_map`: Path to reference map (.mrc) for FSC computation during validation
+
+*   `--reference_mask`: Path to reference mask (.mrc) for masked FSC calculation
+
+*   `--directional_zscore_thr`: Confidence z-score threshold for filtering particles. Particles with scores below this are discarded as low-confidence
+
+*   `--skip_localrefinement`: Skip local pose refinement step and use only neural network predictions (Default: `False`)
+
+*   `--skip_reconstruction`: Skip 3D reconstruction step and output only predicted poses (Default: `False`)
+
+*   `--subset_idxs`: List of particle indices to process (for debugging or partial processing)
+
+*   `--n_first_particles`: Process only the first N particles from dataset (for testing or validation)
+
+*   `--check_interval_secs`: Polling interval in seconds for parent loop in distributed processing (Default: `2.0`)
+
+<!-- AUTO_GENERATED:inference_parameters:END -->
 
 **Half-Set Selection (`--data_halfset` and `--model_halfset`)**
 
@@ -236,25 +294,51 @@ cryopares_projmatching [ARGUMENTS]
 
 **Key Arguments:**
 
-*   `--reference_vol`: Path to the reference volume file (`.mrc`). **Required.**
-*   `--particles_star_fname`: Path to the input `.star` file with particle metadata. **Required.**
-*   `--out_fname`: Path for the output `.star` file with aligned poses. **Required.**
-*   `--particles_dir`: Root directory for particle image paths.
-*   `--mask_radius_angs`: Mask radius in Angstroms.
-*   `--grid_distance_degs`: Angular search range in degrees. (Default: `8.0`)
-*   `--grid_step_degs`: Angular step size in degrees. (Default: `2.0`)
-*   `--return_top_k_poses`: Number of top poses to save per particle. (Default: `1`)
-*   `--filter_resolution_angst`: Low-pass filter the reference before matching.
-*   `--n_jobs`: Number of parallel jobs. (Default: `1`)
-*   `--num_dataworkers`: Number of CPU workers per DataLoader. (Default: `1`)
-*   `--batch_size`: Batch size per job. (Default: `1024`)
-*   `--NOT_use_cuda`: Use this flag to run on CPU instead of GPU.
-*   `--NOT_verbose`: Suppress progress logging.
-*   `--float32_matmul_precision`: Precision mode for matrix multiplication (`highest`, `high`, `medium`). (Default: `high`)
-*   `--gpu_id`: Specific GPU ID to use.
-*   `--n_first_particles`: Process only the first N particles.
-*   `--NOT_correct_ctf`: Disable CTF correction.
-*   `--halfmap_subset`: Select subset `1` or `2` for half-map validation.
+<!-- AUTO_GENERATED:projmatching_parameters:START -->
+**Required Parameters:**
+
+*   `--reference_vol`: Path to reference 3D volume (.mrc file) for generating projection templates
+
+*   `--particles_star_fname`: Path to input STAR file with particle metadata
+
+*   `--out_fname`: Path for output STAR file with aligned particle poses
+
+*   `--particles_dir`: Root directory for particle image paths. If provided, overrides paths in the .star file
+
+
+**Optional Parameters:**
+
+*   `--mask_radius_angs`: Radius of circular mask in Angstroms applied to particle images
+
+*   `--grid_distance_degs`: Maximum angular distance in degrees for local refinement search. Grid ranges from -grid_distance_degs to +grid_distance_degs around predicted pose (Default: `6.0`)
+
+*   `--grid_step_degs`: Angular step size in degrees for grid search during local refinement (Default: `2.0`)
+
+*   `--return_top_k_poses`: Number of top matching poses to save per particle (Default: `1`)
+
+*   `--filter_resolution_angst`: Low-pass filter resolution in Angstroms applied to reference volume before matching
+
+*   `--n_jobs`: Number of parallel worker processes for distributed projection matching (Default: `1`)
+
+*   `--num_dataworkers`: Number of CPU workers per PyTorch DataLoader for data loading (Default: `1`)
+
+*   `--batch_size`: Number of particles to process simultaneously per job (Default: `1024`)
+
+*   `--use_cuda`: Enable GPU acceleration. If False, runs on CPU only (Default: `True`)
+
+*   `--verbose`: Enable progress logging and status messages (Default: `True`)
+
+*   `--float32_matmul_precision`: PyTorch float32 matrix multiplication precision mode (highest/high/medium). Higher is more accurate but slower (Default: `high`)
+
+*   `--gpu_id`: Specific GPU device ID to use (if multiple GPUs available)
+
+*   `--n_first_particles`: Process only the first N particles from dataset (for testing or validation)
+
+*   `--correct_ctf`: Apply CTF correction during processing (Default: `True`)
+
+*   `--halfmap_subset`: Select half-map subset (1 or 2) for half-map validation
+
+<!-- AUTO_GENERATED:projmatching_parameters:END -->
 
 For additional details, see the [Command-Line Interface documentation](./docs/cli.md).
 
@@ -269,21 +353,43 @@ cryopares_reconstruct [ARGUMENTS]
 
 **Key Arguments:**
 
-*   `--particles_star_fname`: Path to the `.star` file with particles and poses. **Required.**
-*   `--symmetry`: Point group symmetry (e.g., `C1`, `D2`). **Required.**
-*   `--output_fname`: Path for the output `.mrc` file. **Required.**
-*   `--particles_dir`: Root directory for particle image paths.
-*   `--n_jobs`: Number of workers for parallel reconstruction. (Default: `1`)
-*   `--num_dataworkers`: Number of workers for data loading. (Default: `1`)
-*   `--batch_size`: Number of particles to backproject simultaneously. (Default: `128`)
-*   `--NOT_use_cuda`: Use this flag to run on CPU instead of GPU.
-*   `--NOT_correct_ctf`: Disable CTF correction.
-*   `--eps`: Regularization constant (ideally `1/SNR`). (Default: `0.001`)
-*   `--min_denominator_value`: Prevent division by zero.
-*   `--use_only_n_first_batches`: Reconstruct using only the first N batches.
-*   `--float32_matmul_precision`: Matrix multiplication precision for speed (`high` or `medium`). (Default: `high`)
-*   `--weight_with_confidence`: Apply per-particle confidence weighting.
-*   `--halfmap_subset`: Reconstruct using only subset `1` or `2`.
+<!-- AUTO_GENERATED:reconstruct_parameters:START -->
+**Required Parameters:**
+
+*   `--particles_star_fname`: Path to input STAR file with particle metadata and poses to reconstruct
+
+*   `--symmetry`: Point group symmetry of the volume for reconstruction (e.g., C1, D2, I, O, T)
+
+*   `--output_fname`: Path for output reconstructed 3D volume (.mrc file)
+
+
+**Optional Parameters:**
+
+*   `--particles_dir`: Root directory for particle image paths. If provided, overrides paths in the .star file
+
+*   `--n_jobs`: Number of parallel worker processes for distributed reconstruction (Default: `1`)
+
+*   `--num_dataworkers`: Number of CPU workers per PyTorch DataLoader for data loading (Default: `1`)
+
+*   `--batch_size`: Number of particles to backproject simultaneously per job (Default: `128`)
+
+*   `--use_cuda`: Enable GPU acceleration for reconstruction. If False, runs on CPU only (Default: `True`)
+
+*   `--correct_ctf`: Apply CTF correction during reconstruction (Default: `True`)
+
+*   `--eps`: Regularization constant for reconstruction (ideally set to 1/SNR). Prevents division by zero and stabilizes reconstruction (Default: `0.001`)
+
+*   `--min_denominator_value`: Minimum value for denominator to prevent numerical instabilities during reconstruction
+
+*   `--use_only_n_first_batches`: Reconstruct using only first N batches (for testing or quick validation)
+
+*   `--float32_matmul_precision`: PyTorch float32 matrix multiplication precision mode (highest/high/medium). Higher is more accurate but slower (Default: `high`)
+
+*   `--weight_with_confidence`: Apply per-particle confidence weighting during backprojection. If True, particles with higher confidence contribute more to reconstruction (Default: `False`)
+
+*   `--halfmap_subset`: Select half-map subset (1 or 2) for half-map reconstruction and validation
+
+<!-- AUTO_GENERATED:reconstruct_parameters:END -->
 
 For additional details, see the [Command-Line Interface documentation](./docs/cli.md).
 

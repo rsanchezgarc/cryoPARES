@@ -20,7 +20,7 @@ class Inference_config:
         'skip_reconstruction': 'Skip 3D reconstruction step and output only predicted poses',
         'update_progressbar_n_batches': 'Update progress bar every N batches',
         'directional_zscore_thr': 'Confidence z-score threshold for filtering particles. Particles with scores below this are discarded as low-confidence',
-        'before_refiner_buffer_size': 'TODO: Document this parameter',
+        'before_refiner_buffer_size': 'If directional_zscore_thr is enabled, wait until before_refiner_buffer_size have been accumulated before executing the projection matching and reconstruction. If None, before_refiner_buffer_size=batch_size//4',
         'float32_matmul_precision': 'PyTorch float32 matrix multiplication precision mode ("highest", "high", or "medium")',
 
         # CLI-exposed parameters (not in config, but used in distributed_inference)
@@ -54,6 +54,6 @@ class Inference_config:
     update_progressbar_n_batches: int = 20
     directional_zscore_thr: Optional[float] = None
 
-    before_refiner_buffer_size: int = 16
+    before_refiner_buffer_size: Optional[int] = None
 
     float32_matmul_precision: str = "high"

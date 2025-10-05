@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from typing import Optional
 
+from cryoPARES.constants import RELION_PRED_POSE_CONFIDENCE_NAME
+
 
 @dataclass
 class Reconstruct_config:
@@ -10,7 +12,7 @@ class Reconstruct_config:
     PARAM_DOCS = {
         # Config parameters
         'eps': 'Regularization constant for reconstruction (ideally set to 1/SNR). Prevents division by zero and stabilizes reconstruction',
-        'weight_with_confidence': 'Apply per-particle confidence weighting during backprojection. If True, particles with higher confidence contribute more to reconstruction',
+        'weight_with_confidence': f'Apply per-particle confidence weighting during backprojection. If True, particles with higher confidence contribute more to reconstruction. It reads the confidence from the metadata label "{RELION_PRED_POSE_CONFIDENCE_NAME}"',
         'correct_ctf': 'Apply CTF correction during reconstruction',
         'float32_matmul_precision': 'PyTorch float32 matrix multiplication precision mode ("highest", "high", or "medium")',
         'disable_compile_insert_central_slices_rfft_3d_multichannel': 'Disable torch.compile optimization for central slice insertion',

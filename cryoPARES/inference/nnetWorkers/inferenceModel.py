@@ -1,4 +1,4 @@
-from typing import Union, Any, Dict, Tuple, List
+from typing import Union, Any, Dict, Tuple, List, Optional
 
 import torch
 from torch import nn, ScriptModule
@@ -17,10 +17,10 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
    def __init__(self,
                 so3model: Union[nn.Module, ScriptModule],
                 scoreNormalizer: Union[nn.Module, ScriptModule, None],
-                normalizedScore_thr: float | None,
-                localRefiner: ProjectionMatcher | None,
-                reconstructor: Reconstructor | None = None,
-                before_refiner_buffer_size: int = CONFIG_PARAM(),
+                normalizedScore_thr: Optional[float],
+                localRefiner: Optional[ProjectionMatcher],
+                reconstructor: Optional[Reconstructor] = None,
+                before_refiner_buffer_size: Optional[int] = CONFIG_PARAM(),
                 top_k_poses_nnet: int = CONFIG_PARAM()
                 ):
        super().__init__()
@@ -42,6 +42,7 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
 
 
        if self.normalizedScore_thr is not None:
+           before_refiner_buffer_size = before_refiner_buffer_size or max(2, main_config.inference.batch_size // 4)
            self.buffer = StreamingBuffer(
                buffer_size=before_refiner_buffer_size,
                processing_fn=self._run_stage2,

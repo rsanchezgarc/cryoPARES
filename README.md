@@ -8,7 +8,7 @@ to rapidly estimate particle poses in other, similar datasets.
 This workflow is divided into two main phases:
 
 *   **Training:** In this phase, you use a pre-existing, high-resolution dataset (where particle poses have already been determined by
-traditional methods like RELION refine) to train a cryoPARES model. This process creates a highly specialized "expert" model that
+traditional methods like RELION refine) to train a cryoPARES model. This process creates a model that
 can recognize and assign poses to particles of that specific type of macromolecule.
 
 *   **Inference:** Once the model is trained, you can use it for inference on new datasets of the *same* or *very similar* molecules
@@ -20,7 +20,7 @@ This "train once, infer many times" paradigm allows for near real-time 3D recons
 collection and analysis.
 
 For a detailed explanation of the method, please refer to our paper:
-[Supervised Deep Learning for Efficient Cryo-EM Image Alignment in Drug Discovery](https://www.biorxiv.org/content/10.1101/2025.03.04.641536v2)
+[Supervised Deep Learning for Efficient Cryo-EM Image Alignment in Drug Discovery](https://www.biorxiv.org/content/10.1101/2025.03.04.641536)
 
 ## Table of Contents
 
@@ -315,7 +315,8 @@ The arguments accepted by daemonInference are mostly the same that the ones acce
 
 ### Utility Tools
 
-CryoPARES includes standalone utility tools for projection matching and reconstruction. **Note:** These tools are automatically used within the `cryopares_infer` workflow, but can also be run independently if needed.
+CryoPARES includes standalone utility tools for projection matching and reconstruction. 
+**Note:** These tools are automatically used within the `cryopares_infer` workflow, but can also be run independently if needed.<br>
 
 #### Projection Matching
 
@@ -323,7 +324,7 @@ The projection matching utility performs local pose refinement by searching arou
 
 **Usage:**
 ```bash
-cryopares_projmatching [ARGUMENTS]
+cryopares_projmatching [ARGUMENTS] [--config [CONFIG_OVERRIDES]] [--show-config]
 ```
 
 **Key Arguments:**
@@ -382,7 +383,7 @@ The reconstruction utility creates a 3D volume from particles with known poses u
 
 **Usage:**
 ```bash
-cryopares_reconstruct [ARGUMENTS]
+cryopares_reconstruct [--config [CONFIG_OVERRIDES]] [--show-config]
 ```
 
 **Key Arguments:**
@@ -515,6 +516,7 @@ For a complete reference of all configuration parameters, see the **[Configurati
         --batch_size 64 \
         --grid_distance_degs 15 \
         --directional_zscore_thr 1.0  #Remove all particles with directional zscore <1.0
+        --n_jobs 2 #To use 2 GPUs
     ```
 
 ## Getting Help

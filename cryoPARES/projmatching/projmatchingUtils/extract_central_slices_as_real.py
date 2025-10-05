@@ -1,3 +1,18 @@
+"""
+Central slice extraction for projection matching.
+
+This module contains code derived from the torch-fourier-slice package:
+https://github.com/teamtomo/torch-fourier-slice
+
+Original code Copyright (c) 2023 Alister Burt
+Licensed under BSD 3-Clause License
+
+Modifications Copyright (c) 2025 CryoPARES developers
+Licensed under GPL-3.0
+
+The original torch-fourier-slice license is included in THIRD-PARTY-LICENSES.
+"""
+
 from functools import lru_cache
 import einops
 from typing import Tuple, Sequence

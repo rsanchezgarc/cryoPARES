@@ -12,7 +12,9 @@ class Reconstruct_config:
         'eps': 'Regularization constant for reconstruction (ideally set to 1/SNR). Prevents division by zero and stabilizes reconstruction',
         'weight_with_confidence': 'Apply per-particle confidence weighting during backprojection. If True, particles with higher confidence contribute more to reconstruction',
         'correct_ctf': 'Apply CTF correction during reconstruction',
-        'float32_matmul_precision': 'PyTorch float32 matrix multiplication precision mode (highest/high/medium). Higher is more accurate but slower',
+        'float32_matmul_precision': 'PyTorch float32 matrix multiplication precision mode ("highest", "high", or "medium")',
+        'disable_compile_insert_central_slices_rfft_3d_multichannel': 'Disable torch.compile optimization for central slice insertion',
+        'compile_insert_central_slices_rfft_3d_multichanne_mode': 'Compilation mode for central slice insertion: "default" or "max-autotune" (does not work with dynamic batches)',
 
         # CLI-exposed parameters (used in reconstruct_starfile)
         'particles_star_fname': 'Path to input STAR file with particle metadata and poses to reconstruct',

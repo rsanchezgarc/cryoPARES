@@ -1,27 +1,44 @@
 # CryoPARES: Cryo-EM Pose Assignment for Related Experiments via Supervised deep learning
 
 **CryoPARES** is a software package for assigning poses to 2D cryo-electron microscopy (cryo-EM) particle images.
-It uses a supervised deep learning approach to accelerate 3D reconstruction in related cryo-EM experiments. 
-The key idea is to train a neural network on a high-quality reference reconstruction, and then reuse this trained model 
+It uses a supervised deep learning approach to accelerate 3D reconstruction in related cryo-EM experiments.
+The key idea is to train a neural network on a high-quality reference reconstruction, and then reuse this trained model
 to rapidly estimate particle poses in other, similar datasets.
 
 This workflow is divided into two main phases:
 
 *   **Training:** In this phase, you use a pre-existing, high-resolution dataset (where particle poses have already been determined by
-traditional methods like RELION refine) to train a CryoPARES model. This process creates a highly specialized "expert" model that 
+traditional methods like RELION refine) to train a cryoPARES model. This process creates a highly specialized "expert" model that
 can recognize and assign poses to particles of that specific type of macromolecule.
 
-*   **Inference:** Once the model is trained, you can use it for inference on new datasets of the *same* or *very similar* molecules 
+*   **Inference:** Once the model is trained, you can use it for inference on new datasets of the *same* or *very similar* molecules
 (e.g., the same protein with a different ligand bound). Because the model has already learned the features of the molecule, it can predict
-particle poses almost instantly, bypassing the computationally expensive and time-consuming alignment steps of traditional workflows. 
+particle poses almost instantly, bypassing the computationally expensive and time-consuming alignment steps of traditional workflows.
 This is especially powerful for applications like drug screening, where many similar datasets need to be processed quickly.
 
-This "train once, infer many times" paradigm allows for near real-time 3D reconstruction, providing rapid feedback during data 
+This "train once, infer many times" paradigm allows for near real-time 3D reconstruction, providing rapid feedback during data
 collection and analysis.
 
 For a detailed explanation of the method, please refer to our paper:
 [Supervised Deep Learning for Efficient Cryo-EM Image Alignment in Drug Discovery](https://www.biorxiv.org/content/10.1101/2025.03.04.641536v2)
 
+## Table of Contents
+
+- [Installation](#installation)
+- [Usage](#usage)
+  - [Training](#training)
+  - [Inference](#inference)
+    - [Static Mode](#static-mode)
+    - [Daemon Mode (On-the-fly)](#daemon-mode-on-the-fly)
+  - [Utility Tools](#utility-tools)
+    - [Projection Matching](#projection-matching)
+    - [Reconstruction](#reconstruction)
+  - [Checkpoint Compactification](#checkpoint-compactification)
+- [Documentation](#documentation)
+  - [Configuration System](#configuration-system)
+- [Example Workflow](#example-workflow)
+- [Getting Help](#getting-help)
+- [License and Attribution](#license-and-attribution)
 
 ## Installation
 
@@ -69,20 +86,23 @@ Before running training or inference, it is highly recommended to increase the o
 the following command in your terminal:
 
 ```bash
-ulimit -n 65536
+ulimit -n 65536 #You are now able to deal with more than 30K .mrcs files. 
 ```
+This command does not generally require sudo. If you are not allowed to increase this number, please, join the
+.mrcs from different micrographs together to reduce the number of required files.
 
+<br>
 CryoPARES has two main modes of operation: training and inference. Particles need to be provided as RELION 3.1+ starfile(s).
 
 ### Training
 
-The `cryopares_train` module is used to train a new model for pose estimation. Training needs to be done first using 
+The `cryoPARES.train.train` module is used to train a new model for pose estimation. Training needs to be done first using 
 a pre-aligned dataset of particles. While not mandatory, we encourage using particles alignments estimated with RELION.
 
 
 **Usage:**
 ```bash
-python -m cryopares_train [ARGUMENTS] [--config [CONFIG_OVERRIDES]]
+cryopares_train [ARGUMENTS] [--config [CONFIG_OVERRIDES]] [--show-config]
 ```
 
 **Key Arguments:**
@@ -105,7 +125,7 @@ python -m cryopares_train [ARGUMENTS] [--config [CONFIG_OVERRIDES]]
 
 *   `--batch_size`: Number of particles per batch. Try to make it as large as possible before running out of GPU memory. We advice using batch sizes of at least 32 images (Default: `64`)
 
-*   `--num_dataworkers`: Number of parallel data loading workers per GPU. Each worker is a separate CPU process. Set to 0 to load data in the main thread (useful for debugging) (Default: `8`)
+*   `--num_dataworkers`: Number of parallel data loading workers per GPU. Each worker is a separate CPU process. Set to 0 to load data in the main thread (useful only for debugging). Try not to oversubscribe by asking more workers than CPUs (Default: `8`)
 
 *   `--image_size_px_for_nnet`: Target image size in pixels for neural network input. After rescaling to target sampling rate, images are cropped or padded to this size (Default: `160`)
 
@@ -135,7 +155,7 @@ python -m cryopares_train [ARGUMENTS] [--config [CONFIG_OVERRIDES]]
 
 **Additional relevant Parameters (via --config):**
 
-You can override configuration parameters using `--config KEY=VALUE`. Multiple key-value pairs can be provided. The `--config` flag should be the last argument:
+You can override configuration parameters using `--config KEY=VALUE`. Multiple key-value pairs can be provided. The `--config` flag should be the last argument. To see all available configuration options, run `cryopares_train --show-config`.
 
 *   **`train.learning_rate`**: Initial learning rate. (Default: `1e-3`). It needs to be tuned to get the best performance.
 *   **`train.weight_decay`**: Weight decay for optimizer, that regularizes the model. (Default: `1e-5`). Make it larger if you are suffer from overfitting.
@@ -143,7 +163,12 @@ You can override configuration parameters using `--config KEY=VALUE`. Multiple k
 *   **`models.image2sphere.lmax`**: Maximum spherical harmonic degree. The larger, the more expresive the network is (Default: `12`). Reduce it if you see overfitting.
 *   **`datamanager.num_augmented_copies_per_batch`**: Number of augmented copies per particle. Each copy undergoes a different data augmentation. The batch_size needs to be selected to be divisible by this number. Large batches with large num_augmented_copies_per_batch values help stabilizing training, but require a lot of GPU memory (Default: `4`)
 
-For comprehensive training guidance including monitoring with TensorBoard and avoiding overfitting/underfitting, see the **[Training Guide](./docs/training_guide.md)**. For a complete list of all configuration parameters, see the **[Configuration Guide](./docs/configuration_guide.md)**.
+For comprehensive training guidance including monitoring with TensorBoard and avoiding overfitting/underfitting, see the **[Training Guide](./docs/training_guide.md)**. 
+For a complete list of all configuration parameters, see the **[Configuration Guide](./docs/configuration_guide.md)**.
+<br>
+Once the training is done, you could use the checkpoint dir contained in `--train_save_dir` to infer poses of new datasets.
+The checkpoint dir is named version_0. If you run another training experiment with the same `--train_save_dir`, another
+checkpoint dir names version_1 will be created.
 
 ### Inference
 
@@ -155,7 +180,7 @@ In static mode, the inference is run on a fixed set of particles, that again, ne
 
 **Usage:**
 ```bash
-cryopares_infer [ARGUMENTS] --config [CONFIG_OVERRIDES]
+cryopares_infer [ARGUMENTS] [--config [CONFIG_OVERRIDES]] [--show-config]
 ```
 
 **Key Arguments:**
@@ -163,9 +188,9 @@ cryopares_infer [ARGUMENTS] --config [CONFIG_OVERRIDES]
 <!-- AUTO_GENERATED:inference_parameters:START -->
 **Required Parameters:**
 
-*   `--particles_star_fname`: Path to input STAR file with particle metadata
+*   `--particles_star_fname`: Path to input RELION particles .star file
 
-*   `--checkpoint_dir`: Path to training directory (or .zip file) containing half-set models with checkpoints and hyperparameters
+*   `--checkpoint_dir`: Path to training directory (or .zip file) containing half-set models with checkpoints and hyperparameters. By default they are called version_0, version_1, etc.
 
 *   `--results_dir`: Output directory for inference results including predicted poses and optional reconstructions
 
@@ -178,13 +203,13 @@ cryopares_infer [ARGUMENTS] --config [CONFIG_OVERRIDES]
 
 *   `--particles_dir`: Root directory for particle image paths. If provided, overrides paths in the .star file
 
-*   `--batch_size`: Number of particles to process simultaneously per job (Default: `64`)
+*   `--batch_size`: Number of particles per batch for inference (Default: `64`)
 
-*   `--n_jobs`: Number of parallel worker processes for distributed projection matching
+*   `--n_jobs`: Number of worker processes. Defaults to number of GPUs if CUDA enabled, otherwise 1
 
-*   `--num_dataworkers`: Number of parallel data loading workers per GPU. Each worker is a separate CPU process. Set to 0 to load data in the main thread (useful for debugging) (Default: `8`)
+*   `--num_dataworkers`: Number of parallel data loading workers per GPU. Each worker is a separate CPU process. Set to 0 to load data in the main thread (useful only for debugging). Try not to oversubscribe by asking more workers than CPUs (Default: `8`)
 
-*   `--use_cuda`: Enable GPU acceleration. If False, runs on CPU only (Default: `True`)
+*   `--use_cuda`: Enable GPU acceleration for inference. If False, runs on CPU only (Default: `True`)
 
 *   `--n_cpus_if_no_cuda`: Maximum CPU threads per worker when CUDA is disabled (Default: `4`)
 
@@ -208,7 +233,7 @@ cryopares_infer [ARGUMENTS] --config [CONFIG_OVERRIDES]
 
 *   `--subset_idxs`: List of particle indices to process (for debugging or partial processing)
 
-*   `--n_first_particles`: Process only the first N particles from dataset (for testing or validation)
+*   `--n_first_particles`: Process only the first N particles from dataset
 
 *   `--check_interval_secs`: Polling interval in seconds for parent loop in distributed processing (Default: `2.0`)
 
@@ -229,18 +254,19 @@ To avoid overfitting and to ensure a fair evaluation, cryo-EM datasets are often
     *   `matchingHalf`: Use the model from the corresponding half of the data (e.g., `half1` data with `half1` model). This is the default and recommended setting.
     *   `allCombinations`: Run inference for all possible combinations of data and model halves (e.g., `half1` data with `half1` model, `half1` data with `half2` model, etc.). 
 
-**Note:** Many of these parameters can also be set via `--config` (e.g., `--config projmatching.grid_step_degs=2.0`). However, using the direct CLI flags is recommended for commonly adjusted parameters.
+**Note:** Many of these parameters can also be set via `--config` (e.g., `--config projmatching.grid_step_degs=2.0`). However, using the direct CLI flags is recommended for commonly adjusted parameters. 
+To see all available configuration options, run `cryopares_infer --show-config`.
 
 For detailed API documentation, see the **[API Reference](https://rsanchezgarc.github.io/cryoPARES/api/)**.
 
-#### Daemon Mode
+#### Daemon Mode (On-the-fly)
 
 In daemon mode, the inference script runs continuously and watches for new particles to be added to a directory. This is useful for processing particles as they are being generated.
 
 The daemon workflow consists of three main components:
 
 1.  **Queue Manager:** A central server that manages a queue of jobs.
-2.  **Spooling Filler:** A script that monitors a directory for new `.star` files and adds them to the queue.
+2.  **Spooling Filler:** A script that monitors a directory for new `.star` files and adds them to the queue. You could implement other filler protocols using this module as an example.
 3.  **Daemon Inferencer:** One or more worker processes that take jobs from the queue and perform inference.
 
 **Workflow:**
@@ -261,7 +287,8 @@ The daemon workflow consists of three main components:
     python -m cryoPARES.inference.daemon.spoolingFiller --directory /path/to/watch
     ```
 
-    You can also use other mechanisms to add jobs to the queue.
+    You can also use other mechanisms to add jobs to the queue.  The key is to use the `cryoPARES.inference.daemon.queueManagerconnect_to_queue`
+context manager to connect to the queue.
 
 3.  **Start the Daemon Inferencer(s):**
 
@@ -274,18 +301,25 @@ The daemon workflow consists of three main components:
     # Worker 2
     python -m cryoPARES.inference.daemon.daemonInference --checkpoint_dir /path/to/checkpoint --results_dir /path/to/results_worker2 --particles_dir /path/to/particles
     ```
+The arguments accepted by daemonInference are mostly the same that the ones accepted by `cryopares_infer`
 
 4.  **Materialize the Volume:**
 
-    You can materialize the final 3D volume from the partial results at any time, even while the inferencers are still running. The script will combine all the available partial results.
+    You can materialize the final 3D volume from the partial results at any time, even while the inference workers are still running.
+    The script will combine all the available partial results.
 
     ```bash
-    python -m cryoPARES.inference.daemon.materializePartialResults --partial_outputs_dirs /path/to/results_*/ --output_mrc /path/to/final_map.mrc --output_star /path/to/final_particles.star
+    python -m cryoPARES.inference.daemon.materializePartialResults --partial_outputs_dirs /path/to/results_worker1/ /path/to/results_worker2 \
+     --output_mrc /path/to/final_map.mrc --output_star /path/to/final_particles.star
     ```
 
-### Projection Matching
+### Utility Tools
 
-If you have particles and a reference volume and want to align them without the full training/inference pipeline, use `cryopares_projmatching`. This performs a local search around existing particle orientations to find the best match against reference volume projections.
+CryoPARES includes standalone utility tools for projection matching and reconstruction. **Note:** These tools are automatically used within the `cryopares_infer` workflow, but can also be run independently if needed.
+
+#### Projection Matching
+
+The projection matching utility performs local pose refinement by searching around existing particle orientations to find the best match against reference volume projections. This is used automatically during inference for local refinement, but can also be run standalone.
 
 **Usage:**
 ```bash
@@ -342,9 +376,9 @@ cryopares_projmatching [ARGUMENTS]
 
 For additional details, see the [Command-Line Interface documentation](./docs/cli.md).
 
-### Reconstruction
+#### Reconstruction
 
-If you have particles with known poses (e.g., from RELION) and want to reconstruct the 3D map directly, use `cryopares_reconstruct`.
+The reconstruction utility creates a 3D volume from particles with known poses using direct Fourier inversion. This is used automatically during inference to generate the final 3D map, but can also be run standalone for particles aligned by other methods (e.g., RELION).
 
 **Usage:**
 ```bash
@@ -443,7 +477,7 @@ CryoPARES uses a flexible configuration system that allows you to manage setting
 *   **`--show-config`:** To see all available options, run any main script with the `--show-config` flag. This will print a comprehensive list of all parameters, their current values, and their paths.
 
     ```bash
-    python -m cryopares_train --show-config
+    cryopares_train --show-config
     ```
 
 *   **YAML Files:** Create a `.yaml` file with your desired parameters.
@@ -465,9 +499,9 @@ For a complete reference of all configuration parameters, see the **[Configurati
         --train_save_dir /path/to/training_output \
         --n_epochs 10 \
         --batch_size 64 \
-        --image_size_px_for_nnet 160 \
-        --sampling_rate_angs_for_nnet 1.5 \
-        --config models.image2sphere.lmax=6
+        --image_size_px_for_nnet 160 \ #The box size seen by the neural network will be 160.
+        --sampling_rate_angs_for_nnet 1.5 \ 
+        --config models.image2sphere.lmax=6 #lmax=6 to have a quick, low accuracy model
     ```
 
 2.  **Run inference on a new dataset with local refinement and reconstruction:**
@@ -480,27 +514,7 @@ For a complete reference of all configuration parameters, see the **[Configurati
         --reference_map /path/to/initial_model.mrc \
         --batch_size 64 \
         --grid_distance_degs 15 \
-        --directional_zscore_thr 2.0
-    ```
-
-3.  **Perform projection matching for quick alignment:**
-    ```bash
-    cryopares_projmatching \
-        --reference_vol /path/to/reference.mrc \
-        --particles_star_fname /path/to/particles.star \
-        --out_fname /path/to/aligned_particles.star \
-        --particles_dir /path/to/particles \
-        --grid_distance_degs 10 \
-        --grid_step_degs 2
-    ```
-
-4.  **Reconstruct a 3D map from aligned particles:**
-    ```bash
-    cryopares_reconstruct \
-        --particles_star_fname /path/to/aligned_particles.star \
-        --symmetry C1 \
-        --output_fname /path/to/output_map.mrc \
-        --particles_dir /path/to/particles
+        --directional_zscore_thr 1.0  #Remove all particles with directional zscore <1.0
     ```
 
 ## Getting Help
@@ -513,3 +527,17 @@ If you encounter issues:
 4. See the **[API Reference](https://rsanchezgarc.github.io/cryoPARES/api/)** for programmatic usage
 
 For bugs or feature requests, please open an issue on [GitHub](https://github.com/rsanchezgarc/cryoPARES/issues).
+
+## License and Attribution
+
+CryoPARES is licensed under the **GNU General Public License v3.0** (GPL-3.0). See the [LICENSE](LICENSE) file for details.
+
+### Third-Party Code
+
+This project incorporates code derived from the following open-source projects:
+
+- **[torch-fourier-slice](https://github.com/teamtomo/torch-fourier-slice)** (Copyright © 2023 Alister Burt, BSD 3-Clause License)
+  - Used in: `cryoPARES/reconstruction/insert_central_slices_rfft_3d.py`
+  - Used in: `cryoPARES/projmatching/projmatchingUtils/extract_central_slices_as_real.py`
+
+See [THIRD-PARTY-LICENSES](THIRD-PARTY-LICENSES) for complete license texts and attribution details.

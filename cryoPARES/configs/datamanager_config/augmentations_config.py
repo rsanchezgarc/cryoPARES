@@ -76,6 +76,15 @@ class Operations:
 
 @dataclass
 class Augmenter_config:
+    """Data augmentation configuration parameters."""
+
+    # Centralized parameter documentation
+    PARAM_DOCS = {
+        'min_n_augm_per_img': 'Minimum number of augmentation operations to apply per image',
+        'max_n_augm_per_img': 'Maximum number of augmentation operations to apply per image (TODO: Consider reducing to 4)',
+        'prob_augment_each_image': 'Probability of applying augmentation to each image (0.0 to 1.0)',
+    }
+
     min_n_augm_per_img: int = 1
     max_n_augm_per_img: int = 8 #TODO: We probably want to do 4 since, in the original code we have the swap between particle and proj
     prob_augment_each_image: float = 0.95

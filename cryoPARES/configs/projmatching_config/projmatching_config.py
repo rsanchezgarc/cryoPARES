@@ -12,6 +12,17 @@ class Projmatching_config:
         'grid_distance_degs': 'Maximum angular distance in degrees for local refinement search. Grid ranges from -grid_distance_degs to +grid_distance_degs around predicted pose',
         'grid_step_degs': 'Angular step size in degrees for grid search during local refinement',
         'top_k_poses_localref': 'Number of best matching poses to keep after local refinement',
+        'max_resolution_A': 'Maximum resolution in Angstroms for projection matching computations',
+        'max_shift_fraction': 'Maximum allowed in-plane shift as fraction of box size during local refinement',
+        'correct_ctf': 'Apply CTF correction during projection matching',
+        'verbose': 'Enable verbose logging output',
+        'disable_compile_projectVol': 'Disable torch.compile optimization for volume projection',
+        'compile_projectVol_mode': 'Compilation mode for volume projection: "default" or "max-autotune" (does not work with dynamic batches)',
+        'disable_compile_correlate_dft_2d': 'Disable torch.compile for 2D correlation (currently required as inductor does not support complex numbers)',
+        'compile_correlate_dft_2d_mode': 'Compilation mode for 2D correlation if enabled',
+        'disable_compile_analyze_cc': 'Disable torch.compile optimization for cross-correlation analysis',
+        'compile_analyze_cc_mode': 'Compilation mode for CC analysis: "default" or "max-autotune" (does not work with dynamic batches)',
+        'float32_matmul_precision': 'PyTorch float32 matrix multiplication precision mode ("highest", "high", or "medium")',
 
         # CLI-exposed parameters (used in projmatching_starfile)
         'reference_vol': 'Path to reference 3D volume (.mrc file) for generating projection templates',
@@ -25,11 +36,8 @@ class Projmatching_config:
         'num_dataworkers': 'Number of CPU workers per PyTorch DataLoader for data loading',
         'batch_size': 'Number of particles to process simultaneously per job',
         'use_cuda': 'Enable GPU acceleration. If False, runs on CPU only',
-        'verbose': 'Enable progress logging and status messages',
-        'float32_matmul_precision': 'PyTorch float32 matrix multiplication precision mode (highest/high/medium). Higher is more accurate but slower',
         'gpu_id': 'Specific GPU device ID to use (if multiple GPUs available)',
         'n_first_particles': 'Process only the first N particles from dataset (for testing or validation)',
-        'correct_ctf': 'Apply CTF correction during processing',
         'halfmap_subset': 'Select half-map subset (1 or 2) for half-map validation',
     }
 

@@ -20,17 +20,25 @@ class ConfigOverrideSystem:
 
     @staticmethod
     def print_config(config: Any, indent: int = 0, name: str = "config") -> None:
-        """Recursively print config structure and values."""
+        """Recursively print config structure and values with descriptions when available."""
         indent_str = "  " * indent
 
         if is_dataclass(config):
             print(f"{indent_str}{name}:")
+
+            # Try to get PARAM_DOCS if available
+            param_docs = getattr(config.__class__, 'PARAM_DOCS', {})
+
             for field in fields(config):
                 field_value = getattr(config, field.name)
                 if is_dataclass(field_value):
                     ConfigOverrideSystem.print_config(field_value, indent + 1, field.name)
                 else:
-                    print(f"{indent_str}  {field.name}: {field_value} ({type(field_value).__name__})")
+                    # Get description if available
+                    description = param_docs.get(field.name, "")
+                    desc_str = f"  # {description}" if description else ""
+
+                    print(f"{indent_str}  {field.name}: {field_value} ({type(field_value).__name__}){desc_str}")
         else:
             print(f"{indent_str}{name}: {config} ({type(config).__name__})")
 
@@ -48,7 +56,7 @@ class ConfigOverrideSystem:
                     paths.extend(ConfigOverrideSystem.get_all_config_paths(field_value, field_path))
                 else:
                     # Format as key=value (type) for display
-                    paths.append(f"{field_path} = {repr(field_value)} ({type(field_value).__name__})")
+                    paths.append(f"{field_path}={repr(field_value)} ({type(field_value).__name__})")
 
         return paths
 

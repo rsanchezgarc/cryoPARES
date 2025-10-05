@@ -1,0 +1,60 @@
+# Third-Party Licenses
+
+This file contains the licenses for third-party code included or derived in CryoPARES.
+
+---
+
+## torch-fourier-slice
+
+**Repository:** https://github.com/teamtomo/torch-fourier-slice
+**License:** BSD 3-Clause License
+**Copyright:** Copyright (c) 2023 Alister Burt
+**Used in:**
+- `cryoPARES/reconstruction/insert_central_slices_rfft_3d.py`
+- `cryoPARES/projmatching/projmatchingUtils/extract_central_slices_as_real.py`
+
+### License Text
+
+```
+BSD 3-Clause License
+
+Copyright (c) 2023, Alister Burt
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+---
+
+## Note on License Compatibility
+
+The BSD 3-Clause License is compatible with GPL-3.0. Code licensed under BSD 3-Clause
+can be incorporated into GPL-3.0 licensed projects. The combined work is distributed
+under the GPL-3.0 license, but the original BSD-licensed code retains its copyright
+notice and attribution requirements as specified above.
+
+CryoPARES is licensed under GPL-3.0 (see LICENSE file). The modifications and additions
+to the torch-fourier-slice derived code (Copyright (c) 2025 CryoPARES developers) are
+also licensed under GPL-3.0.

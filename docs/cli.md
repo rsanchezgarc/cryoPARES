@@ -33,7 +33,7 @@ cryopares_train [OPTIONS]
 | `--particles_dir` | Optional[List[str]] | None | Root directory for particle image paths. If paths in .star file are relative, this directory is prepended (similar to RELION project directory concept) |
 | `--n_epochs` | int | `100` | Number of training epochs. More epochs allow better convergence, although it does not help beyond a certain point |
 | `--batch_size` | int | `64` | Number of particles per batch. Try to make it as large as possible before running out of GPU memory. We advice using batch sizes of at least 32 images |
-| `--num_dataworkers` | int | `8` | Number of parallel data loading workers per GPU. Each worker is a separate CPU process. Set to 0 to load data in the main thread (useful for debugging) |
+| `--num_dataworkers` | int | `8` | Number of parallel data loading workers per GPU. Each worker is a separate CPU process. Set to 0 to load data in the main thread (useful only for debugging). Try not to oversubscribe by asking more workers than CPUs |
 | `--image_size_px_for_nnet` | int | `160` | Target image size in pixels for neural network input. After rescaling to target sampling rate, images are cropped or padded to this size |
 | `--sampling_rate_angs_for_nnet` | float | `1.5` | Target sampling rate in Angstroms/pixel for neural network input. Particle images are first rescaled to this sampling rate before processing |
 | `--mask_radius_angs` | Optional[float] | None | Radius of circular mask in Angstroms applied to particle images. If not provided, defaults to half the box size |
@@ -151,16 +151,16 @@ cryopares_infer [OPTIONS]
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `--particles_star_fname` | str | **Required** | Path to input STAR file with particle metadata |
-| `--checkpoint_dir` | str | **Required** | Path to training directory (or .zip file) containing half-set models with checkpoints and hyperparameters |
+| `--particles_star_fname` | str | **Required** | Path to input RELION particles .star file |
+| `--checkpoint_dir` | str | **Required** | Path to training directory (or .zip file) containing half-set models with checkpoints and hyperparameters. By default they are called version_0, version_1, etc. |
 | `--results_dir` | str | **Required** | Output directory for inference results including predicted poses and optional reconstructions |
 | `--data_halfset` | 'half1', 'half2', 'allParticles' | `allParticles` | Which particle half-set(s) to process: "half1", "half2", or "allParticles" |
 | `--model_halfset` | 'half1', 'half2', 'allCombinations', 'matchingHalf' | `matchingHalf` | Model half-set selection policy: "half1", "half2", "allCombinations", or "matchingHalf" (uses matching data/model pairs) |
 | `--particles_dir` | Optional[str] | None | Root directory for particle image paths. If provided, overrides paths in the .star file |
-| `--batch_size` | int | `64` | Number of particles to process simultaneously per job |
-| `--n_jobs` | Optional[int] | None | Number of parallel worker processes for distributed projection matching |
-| `--num_dataworkers` | int | `8` | Number of parallel data loading workers per GPU. Each worker is a separate CPU process. Set to 0 to load data in the main thread (useful for debugging) |
-| `--use_cuda` | bool | `True` | Enable GPU acceleration. If False, runs on CPU only |
+| `--batch_size` | int | `64` | Number of particles per batch for inference |
+| `--n_jobs` | Optional[int] | None | Number of worker processes. Defaults to number of GPUs if CUDA enabled, otherwise 1 |
+| `--num_dataworkers` | int | `8` | Number of parallel data loading workers per GPU. Each worker is a separate CPU process. Set to 0 to load data in the main thread (useful only for debugging). Try not to oversubscribe by asking more workers than CPUs |
+| `--use_cuda` | bool | `True` | Enable GPU acceleration for inference. If False, runs on CPU only |
 | `--n_cpus_if_no_cuda` | int | `4` | Maximum CPU threads per worker when CUDA is disabled |
 | `--compile_model` | bool | `False` | Compile model with torch.compile for faster inference (experimental, requires PyTorch 2.0+) |
 | `--top_k_poses_nnet` | int | `1` | Number of top pose predictions to retrieve from neural network before local refinement |
@@ -172,7 +172,7 @@ cryopares_infer [OPTIONS]
 | `--skip_localrefinement` | bool | `False` | Skip local pose refinement step and use only neural network predictions |
 | `--skip_reconstruction` | bool | `False` | Skip 3D reconstruction step and output only predicted poses |
 | `--subset_idxs` | Optional[List[int]] | None | List of particle indices to process (for debugging or partial processing) |
-| `--n_first_particles` | Optional[int] | None | Process only the first N particles from dataset (for testing or validation) |
+| `--n_first_particles` | Optional[int] | None | Process only the first N particles from dataset |
 | `--check_interval_secs` | float | `2.0` | Polling interval in seconds for parent loop in distributed processing |
 <!-- AUTO_GENERATED:inference_cli:END -->
 

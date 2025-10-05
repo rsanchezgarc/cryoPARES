@@ -223,10 +223,12 @@ def generate_inference_docs(output_format: str = "readme") -> str:
     """Generate documentation for cryopares_infer."""
     from cryoPARES.inference.infer import distributed_inference
 
+    # Note: Order matters! Later configs override earlier ones for conflicting param names.
+    # Inference_config must be last to ensure inference-specific n_jobs description is used.
     param_docs = collect_param_docs([
-        Inference_config,
         Projmatching_config,
-        DataManager_config
+        DataManager_config,
+        Inference_config  # Last so its n_jobs description wins
     ])
 
     params = extract_function_params(distributed_inference, param_docs)

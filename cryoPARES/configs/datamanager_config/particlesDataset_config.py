@@ -20,8 +20,14 @@ class ParticlesDataset_config():
     # Centralized parameter documentation
     PARAM_DOCS = {
         'sampling_rate_angs_for_nnet': 'Target sampling rate in Angstroms/pixel for neural network input. Particle images are first rescaled to this sampling rate before processing',
-        'image_size_px_for_nnet': 'Target image size in pixels for neural network input. After rescaling to target sampling rate, images are cropped or padded to this size',
+        'image_size_px_for_nnet': 'Target image size in pixels for neural network input. After rescaling to target sampling rate, images are cropped or padded to this size. We recommend tight box-sizes',
         'mask_radius_angs': 'Radius of circular mask in Angstroms applied to particle images. If not provided, defaults to half the box size',
+        'store_data_in_memory': 'Cache particle images in RAM for faster data loading (requires sufficient memory)',
+        'apply_mask_to_img': 'Apply circular mask to particle images. If False, mask is only used for computing normalization statistics',
+        'min_maxProb': 'Minimum maximum probability threshold for filtering particles. Particles with maxProb below this value are excluded',
+        'perImg_normalization': 'Per-image normalization method: "none", "noiseStats" (normalize using noise region statistics), or "subtractMean"',
+        'ctf_correction': 'CTF correction method: "none", "phase_flip", "concat_phase_flip" (concatenate original and phase-flipped), or "ctf_multiply"',
+        'reduce_symmetry_in_label': 'TODO: Document this parameter',
     }
 
     sampling_rate_angs_for_nnet: float = 1.5

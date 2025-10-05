@@ -23,6 +23,14 @@ Welcome to the CryoPARES documentation! This directory contains comprehensive gu
   - Common configuration recipes
   - YAML config file usage
 
+- **[Scripts Guide](scripts_guide.md)** - Utility scripts for analysis and visualization
+  - GMM histogram analysis (auto-used in training)
+  - FSC computation (auto-used in inference)
+  - Pose comparison and validation
+  - Learning curve visualization
+  - STAR file inspection tools
+  - Checkpoint packaging
+
 - **[Troubleshooting Guide](troubleshooting.md)** - Solutions to common issues
   - Installation problems
   - File system issues
@@ -49,6 +57,11 @@ Welcome to the CryoPARES documentation! This directory contains comprehensive gu
   - `cryopares_projmatching` - Projection matching
   - `compactify_checkpoint` - Package checkpoints
 
+- **[Scripts Guide](scripts_guide.md)** - Utility scripts reference
+  - Analysis and visualization tools
+  - Automatic vs manual usage
+  - Integration with main pipeline
+
 ## Quick Links by Task
 
 ### I want to train a model
@@ -72,12 +85,19 @@ Welcome to the CryoPARES documentation! This directory contains comprehensive gu
 ### Training is too slow
 → See "Performance Issues" in [Troubleshooting Guide](troubleshooting.md) and "Advanced Training Options" in [Training Guide](training_guide.md)
 
+### I want to analyze my results
+→ See [Scripts Guide](scripts_guide.md) for pose comparison, histogram analysis, and learning curve visualization
+
+### I want to inspect STAR file metadata
+→ Use `hists_from_starfile` - see [Scripts Guide](scripts_guide.md)
+
 ## Document Overview
 
 | Document | Purpose | Target Audience |
 |----------|---------|-----------------|
 | Training Guide | Learn how to train models effectively | Users training models |
 | Configuration Guide | Understand all configuration parameters | All users |
+| Scripts Guide | Use analysis and visualization tools | Users analyzing results |
 | Troubleshooting Guide | Fix common problems | Users encountering issues |
 | API Reference (auto-generated) | Programmatic usage with type hints | Developers, advanced users |
 | CLI Reference | Command-line tool usage | All users |

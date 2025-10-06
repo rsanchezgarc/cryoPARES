@@ -22,6 +22,8 @@ collection and analysis.
 For a detailed explanation of the method, please refer to our paper:
 [Supervised Deep Learning for Efficient Cryo-EM Image Alignment in Drug Discovery](https://www.biorxiv.org/content/10.1101/2025.03.04.641536)
 
+> 📚 **Documentation:** See the [full documentation](https://rsanchezgarc.github.io/cryoPARES) for detailed instructions on training, configuration, CLI reference, troubleshooting, and API reference.
+
 ## Table of Contents
 
 - [Installation](#installation)
@@ -35,6 +37,11 @@ For a detailed explanation of the method, please refer to our paper:
     - [Reconstruction](#reconstruction)
   - [Checkpoint Compactification](#checkpoint-compactification)
 - [Documentation](#documentation)
+  - [Training Guide](./docs/training_guide.md)
+  - [API Reference](https://rsanchezgarc.github.io/cryoPARES/api/)
+  - [Configuration Guide](./docs/configuration_guide.md)
+  - [Troubleshooting Guide](./docs/troubleshooting.md)
+  - [CLI Reference](./docs/cli.md)
   - [Configuration System](#configuration-system)
 - [Example Workflow](#example-workflow)
 - [Getting Help](#getting-help)
@@ -406,7 +413,7 @@ cryopares_projmatching [ARGUMENTS] [--config [CONFIG_OVERRIDES]] [--show-config]
 
 *   `--use_cuda`: Enable GPU acceleration. If False, runs on CPU only (Default: `True`)
 
-*   `--verbose`: Enable verbose logging output (Default: `True`)
+*   `--verbose`: Enable verbose logging output (Default: `False`)
 
 *   `--float32_matmul_precision`: PyTorch float32 matrix multiplication precision mode ("highest", "high", or "medium") (Default: `high`)
 

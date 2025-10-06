@@ -274,12 +274,12 @@ cryopares_projmatching [OPTIONS]
 | `--num_dataworkers` | int | `1` | Number of CPU workers per PyTorch DataLoader for data loading |
 | `--batch_size` | int | `1024` | Number of particles to process simultaneously per job |
 | `--use_cuda` | bool | `True` | Enable GPU acceleration. If False, runs on CPU only |
-| `--verbose` | bool | `True` | Enable verbose logging output |
+| `--verbose` | bool | `False` | Enable verbose logging output |
 | `--float32_matmul_precision` | 'highest', 'high', 'medium' | `high` | PyTorch float32 matrix multiplication precision mode ("highest", "high", or "medium") |
 | `--gpu_id` | Optional[int] | None | Specific GPU device ID to use (if multiple GPUs available) |
 | `--n_first_particles` | Optional[int] | None | Process only the first N particles from dataset (for testing or validation) |
 | `--correct_ctf` | bool | `True` | Apply CTF correction during projection matching |
-| `--halfmap_subset` | Optional['1', '2'] | None | Select half-map subset (1 or 2) for half-map validation |
+| `--halfmap_subset` | Optional['1', '2' | None | Select half-map subset (1 or 2) for half-map validation |
 <!-- AUTO_GENERATED:projmatching_cli:END -->
 
 ### Example
@@ -323,7 +323,7 @@ cryopares_reconstruct [OPTIONS]
 | `--use_only_n_first_batches` | Optional[int] | None | Reconstruct using only first N batches (for testing or quick validation) |
 | `--float32_matmul_precision` | Optional[str] | `high` | PyTorch float32 matrix multiplication precision mode ("highest", "high", or "medium") |
 | `--weight_with_confidence` | bool | `False` | Apply per-particle confidence weighting during backprojection. If True, particles with higher confidence contribute more to reconstruction. It reads the confidence from the metadata label "rlnParticleFigureOfMerit" |
-| `--halfmap_subset` | Optional['1', '2'] | None | Select half-map subset (1 or 2) for half-map reconstruction and validation |
+| `--halfmap_subset` | Optional['1', '2' | None | Select half-map subset (1 or 2) for half-map reconstruction and validation |
 <!-- AUTO_GENERATED:reconstruct_cli:END -->
 
 ### Example

@@ -184,24 +184,27 @@ class SingleInferencer:
         :param rank: The rank of the current process in a distributed setup.
         """
 
+        # Detect actual halfset directory (handles allParticles vs half1/half2)
+        actual_halfset = self._detect_actual_halfset(self._checkpoint_reader, self.model_halfset)
+
         # Try to load SO3 model (prefer TorchScript, fallback to checkpoint)
         try:
-            model_path = f"{self.model_halfset}/checkpoints/{BEST_MODEL_SCRIPT_BASENAME}"
+            model_path = f"{actual_halfset}/checkpoints/{BEST_MODEL_SCRIPT_BASENAME}"
             so3Model = self._checkpoint_reader.load_jit(model_path)
         except (ValueError, IOError, FileNotFoundError):
             try:
-                model_path = f"{self.model_halfset}/checkpoints/{BEST_CHECKPOINT_BASENAME}"
+                model_path = f"{actual_halfset}/checkpoints/{BEST_CHECKPOINT_BASENAME}"
                 # For PlModel.load_from_checkpoint, we need a real file path
                 so3Model_fname = self._checkpoint_reader.get_real_path(model_path)
                 so3Model = PlModel.load_from_checkpoint(so3Model_fname)
             except FileNotFoundError:
-                model_path = f"{self.model_halfset}/checkpoints/last.ckpt"
+                model_path = f"{actual_halfset}/checkpoints/last.ckpt"
                 so3Model_fname = self._checkpoint_reader.get_real_path(model_path)
                 so3Model = PlModel.load_from_checkpoint(so3Model_fname)
 
         # Try to load directional normalizer
         try:
-            normalizer_path = f"{self.model_halfset}/checkpoints/{BEST_DIRECTIONAL_NORMALIZER}"
+            normalizer_path = f"{actual_halfset}/checkpoints/{BEST_DIRECTIONAL_NORMALIZER}"
             percentilemodel = self._checkpoint_reader.load_torch(normalizer_path, weights_only=False)
         except FileNotFoundError:
             assert self.directional_zscore_thr is None, ("Error, if no percentilemodel available, you cannot set a "
@@ -213,7 +216,7 @@ class SingleInferencer:
         # Get reference map
         if self.reference_map is None:
             # Need real path for mrcfile
-            reference_map_path = f"{self.model_halfset}/reconstructions/0.mrc"
+            reference_map_path = f"{actual_halfset}/reconstructions/0.mrc"
             reference_map = self._checkpoint_reader.get_real_path(reference_map_path)
         else:
             reference_map = self.reference_map
@@ -262,6 +265,32 @@ class SingleInferencer:
         return self._get_symmetry(self._checkpoint_reader, self.model_halfset)
 
     @staticmethod
+    def _detect_actual_halfset(checkpoint_reader: CheckpointReader, model_halfset: str) -> str:
+        """
+        Detects the actual halfset directory in the checkpoint.
+        If checkpoint was trained with --NOT_split_halves, it will have 'allParticles' instead of 'half1'/'half2'.
+
+        :param checkpoint_reader: CheckpointReader instance
+        :param model_halfset: Requested model half-set name
+        :return: The actual halfset directory name to use
+        """
+        # If allParticles is requested, use it
+        if model_halfset == "allParticles":
+            return "allParticles"
+
+        # If half1/half2 is requested, check if allParticles exists instead
+        if model_halfset in ["half1", "half2"]:
+            if checkpoint_reader.exists("allParticles/hparams.yaml") and not checkpoint_reader.exists(f"{model_halfset}/hparams.yaml"):
+                warnings.warn(
+                    f"Checkpoint was trained with --NOT_split_halves. "
+                    f"Using 'allParticles' model for requested halfset '{model_halfset}'. "
+                    f"Note: FSC between halves can be overoptimistic as both halves use the same model."
+                )
+                return "allParticles"
+
+        return model_halfset
+
+    @staticmethod
     def _get_symmetry(checkpoint_reader: CheckpointReader, model_halfset: str):
         """
         Retrieves the symmetry value from the `hparams.yaml` file in the checkpoint directory.
@@ -271,7 +300,8 @@ class SingleInferencer:
         :return: The symmetry value.
         :raises RuntimeError: If the symmetry cannot be loaded from the file.
         """
-        hparams_path = f"{model_halfset}/hparams.yaml"
+        actual_halfset = SingleInferencer._detect_actual_halfset(checkpoint_reader, model_halfset)
+        hparams_path = f"{actual_halfset}/hparams.yaml"
         try:
             hparams_text = checkpoint_reader.read_text(hparams_path)
             symmetry = yaml.safe_load(hparams_text)["symmetry"]
@@ -379,7 +409,8 @@ class SingleInferencer:
             for data_halfset in data_halfset_list:
                 self.model_halfset = data_halfset if model_halfset is None else model_halfset
                 self.data_halfset = data_halfset
-                print(f"Running inference for data {self.data_halfset} with model {self.model_halfset}")
+                actual_model_dir = self._detect_actual_halfset(self._checkpoint_reader, self.model_halfset)
+                print(f"Running inference for data {self.data_halfset} with model {actual_model_dir}")
                 out = self._run()
                 if self._model and not self.skip_reconstruction and hasattr(self._model, "reconstructor"):
                     sampling_rate = self._model.reconstructor.sampling_rate

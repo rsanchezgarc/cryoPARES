@@ -207,8 +207,28 @@ class ConfigOverrideSystem:
                         if field_type:
                             value = ConfigOverrideSystem.convert_to_enum_if_needed(value, field_type)
 
+                        # Handle Path conversion
                         if field_type == Path or (isinstance(current_value, Path) and not isinstance(value, Path)):
                             value = Path(value)
+
+                        # Handle basic type conversion (int, float, str, bool)
+                        # This ensures that values parsed as strings like '1e-3' are converted to their proper types
+                        if field_type and not isinstance(value, field_type):
+                            origin_type = get_origin(field_type)
+                            # Handle Optional types
+                            if origin_type is Union:
+                                # For Optional[T], extract the non-None type
+                                for arg in get_args(field_type):
+                                    if arg is not type(None):
+                                        field_type = arg
+                                        break
+
+                            # Convert to the target type
+                            if field_type in (int, float, str, bool) and not isinstance(value, field_type):
+                                try:
+                                    value = field_type(value)
+                                except (ValueError, TypeError):
+                                    pass  # Keep original value if conversion fails
 
                         setattr(config, key, value)
                         if verbose: print(f"Set {current_path} = {value}")

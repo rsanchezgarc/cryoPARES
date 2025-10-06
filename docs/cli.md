@@ -9,6 +9,7 @@ This document provides instructions for using the command-line tools included wi
 - [`cryopares_projmatching`](#cryopares_projmatching) - Align particles via projection matching
 - [`cryopares_reconstruct`](#cryopares_reconstruct) - Reconstruct 3D volume from aligned particles
 - [`compactify_checkpoint`](#compactify_checkpoint) - Package checkpoint for distribution
+- [Utility Scripts](#utility-scripts) - Analysis and visualization tools
 
 ---
 
@@ -32,12 +33,12 @@ cryopares_train [OPTIONS]
 | `--train_save_dir` | str | **Required** | Output directory where model checkpoints, logs, and training artifacts will be saved |
 | `--particles_dir` | Optional[List[str]] | None | Root directory for particle image paths. If paths in .star file are relative, this directory is prepended (similar to RELION project directory concept) |
 | `--n_epochs` | int | `100` | Number of training epochs. More epochs allow better convergence, although it does not help beyond a certain point |
-| `--batch_size` | int | `64` | Number of particles per batch. Try to make it as large as possible before running out of GPU memory. We advice using batch sizes of at least 32 images |
+| `--batch_size` | int | `32` | Number of particles per batch. Try to make it as large as possible before running out of GPU memory. We advice using batch sizes of at least 32 images |
 | `--num_dataworkers` | int | `8` | Number of parallel data loading workers per GPU. Each worker is a separate CPU process. Set to 0 to load data in the main thread (useful only for debugging). Try not to oversubscribe by asking more workers than CPUs |
-| `--image_size_px_for_nnet` | int | `160` | Target image size in pixels for neural network input. After rescaling to target sampling rate, images are cropped or padded to this size |
+| `--image_size_px_for_nnet` | int | `160` | Target image size in pixels for neural network input. After rescaling to target sampling rate, images are cropped or padded to this size. We recommend tight box-sizes |
 | `--sampling_rate_angs_for_nnet` | float | `1.5` | Target sampling rate in Angstroms/pixel for neural network input. Particle images are first rescaled to this sampling rate before processing |
 | `--mask_radius_angs` | Optional[float] | None | Radius of circular mask in Angstroms applied to particle images. If not provided, defaults to half the box size |
-| `--split_halfs` | bool | `True` | If True (default), trains two separate models on data half-sets for cross-validation. Use --NOT_split_halfs to train single model on all data |
+| `--split_halves` | bool | `True` | If True (default), trains two separate models on data half-sets for cross-validation. Use --NOT_split_halves to train single model on all data |
 | `--continue_checkpoint_dir` | Optional[str] | None | Path to checkpoint directory to resume training from a previous run |
 | `--finetune_checkpoint_dir` | Optional[str] | None | Path to checkpoint directory to fine-tune a pre-trained model on new dataset |
 | `--compile_model` | bool | `False` | Enable torch.compile for faster training (experimental) |
@@ -172,7 +173,7 @@ cryopares_infer [OPTIONS]
 | `--skip_localrefinement` | bool | `False` | Skip local pose refinement step and use only neural network predictions |
 | `--skip_reconstruction` | bool | `False` | Skip 3D reconstruction step and output only predicted poses |
 | `--subset_idxs` | Optional[List[int]] | None | List of particle indices to process (for debugging or partial processing) |
-| `--n_first_particles` | Optional[int] | None | Process only the first N particles from dataset |
+| `--n_first_particles` | Optional[int] | None | Process only the first N particles from dataset (debug feature) |
 | `--check_interval_secs` | float | `2.0` | Polling interval in seconds for parent loop in distributed processing |
 <!-- AUTO_GENERATED:inference_cli:END -->
 
@@ -273,12 +274,12 @@ cryopares_projmatching [OPTIONS]
 | `--num_dataworkers` | int | `1` | Number of CPU workers per PyTorch DataLoader for data loading |
 | `--batch_size` | int | `1024` | Number of particles to process simultaneously per job |
 | `--use_cuda` | bool | `True` | Enable GPU acceleration. If False, runs on CPU only |
-| `--verbose` | bool | `True` | Enable progress logging and status messages |
-| `--float32_matmul_precision` | 'highest', 'high', 'medium' | `high` | PyTorch float32 matrix multiplication precision mode (highest/high/medium). Higher is more accurate but slower |
+| `--verbose` | bool | `True` | Enable verbose logging output |
+| `--float32_matmul_precision` | 'highest', 'high', 'medium' | `high` | PyTorch float32 matrix multiplication precision mode ("highest", "high", or "medium") |
 | `--gpu_id` | Optional[int] | None | Specific GPU device ID to use (if multiple GPUs available) |
 | `--n_first_particles` | Optional[int] | None | Process only the first N particles from dataset (for testing or validation) |
-| `--correct_ctf` | bool | `True` | Apply CTF correction during processing |
-| `--halfmap_subset` | Optional['1', '2' | None | Select half-map subset (1 or 2) for half-map validation |
+| `--correct_ctf` | bool | `True` | Apply CTF correction during projection matching |
+| `--halfmap_subset` | Optional['1', '2'] | None | Select half-map subset (1 or 2) for half-map validation |
 <!-- AUTO_GENERATED:projmatching_cli:END -->
 
 ### Example
@@ -320,9 +321,9 @@ cryopares_reconstruct [OPTIONS]
 | `--eps` | float | `0.001` | Regularization constant for reconstruction (ideally set to 1/SNR). Prevents division by zero and stabilizes reconstruction |
 | `--min_denominator_value` | Optional[float] | None | Minimum value for denominator to prevent numerical instabilities during reconstruction |
 | `--use_only_n_first_batches` | Optional[int] | None | Reconstruct using only first N batches (for testing or quick validation) |
-| `--float32_matmul_precision` | Optional[str] | `high` | PyTorch float32 matrix multiplication precision mode (highest/high/medium). Higher is more accurate but slower |
-| `--weight_with_confidence` | bool | `False` | Apply per-particle confidence weighting during backprojection. If True, particles with higher confidence contribute more to reconstruction |
-| `--halfmap_subset` | Optional['1', '2' | None | Select half-map subset (1 or 2) for half-map reconstruction and validation |
+| `--float32_matmul_precision` | Optional[str] | `high` | PyTorch float32 matrix multiplication precision mode ("highest", "high", or "medium") |
+| `--weight_with_confidence` | bool | `False` | Apply per-particle confidence weighting during backprojection. If True, particles with higher confidence contribute more to reconstruction. It reads the confidence from the metadata label "rlnParticleFigureOfMerit" |
+| `--halfmap_subset` | Optional['1', '2'] | None | Select half-map subset (1 or 2) for half-map reconstruction and validation |
 <!-- AUTO_GENERATED:reconstruct_cli:END -->
 
 ### Example
@@ -436,7 +437,99 @@ cryopares_infer \
 
 CryoPARES automatically detects ZIP files and reads models directly from the archive without extraction.
 
-### See Also
+---
+
+## Utility Scripts
+
+CryoPARES includes several utility scripts for analysis, visualization, and model management.
+
+### GMM Histogram Analysis
+
+**Script:** `cryoPARES.scripts.gmm_hists`
+**Automatic Usage:** Yes - Called during training to estimate confidence thresholds
+**Manual Usage:** Yes - Can be run standalone for analysis
+
+Analyzes and compares score distributions between "good" (aligned) and "bad" (misaligned) particle populations using Gaussian Mixture Models (GMMs). Automatically estimates optimal thresholds for filtering low-quality particles.
+
+**CLI Usage:**
+```bash
+python -m cryoPARES.scripts.gmm_hists \
+    --fname_good aligned.star \
+    --fname_bad misaligned.star \
+    --plot_fname results/distributions.png
+```
+
+### FSC Computation
+
+**Script:** `cryoPARES.scripts.computeFsc`
+**Automatic Usage:** Yes - Called during inference when reconstructing volumes
+**Manual Usage:** Yes - Can be run standalone for FSC analysis
+
+Computes Fourier Shell Correlation (FSC) between two 3D volumes to assess resolution.
+
+**CLI Usage:**
+```bash
+python -m cryoPARES.scripts.computeFsc \
+    --fname_vol_half1 half1.mrc \
+    --fname_vol_half2 half2.mrc \
+    --fname_fsc_out fsc_curve.txt \
+    --show_plot
+```
+
+### Pose Comparison
+
+**Script:** `cryoPARES.scripts.compare_poses`
+**Automatic Usage:** No - Manual analysis tool only
+**Manual Usage:** Yes
+
+Compares predicted particle orientations between two STAR files to evaluate pose accuracy.
+
+**CLI Usage:**
+```bash
+python -m cryoPARES.scripts.compare_poses \
+    --starfile1 predicted_poses.star \
+    --starfile2 ground_truth_poses.star \
+    --symmetry C1 \
+    --output_plot error_histogram.png
+```
+
+### Learning Curve Visualization
+
+**Script:** `cryoPARES.scripts.plot_learning_curve`
+**Automatic Usage:** No - Manual visualization tool only
+**Manual Usage:** Yes
+
+Visualizes training metrics from PyTorch Lightning CSV logs to monitor training progress.
+
+**CLI Usage:**
+```bash
+python -m cryoPARES.scripts.plot_learning_curve \
+    --csv_file /path/to/training/version_0/metrics.csv \
+    --skip_steps 100 \
+    --log_scale
+```
+
+### STAR File Histograms
+
+**Script:** `cryoPARES.scripts.hists_from_starfile`
+**Automatic Usage:** No - Manual analysis tool only
+**Manual Usage:** Yes
+
+Generates histograms of any metadata column(s) from RELION STAR files.
+
+**CLI Usage:**
+```bash
+python -m cryoPARES.scripts.hists_from_starfile \
+    --input particles.star \
+    --cols rlnDirectionalZScore rlnDefocusU \
+    --output histograms.png
+```
+
+---
+
+## See Also
 
 - [Training Guide](training_guide.md) - How to train models
+- [Configuration Guide](configuration_guide.md) - All configuration parameters
+- [Troubleshooting Guide](troubleshooting.md) - Common issues and solutions
 - [API Reference](https://rsanchezgarc.github.io/cryoPARES/api/) - Programmatic usage

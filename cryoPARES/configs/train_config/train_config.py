@@ -42,7 +42,7 @@ class Train_config:
         'particles_star_fname': 'Path(s) to RELION 3.1+ format .star file(s) containing pre-aligned particles. Can accept multiple files',
         'train_save_dir': 'Output directory where model checkpoints, logs, and training artifacts will be saved',
         'particles_dir': 'Root directory for particle image paths. If paths in .star file are relative, this directory is prepended (similar to RELION project directory concept)',
-        'split_halfs': 'If True (default), trains two separate models on data half-sets for cross-validation. Use --NOT_split_halfs to train single model on all data',
+        'split_halves': 'If True (default), trains two separate models on data half-sets for cross-validation. Use --NOT_split_halves to train single model on all data',
         'continue_checkpoint_dir': 'Path to checkpoint directory to resume training from a previous run',
         'finetune_checkpoint_dir': 'Path to checkpoint directory to fine-tune a pre-trained model on new dataset',
         'compile_model': 'Enable torch.compile for faster training (experimental)',
@@ -61,7 +61,7 @@ class Train_config:
 
     n_epochs: int = 100
     learning_rate: float = 1e-3
-    batch_size: int = 64
+    batch_size: int = 32
     accumulate_grad_batches: int = 16
     weight_decay: float = 1e-5
 

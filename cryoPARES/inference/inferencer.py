@@ -515,6 +515,12 @@ class SingleInferencer:
             result = self._process_batch(model, batch=None, batch_idx=-1, gpu_offload=gpu_offload)  # batch=None flushes the model buffer
             if result is not None:
                 all_results.append(result)
+
+        # Warn if no particles passed the directional_zscore threshold
+        if not all_results and self.directional_zscore_thr is not None:
+            warnings.warn(f"No particles passed directional_zscore_thr={self.directional_zscore_thr}. "
+                         f"All particles were filtered out. Consider lowering the threshold or setting it to None.")
+
         return all_results
 
     def _save_reconstruction(self, save_to_file: bool = True, materialize: bool = True):

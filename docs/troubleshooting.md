@@ -5,6 +5,7 @@ This guide covers common issues and their solutions when using CryoPARES.
 ## Table of Contents
 
 - [Installation Issues](#installation-issues)
+- [Configuration Issues](#configuration-issues)
 - [File System Issues](#file-system-issues)
 - [Memory Issues](#memory-issues)
 - [Training Issues](#training-issues)
@@ -35,10 +36,6 @@ conda activate cryopares_fresh
 
 2. Install in order:
 ```bash
-# Install PyTorch first
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
-
-# Then install cryoPARES
 pip install git+https://github.com/rsanchezgarc/cryoPARES.git
 ```
 
@@ -84,8 +81,56 @@ Reinstall PyTorch with correct CUDA version:
 nvidia-smi
 
 # Install matching PyTorch (example for CUDA 11.8)
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+pip install --force-reinstall numpy scikit-image scipy torch torchvision --index-url https://download.pytorch.org/whl/cu118
+pip install -e .
+
 ```
+
+---
+
+## Configuration Issues
+
+### Type mismatch errors when using --config
+
+**Symptoms:**
+```
+TypeError: argument must be int, not float
+ValueError: could not convert string to float
+```
+
+**Cause:** Parameter types must match exactly when using `--config` overrides.
+
+**Solution:**
+
+**Always match the parameter type:**
+
+1. **For float parameters** - include a decimal point:
+   ```bash
+   # Correct:
+   --config train.learning_rate=1e-3
+   --config datamanager.particlesDataset.sampling_rate_angs_for_nnet=2.0
+
+   # Wrong:
+   --config train.learning_rate=1      # Missing decimal - will fail!
+   --config sampling_rate_angs_for_nnet=2  # Missing decimal - will fail!
+   ```
+
+2. **For int parameters** - do NOT include a decimal point:
+   ```bash
+   # Correct:
+   --config models.image2sphere.lmax=8
+   --config train.n_epochs=100
+
+   # Wrong:
+   --config models.image2sphere.lmax=8.0    # Has decimal - will fail!
+   --config train.n_epochs=100.0            # Has decimal - will fail!
+   ```
+
+3. **Check parameter types:**
+   ```bash
+   python -m cryopares_train --show-config | grep parameter_name
+   # Look for (int) or (float) annotation
+   ```
 
 ---
 
@@ -98,7 +143,7 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
 OSError: [Errno 24] Too many open files
 ```
 
-**Root cause:** CryoPARES opens file handlers for each `.mrcs` file in the .star file.
+**Root cause:** CryoPARES opens one file handler for each `.mrcs` file in the .star file.
 
 **Solutions:**
 
@@ -112,6 +157,7 @@ ulimit -n 65536
 echo "ulimit -n 65536" >> ~/.bashrc
 source ~/.bashrc
 ```
+If you cannot set it to a large enough number, join your particles stacsk into a smaller number of .mrcs files
 
 3. **System-wide fix** (requires root):
 ```bash
@@ -167,6 +213,7 @@ FileNotFoundError: Particle file not found: /path/to/particles/...
 ```bash
 # If .star file has relative paths like:
 # MotionCorr/job01/particles_001.mrcs
+#And the MotionCorr directory is at  /path/to/relion/project/
 
 # Use:
 --particles_dir /path/to/relion/project/
@@ -326,7 +373,7 @@ python -m cryopares_train \
     --n_epochs 100 \
     --overfit_batches 10
 ```
-If model can't overfit 10 batches, there's a bug.
+
 
 3. **Check symmetry:**
 Wrong symmetry can make training impossible.
@@ -443,8 +490,9 @@ Verify symmetry matches training
 
 1. **Insufficient local refinement:**
 ```bash
---config projmatching.grid_distance_degs=15.0
+--config projmatching.grid_distance_degs=10.0
 ```
+Note. Increasing this parameter will make running times and memory consumption massively grow.
 
 2. **Too strict confidence filtering:**
 ```bash
@@ -488,12 +536,15 @@ Verify you're using the correct trained model
 
 1. **Increase batch size:**
 ```bash
---batch_size 2048
+--batch_size 64
 ```
+But this increases GPU memory consumption
 
 2. **Reduce top_k predictions:**
+If you enabled inference.top_k_poses_nnet>1, then decrease the number
+3. 
 ```bash
---config inference.top_k_poses_nnet=5
+--config inference.top_k_poses_nnet=1
 ```
 
 3. **Skip reconstruction if not needed:**
@@ -547,8 +598,8 @@ For **training**, you need pre-aligned particles with:
 - `_rlnAngleRot`
 - `_rlnAngleTilt`
 - `_rlnAnglePsi`
-- `_rlnOriginXAngst` (or `_rlnOriginX`)
-- `_rlnOriginYAngst` (or `_rlnOriginY`)
+- `_rlnOriginXAngst`
+- `_rlnOriginYAngst`
 
 For **inference**, orientations are optional (will be predicted).
 
@@ -565,14 +616,6 @@ Re-center particles in RELION:
 2. Run 2D or 3D classification
 3. Re-extract centered particles
 
-Or use CryoPARES projection matching from random initialization:
-```bash
-cryopares_projmatching \
-    --reference_vol /path/to/initial_model.mrc \
-    --particles_star_fname unaligned.star \
-    --out_fname aligned.star \
-    --grid_distance_degs 30  # Large range for initial alignment
-```
 
 ### Different sampling rate in data vs. reference
 
@@ -631,13 +674,15 @@ CryoPARES automatically uses all available GPUs
 
 5. **Reduce model complexity:**
 ```bash
---config models.image2sphere.lmax=6
+--config models.image2sphere.lmax=12
 ```
 
 6. **Check data loading is not bottleneck:**
 ```bash
 --num_dataworkers 8
 ```
+You might want to use `top`/`htop` to monitor CPU usage as well as IO. If you see your workers in S status,
+it is a sign of IO bottleneck.
 
 7. **Use faster precision:**
 ```bash
@@ -650,17 +695,17 @@ CryoPARES automatically uses all available GPUs
 
 1. **Increase batch size:**
 ```bash
---batch_size 4096
+--batch_size 64
 ```
 
 2. **Reduce angular search range:**
 ```bash
---config projmatching.grid_distance_degs=5.0
+--config projmatching.grid_distance_degs=4.0
 ```
 
-3. **Skip local refinement (if acceptable):**
+3. **Skip local refinement (if acceptable): and reconstruction**
 ```bash
---config inference.skip_localrefinement=True
+--config inference.skip_localrefinement=True inference.skip_reconstruction=True
 ```
 
 4. **Use coarser search:**
@@ -681,15 +726,10 @@ CryoPARES automatically uses all available GPUs
 --num_dataworkers 8
 ```
 
-2. **Enable in-memory caching (if enough RAM):**
-```bash
---config datamanager.particlesDataset.store_data_in_memory=True
-```
-
-3. **Use faster storage:**
+2. **Use faster storage:**
 Move data to local SSD instead of network drive
 
-4. **Reduce preprocessing:**
+3. **Reduce preprocessing:**
 Ensure images don't require heavy rescaling
 
 ---
@@ -709,13 +749,7 @@ nvidia-smi
 # Kill any zombie processes
 ```
 
-2. **Clear cache in code:**
-```python
-import torch
-torch.cuda.empty_cache()
-```
-
-3. **Reduce batch size:**
+2. **Reduce batch size:**
 Even if GPU shows free memory, fragmentation can prevent allocation
 
 ### Multiple GPUs not being used
@@ -768,7 +802,6 @@ nvidia-smi
 
 2. **CTF correction issues:**
    - Verify CTF parameters are correct
-   - Try different CTF correction: `--config datamanager.particlesDataset.ctf_correction="phase_flip"`
 
 3. **Mask too tight:**
 ```bash
@@ -782,22 +815,13 @@ Check how many particles passed filtering
 
 **Solutions:**
 
-1. **Use independent half-sets:**
-```bash
-# For half1:
---data_halfset half1 --model_halfset half1
-
-# For half2:
---data_halfset half2 --model_halfset half2
-```
-
-2. **More thorough local refinement:**
+1. **More thorough local refinement:**
 ```bash
 --config projmatching.grid_distance_degs=10.0 \
         projmatching.grid_step_degs=1.0
 ```
 
-3. **Filter particles more aggressively:**
+2. **Filter particles more aggressively:**
 ```bash
 --config inference.directional_zscore_thr=2.5
 ```
@@ -833,12 +857,7 @@ python -m cryopares_train \
 
 Training logs are saved to:
 ```
-train_save_dir/version_0/logs/
-```
-
-Inference logs:
-```
-results_dir/inference.log
+train_save_dir/version_0/half*/
 ```
 
 ### Report Issues

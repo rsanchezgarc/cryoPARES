@@ -123,17 +123,17 @@ cryopares_train [ARGUMENTS] [--config [CONFIG_OVERRIDES]] [--show-config]
 
 *   `--n_epochs`: Number of training epochs. More epochs allow better convergence, although it does not help beyond a certain point (Default: `100`)
 
-*   `--batch_size`: Number of particles per batch. Try to make it as large as possible before running out of GPU memory. We advice using batch sizes of at least 32 images (Default: `64`)
+*   `--batch_size`: Number of particles per batch. Try to make it as large as possible before running out of GPU memory. We advice using batch sizes of at least 32 images (Default: `32`)
 
 *   `--num_dataworkers`: Number of parallel data loading workers per GPU. Each worker is a separate CPU process. Set to 0 to load data in the main thread (useful only for debugging). Try not to oversubscribe by asking more workers than CPUs (Default: `8`)
 
-*   `--image_size_px_for_nnet`: Target image size in pixels for neural network input. After rescaling to target sampling rate, images are cropped or padded to this size (Default: `160`)
+*   `--image_size_px_for_nnet`: Target image size in pixels for neural network input. After rescaling to target sampling rate, images are cropped or padded to this size. We recommend tight box-sizes (Default: `160`)
 
 *   `--sampling_rate_angs_for_nnet`: Target sampling rate in Angstroms/pixel for neural network input. Particle images are first rescaled to this sampling rate before processing (Default: `1.5`)
 
 *   `--mask_radius_angs`: Radius of circular mask in Angstroms applied to particle images. If not provided, defaults to half the box size
 
-*   `--split_halfs`: If True (default), trains two separate models on data half-sets for cross-validation. Use --NOT_split_halfs to train single model on all data (Default: `True`)
+*   `--split_halves`: If True (default), trains two separate models on data half-sets for cross-validation. Use --NOT_split_halves to train single model on all data (Default: `True`)
 
 *   `--continue_checkpoint_dir`: Path to checkpoint directory to resume training from a previous run
 
@@ -233,7 +233,7 @@ cryopares_infer [ARGUMENTS] [--config [CONFIG_OVERRIDES]] [--show-config]
 
 *   `--subset_idxs`: List of particle indices to process (for debugging or partial processing)
 
-*   `--n_first_particles`: Process only the first N particles from dataset
+*   `--n_first_particles`: Process only the first N particles from dataset (debug feature)
 
 *   `--check_interval_secs`: Polling interval in seconds for parent loop in distributed processing (Default: `2.0`)
 
@@ -287,12 +287,57 @@ The daemon workflow consists of three main components:
     python -m cryoPARES.inference.daemon.spoolingFiller --directory /path/to/watch
     ```
 
-    You can also use other mechanisms to add jobs to the queue.  The key is to use the `cryoPARES.inference.daemon.queueManagerconnect_to_queue`
-context manager to connect to the queue.
+**Alternative: Manually Submit Jobs**
+
+You can also use other mechanisms to add jobs to the queue programmatically. The key is to use the
+`cryoPARES.inference.daemon.queueManager.queue_connection` context manager to connect to the queue
+and the `put()` method to add new `.star` files to be processed.
+
+**Example Python script to submit jobs:**
+
+```python
+from cryoPARES.inference.daemon.queueManager import queue_connection
+
+# Submit a single .star file
+with queue_connection(ip="localhost", port=50000, authkey="shared_queue_key") as queue:
+    queue.put("/path/to/particles.star")
+    print("Job submitted!")
+
+# Submit multiple .star files
+with queue_connection() as queue:  # Uses default connection settings
+    star_files = [
+        "/path/to/particles1.star",
+        "/path/to/particles2.star",
+        "/path/to/particles3.star"
+    ]
+    for star_file in star_files:
+        queue.put(star_file)
+    print(f"Submitted {len(star_files)} jobs")
+
+# Submit a .star file with a specific particle subset (advanced)
+import pandas as pd
+particles_subset = pd.read_csv("/path/to/particles.star", comment='#', delimiter=r'\s+')
+# Filter to specific particles, e.g., particles_subset = particles_subset[particles_subset['rlnImageName'].str.contains('mic001')]
+
+with queue_connection() as queue:
+    queue.put(("/path/to/particles.star", particles_subset))  # Tuple: (star_file, DataFrame)
+    print("Submitted job with particle subset")
+
+# Send poison pill to terminate workers gracefully
+with queue_connection() as queue:
+    queue.put(None)  # None acts as a poison pill
+    print("Sent termination signal to workers")
+```
+
+**Input formats:**
+- **String:** Path to a `.star` file (all particles will be processed)
+- **Tuple:** `(star_file_path, pd.DataFrame)` where the DataFrame contains a subset of particles to process
+- **None:** Poison pill to signal workers to terminate gracefully
+
 
 3.  **Start the Daemon Inferencer(s):**
 
-    You can start as many inferencer workers as you want. Each worker will take jobs from the queue and process them in parallel. **Important:** Each worker must have its own results directory.
+    You can start as many inference workers as you want. Each worker will take jobs from the queue and process them in parallel. **Important:** Each worker must have its own results directory.
 
     ```bash
     # Worker 1
@@ -301,7 +346,7 @@ context manager to connect to the queue.
     # Worker 2
     python -m cryoPARES.inference.daemon.daemonInference --checkpoint_dir /path/to/checkpoint --results_dir /path/to/results_worker2 --particles_dir /path/to/particles
     ```
-The arguments accepted by daemonInference are mostly the same that the ones accepted by `cryopares_infer`
+The arguments accepted by `daemonInference` are mostly the same that the ones accepted by `cryopares_infer`
 
 4.  **Materialize the Volume:**
 
@@ -361,15 +406,15 @@ cryopares_projmatching [ARGUMENTS] [--config [CONFIG_OVERRIDES]] [--show-config]
 
 *   `--use_cuda`: Enable GPU acceleration. If False, runs on CPU only (Default: `True`)
 
-*   `--verbose`: Enable progress logging and status messages (Default: `True`)
+*   `--verbose`: Enable verbose logging output (Default: `True`)
 
-*   `--float32_matmul_precision`: PyTorch float32 matrix multiplication precision mode (highest/high/medium). Higher is more accurate but slower (Default: `high`)
+*   `--float32_matmul_precision`: PyTorch float32 matrix multiplication precision mode ("highest", "high", or "medium") (Default: `high`)
 
 *   `--gpu_id`: Specific GPU device ID to use (if multiple GPUs available)
 
 *   `--n_first_particles`: Process only the first N particles from dataset (for testing or validation)
 
-*   `--correct_ctf`: Apply CTF correction during processing (Default: `True`)
+*   `--correct_ctf`: Apply CTF correction during projection matching (Default: `True`)
 
 *   `--halfmap_subset`: Select half-map subset (1 or 2) for half-map validation
 
@@ -418,9 +463,9 @@ cryopares_reconstruct [--config [CONFIG_OVERRIDES]] [--show-config]
 
 *   `--use_only_n_first_batches`: Reconstruct using only first N batches (for testing or quick validation)
 
-*   `--float32_matmul_precision`: PyTorch float32 matrix multiplication precision mode (highest/high/medium). Higher is more accurate but slower (Default: `high`)
+*   `--float32_matmul_precision`: PyTorch float32 matrix multiplication precision mode ("highest", "high", or "medium") (Default: `high`)
 
-*   `--weight_with_confidence`: Apply per-particle confidence weighting during backprojection. If True, particles with higher confidence contribute more to reconstruction (Default: `False`)
+*   `--weight_with_confidence`: Apply per-particle confidence weighting during backprojection. If True, particles with higher confidence contribute more to reconstruction. It reads the confidence from the metadata label "rlnParticleFigureOfMerit" (Default: `False`)
 
 *   `--halfmap_subset`: Select half-map subset (1 or 2) for half-map reconstruction and validation
 

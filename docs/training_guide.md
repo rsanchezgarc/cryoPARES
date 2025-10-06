@@ -2,6 +2,15 @@
 
 This guide provides detailed instructions for training CryoPARES models, including best practices for avoiding overfitting/underfitting and monitoring training progress.
 
+## Overview
+
+Training in CryoPARES takes a set of pre-aligned particles (from RELION, cryoSPARC, or other alignment tools) and 
+learns a deep learning model that can predict particle orientations. 
+The training process produces a checkpoint directory (named `version_0`, `version_1`, etc.) 
+containing the trained model weights. 
+**Training an accurate model is essential for obtaining good results during inference** - the quality of your 
+trained model directly determines the accuracy of pose predictions on new data.
+
 ## Table of Contents
 
 - [Quick Start](#quick-start)
@@ -30,7 +39,7 @@ python -m cryopares_train \
 ```bash
 ulimit -n 65536
 ```
-If you cannot increase it, make sure that you keep all your images into a small number of stack files.
+If you cannot increase it, make sure that you group all your images into a small number of stack files (.mrcs).
 
 ## Training Parameters
 
@@ -42,7 +51,7 @@ If you cannot increase it, make sure that you keep all your images into a small 
 | `--particles_star_fname` | str | Required | Path to pre-aligned RELION .star file |
 | `--train_save_dir` | str | Required | Output directory for checkpoints and logs |
 | `--n_epochs` | int | 100      | Number of training epochs |
-| `--batch_size` | int | 64       | Number of particles per batch |
+| `--batch_size` | int | 32       | Number of particles per batch |
 
 ### Data Configuration Parameters
 
@@ -59,18 +68,18 @@ Override via `--config` flag with dot notation:
   - Target sampling rate in Ångströms/pixel
   - Images are rescaled to this value before training
   - Lower values = higher resolution but more memory/compute
-  - Downsampling helps to reduce noise.
+  - Downsampling helps to reduce noise
 - **`datamanager.particlesDataset.image_size_px_for_nnet`** (int)
   - Final image size in pixels after rescaling
   - Images are cropped/padded to this size
   - Must be large enough to contain the particle after rescaling
-    - But we recomend using tight boxes.
+    - But we recommend using tight boxes
 
 - **`datamanager.particlesDataset.mask_radius_angs`** (float, optional)
   - Radius of circular mask in Ångströms
   - If not set, uses half the box size
   - Helps the network focus on the particle
-  - Notice that image_size_px_for_nnet is not the same as mask_radius_angs, but that they should be closelly related.
+  - Notice that image_size_px_for_nnet is not the same as mask_radius_angs, but that they should be closely related.
 
 ### Optimizer Configuration
 
@@ -82,13 +91,18 @@ Override via `--config` flag with dot notation:
 
 **Key optimizer parameters:**
 
-- **`train.learning_rate`** (float)
-  - Initial learning rate for the Adam optimizer
-  - Automatically reduced on plateau (see below)
+- **`train.learning_rate`** (float, default: 1e-3)
+  - Controls how much to update model weights during each training step
+  - The learning rate determines the size of the steps taken during gradient descent optimization
+  - Higher learning rate = faster training but risk of overshooting optimal weights
+  - Lower learning rate = more stable training but slower convergence
+  - **Good values:** 1e-4 to 1e-3 depending on your data and model complexity
+  - Start with default (1e-3) and adjust based on training behavior
+  - Automatically reduced by 0.5 when validation loss plateaus (see `patient_reduce_lr_plateau_n_epochs` below)
 
 - **`train.weight_decay`** (float)
   - L2 regularization coefficient
-  - Helps prevent overfitting
+  - Incrase it to reduce overfitting
 
 - **`train.accumulate_grad_batches`** (int)
   - Number of batches to accumulate gradients over
@@ -103,7 +117,7 @@ Override via `--config` flag with dot notation:
 
 Example:
 ```bash
---config models.image2sphere.lmax=8
+--config models.image2sphere.lmax=8 models.image2sphere.so3components.i2sprojector.sphere_fdim=128 
 ```
 
 **Key architecture parameters:**
@@ -125,30 +139,37 @@ Example:
 
 - **`models.image2sphere.so3components.i2sprojector.rand_fraction_points_to_project`** (float, default: 0.5)
   - Fraction of points to randomly sample for projection (reduces computation)
+  - Acts like a form of dropout
   - Range: 0.1 to 1.0 (1.0 = use all points)
-  - Lower values = faster but potentially less accurate
+  - Lower values = faster, potentially less accurate while more robust to overfitting
 
 - **`models.image2sphere.so3components.s2conv.f_out`** (int, default: 64)
   - Number of output features from S2 (sphere) convolution
-  - Higher values = more capacity but slower training
+  - Higher values = more capacity but slower training and potentially more overfitting
   - Typical values: 32, 64, 128
 
 - **`models.image2sphere.so3components.i2sprojector.hp_order`** (int, default: 3)
   - HEALPix order for image-to-sphere projector grid resolution
-  - Higher values = finer resolution but more computation
+  - Higher values = finer resolution but more computation and potentially more overfitting
   - Each increment roughly doubles resolution. Going beyond 4 is not advisable
 
 - **`models.image2sphere.so3components.s2conv.hp_order`** (int, default: 4)
   - HEALPix order for S2 convolution grid resolution
   - Controls the resolution of spherical convolution
-
+  - Higher values = finer resolution but more computation and potentially more overfitting
+  - Each increment roughly doubles resolution. Going beyond 4 is not advisable
+  - 
 - **`models.image2sphere.so3components.so3outputgrid.hp_order`** (int, default: 4)
   - HEALPix order for SO(3) output grid resolution
   - Affects the final orientation prediction granularity
-
+  - Higher values = finer resolution but more computation and potentially more overfitting
+  - Each increment roughly doubles resolution. Going beyond 4 is not advisable
+  
 ### Data Augmentation Parameters
 
-Data augmentation is **enabled by default** and helps the model generalize by creating variations of training images. CryoPARES applies multiple augmentation operations randomly to each particle image.
+Data augmentation is **enabled by default** and helps the model generalize by creating variations of training images. 
+CryoPARES applies multiple augmentation operations randomly to each particle image. By default, each image gets
+augmented several times in the same batch.
 
 **View current augmentation settings:**
 ```bash
@@ -208,7 +229,7 @@ cryopares_train --show-config | grep -A 20 "augmenter:"
 
 **Example: Adjusting augmentation strength**
 
-To reduce augmentation (if overfitting is not an issue):
+To reduce augmentation (if underfitting is an issue):
 ```bash
 --config datamanager.augmenter.prob_augment_each_image=0.5 \
          datamanager.augmenter.max_n_augm_per_img=4
@@ -263,6 +284,7 @@ Then open your browser to `http://localhost:6006`
 - Average angular error in degrees
 - **Goal:** As low as possible (typically < 15° for good models)
 - `val_geo_degs` is the key metric for final model quality
+- It is easier to check for overfitting comparing `geo_degs` vs `val_geo_degs`
 
 #### 4. Median Angular Error (`val_median_geo_degs`)
 
@@ -336,10 +358,6 @@ Overfitting occurs when the model learns to memorize training data instead of ge
    python -m cryopares_train --show-config | grep augmentation
    ```
 
-5. **Early stopping:**
-   Training automatically saves the best checkpoint based on `val_loss`
-   - Stop training if val_loss hasn't improved in 5+ epochs
-
 ### What is Underfitting?
 
 Underfitting occurs when the model is too simple to capture patterns in the data.
@@ -353,41 +371,26 @@ Underfitting occurs when the model is too simple to capture patterns in the data
 
 1. **Increase model complexity:**
    ```bash
-   --config models.image2sphere.lmax=10  # Increase from default 8
+   --config models.image2sphere.lmax=14 models.image2sphere.so3components.i2sprojector.sphere_fdim=756 # Increase from default 12
    ```
 
-2. **Train longer:**
-   ```bash
-   --n_epochs 30  # Increase from default 10
-   ```
-
-3. **Increase learning rate:**
-   ```bash
-   --config train.learning_rate=5e-3  # Increase from default 1e-3
-   ```
-
-4. **Reduce regularization:**
+2. **Reduce regularization:**
    ```bash
    --config train.weight_decay=1e-6  # Decrease from default 1e-5
    ```
 
-5. **Check data preprocessing:**
+3. **Check data preprocessing:**
    - Ensure `sampling_rate_angs_for_nnet` matches your data resolution
    - Verify particle images are properly centered and normalized
 
-6. **Use a better encoder:**
-   ```bash
-   --config models.image2sphere.imageencoder.resnet.resnetName="resnet50"
-   ```
-   (Default is resnet18; resnet50 is more powerful)
 
 ### The Sweet Spot
 
 **Ideal training behavior:**
 - Both `loss` and `val_loss` decrease together
 - Small gap between train and validation metrics
-- `val_geo_degs` reaches < 3-5 degrees
-- Validation metrics improve for at least 30-35 epochs
+- `val_geo_degs` reaches < 15 degrees
+- Validation metrics improve for at least 50 epochs
 
 **Example of good training:**
 ```
@@ -414,7 +417,7 @@ Result: Image is downsampled by 2×, then center-cropped to 128×128
 
 **Guidelines:**
 - `sampling_rate_angs_for_nnet`: 1.5-3.0 Å/px works well for most proteins
-- `image_size_px_for_nnet`: Should contain entire particle after rescaling
+- `image_size_px_for_nnet`: Should contain entire particle after rescaling, but we prefer tight boxes.
 - Rule of thumb: `image_size_px_for_nnet × sampling_rate_angs_for_nnet ≥ particle_diameter + padding`
 
 ### Masking
@@ -460,31 +463,21 @@ python -m cryopares_train \
     --config train.learning_rate=1e-4  # Lower LR for fine-tuning
 ```
 
-**When to fine-tune:**
-- Training on similar protein with different ligand
-- Limited new training data
-- Want to adapt pre-trained model to slightly different conditions
-
 ### Half-Set Training
 
 By default, CryoPARES trains two models (half1 and half2) for cross-validation:
-
-```bash
---split_halfs True  # Default
-```
 
 This creates:
 - `version_0/half1/` - Model trained on particles with RandomSubset=1
 - `version_0/half2/` - Model trained on particles with RandomSubset=2
 
 **Benefits:**
-- Prevents overfitting during inference
 - Enables gold-standard FSC calculations
 - Recommended for production use
 
 To train on all data (single model):
 ```bash
---split_halfs False
+--NOT_split_halves
 ```
 
 ### Simulated Pre-training
@@ -535,14 +528,14 @@ python -m cryopares_train \
 - Reduce image size: `--config datamanager.particlesDataset.image_size_px_for_nnet=96`
 - Increase batch size: `--batch_size 64`
 - Use multiple GPUs (automatically detected)
-- Reduce model complexity, like `lmax`: `--config models.image2sphere.lmax=10`
+- Reduce model complexity, like `lmax`: `--config models.image2sphere.lmax=10`. Although it will have an impact on model performance (overfitting/underfitting) 
 
 ### Out of memory errors
 
 **Solutions:**
 - Reduce batch size: `--batch_size 16`
+  - You can increase gradient accumulation to partially compensate for the reduction: `--config train.accumulate_grad_batches=32`
 - Reduce image size: `--config datamanager.particlesDataset.image_size_px_for_nnet=96`
-- Increase gradient accumulation: `--config train.accumulate_grad_batches=32`
 
 ### "Too many open files" error
 

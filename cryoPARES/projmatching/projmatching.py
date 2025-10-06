@@ -204,7 +204,7 @@ def projmatching_starfile(
         num_dataworkers: int = 1,
         batch_size: int = 1024,
         use_cuda: bool = True,
-        verbose: bool = True,
+        verbose: bool = False,
         float32_matmul_precision: Literal["highest", "high", "medium"] = "high",
         gpu_id: Optional[int] = None,
         n_first_particles: Optional[int] = None,

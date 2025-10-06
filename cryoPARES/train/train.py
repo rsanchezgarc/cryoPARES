@@ -32,7 +32,7 @@ class Trainer:
                  image_size_px_for_nnet: int = CONFIG_PARAM(config=main_config.datamanager.particlesdataset), #CONFIG_PARAM status with update_config_with_args gets updated in config directly
                  sampling_rate_angs_for_nnet: float = CONFIG_PARAM(config=main_config.datamanager.particlesdataset), # CONFIG_PARAM status with update_config_with_args gets updated in config directly
                  mask_radius_angs: Optional[float] = CONFIG_PARAM(config=main_config.datamanager.particlesdataset), # CONFIG_PARAM status with update_config_with_args gets updated in config directly
-                 split_halfs: bool = True,
+                 split_halves: bool = True,
                  continue_checkpoint_dir: Optional[str] = None, finetune_checkpoint_dir: Optional[str] = None,
                  compile_model: bool = False,
                  val_check_interval: Optional[float] = None,
@@ -55,7 +55,7 @@ class Trainer:
             image_size_px_for_nnet: {image_size_px_for_nnet}
             sampling_rate_angs_for_nnet: {sampling_rate_angs_for_nnet}
             mask_radius_angs: {mask_radius_angs}
-            split_halfs: {split_halfs}
+            split_halves: {split_halves}
             continue_checkpoint_dir: {continue_checkpoint_dir}
             finetune_checkpoint_dir: {finetune_checkpoint_dir}
             compile_model: {compile_model}
@@ -71,7 +71,7 @@ class Trainer:
         self.n_epochs = n_epochs
         self.batch_size = batch_size
         self.num_dataworkers = num_dataworkers
-        self.split_halfs = split_halfs
+        self.split_halves = split_halves
         self.continue_checkpoint_dir = continue_checkpoint_dir
         self.finetune_checkpoint_dir = finetune_checkpoint_dir
         self.compile_model = compile_model
@@ -214,7 +214,7 @@ class Trainer:
         if self.finetune_checkpoint_dir is not None:
             self._save_finetune_checkpoint_info()
 
-        partitions = ["allParticles"] if not self.split_halfs else ["half1", "half2"]
+        partitions = ["allParticles"] if not self.split_halves else ["half1", "half2"]
 
         with tempfile.TemporaryDirectory() as tmpdir:
             for partition in partitions:

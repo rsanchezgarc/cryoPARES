@@ -16,8 +16,8 @@ from cryoPARES.constants import RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES, RELION
     RELION_EULER_CONVENTION, DIRECTIONAL_ZSCORE_NAME
 
 from cryoPARES import constants
-from cryoPARES.configManager.configParser import ConfigOverrideSystem
-from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
+from autoCLI_config import ConfigOverrideSystem
+from autoCLI_config import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.constants import BEST_DIRECTIONAL_NORMALIZER, BEST_CHECKPOINT_BASENAME, BEST_MODEL_SCRIPT_BASENAME
 from cryoPARES.geometry.convert_angles import matrix_to_euler_angles, euler_angles_to_matrix
@@ -713,7 +713,7 @@ if __name__ == "__main__":
     print("---------------------------------------")
     print(" ".join(sys.argv))
     print("---------------------------------------")
-    from cryoPARES.configManager.configParser import ConfigArgumentParser
+    from autoCLI_config import ConfigArgumentParser
 
     parser = ConfigArgumentParser(prog="infer_cryoPARES", description="Run inference with cryoPARES model",
                                   config_obj=main_config)

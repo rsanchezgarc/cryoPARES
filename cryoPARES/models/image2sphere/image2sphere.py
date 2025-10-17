@@ -18,7 +18,7 @@ from cryoPARES.geometry.metrics_angles import mean_rot_matrix, rotation_error_ra
 from cryoPARES.geometry.nearest_neigs_sphere import compute_nearest_neighbours
 from cryoPARES.models.image2sphere.imageEncoder.imageEncoder import ImageEncoder
 from cryoPARES.models.image2sphere.so3Components import S2Conv, SO3Conv, I2SProjector, SO3OutputGrid, SO3Activation
-from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
+from autoCLI_config import inject_defaults_from_config, CONFIG_PARAM
 
 
 class Image2Sphere(nn.Module):

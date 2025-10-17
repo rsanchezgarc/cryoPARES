@@ -9,7 +9,7 @@ from tqdm import tqdm
 from typing import Tuple, Optional
 
 from cryoPARES.cacheManager import get_cache
-from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
+from autoCLI_config import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.geometry.grids import s2_healpix_grid, so3_near_identity_grid_cartesianprod, so3_healpix_grid
 from cryoPARES.geometry.metrics_angles import nearest_rotmat_idx, rotation_magnitude

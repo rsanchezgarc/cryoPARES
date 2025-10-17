@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader, BatchSampler, Sampler, RandomSampler, C
 from typing import Union, Literal, Optional, Tuple, Iterable, List
 
 import pytorch_lightning as pl
-from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
+from autoCLI_config import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.constants import BATCH_PARTICLES_NAME, BATCH_IDS_NAME, BATCH_MD_NAME, BATCH_POSE_NAME
 from cryoPARES.utils.paths import FNAME_TYPE

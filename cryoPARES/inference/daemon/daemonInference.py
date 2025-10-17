@@ -10,8 +10,8 @@ from lightning import seed_everything
 from typing import Optional, List, Literal
 
 from cryoPARES import constants
-from cryoPARES.configManager.configParser import ConfigOverrideSystem
-from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
+from autoCLI_config import ConfigOverrideSystem
+from autoCLI_config import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.inference.daemon.queueManager import queue_connection, get_all_available_items, DEFAULT_IP, \
     DEFAULT_PORT, DEFAULT_AUTHKEY
@@ -196,7 +196,7 @@ if __name__ == "__main__":
     print("---------------------------------------")
     print(" ".join(sys.argv))
     print("---------------------------------------")
-    from cryoPARES.configManager.configParser import ConfigArgumentParser
+    from autoCLI_config import ConfigArgumentParser
 
     parser = ConfigArgumentParser(prog="inferWorker_cryoPARES", description="Run inference with cryoPARES model",
                                   config_obj=main_config)

@@ -14,7 +14,7 @@ from cryoPARES.configs.models_config.image2sphere_config.imageEncoder_config.ima
 from cryoPARES.datamanager.datamanager import get_number_image_channels, get_example_random_batch
 from cryoPARES.models.image2sphere.gaussianFilters import GaussianFilterBank
 
-from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
+from autoCLI_config import inject_defaults_from_config, CONFIG_PARAM
 
 class ImageEncoder(nn.Module):
     @inject_defaults_from_config(main_config.models.image2sphere.imageencoder)

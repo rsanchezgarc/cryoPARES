@@ -14,7 +14,7 @@ from typing import Optional, List, Literal
 from argParseFromDoc import generate_command_for_argparseFromDoc
 
 from cryoPARES import constants
-from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, inject_docs_from_config_params, CONFIG_PARAM
+from autoCLI_config import inject_defaults_from_config, inject_docs_from_config_params, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.constants import DATA_SPLITS_BASENAME
 from cryoPARES.scripts.gmm_hists import compare_prob_hists
@@ -168,7 +168,7 @@ class Trainer:
             extension="yml"
         )
         fname = osp.join(self.experiment_root, basename)
-        from cryoPARES.configManager.configParser import export_config_to_yaml
+        from autoCLI_config import export_config_to_yaml
         export_config_to_yaml(main_config, fname)
 
     def _copy_code_files(self):
@@ -359,7 +359,7 @@ def main():
     print("---------------------------------------")
     print(" ".join(sys.argv))
     print("---------------------------------------")
-    from cryoPARES.configManager.configParser import ConfigArgumentParser, export_config_to_yaml
+    from autoCLI_config import ConfigArgumentParser, export_config_to_yaml
 
     parser = ConfigArgumentParser(prog="train_cryoPARES", config_obj=main_config, verbose=True)
     parser.add_args_from_function(Trainer.__init__)

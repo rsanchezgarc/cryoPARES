@@ -3,7 +3,7 @@ from typing import Union, Any, Dict, Tuple, List, Optional
 import torch
 from torch import nn, ScriptModule
 
-from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
+from autoCLI_config import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.projmatching.projMatcher import ProjectionMatcher
 from cryoPARES.reconstruction.reconstruct import Reconstructor

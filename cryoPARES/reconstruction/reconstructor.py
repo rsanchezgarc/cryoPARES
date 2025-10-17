@@ -17,7 +17,7 @@ from torch import nn
 from torch.utils.data import Dataset, DataLoader
 from torch_fourier_shift import fourier_shift_dft_2d
 
-from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
+from autoCLI_config import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.datamanager.ctf.rfft_ctf import compute_ctf_rfft
 from cryoPARES.geometry.convert_angles import euler_angles_to_matrix

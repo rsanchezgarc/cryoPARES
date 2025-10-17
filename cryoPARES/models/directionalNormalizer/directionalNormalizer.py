@@ -7,7 +7,7 @@ from typing import Dict, Optional, Tuple, List, Union
 from collections import defaultdict
 import pickle
 
-from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
+from autoCLI_config import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.models.image2sphere.so3Components import SO3OutputGrid
 

@@ -1,4 +1,5 @@
 argParseFromDoc>=0.1.5,<1.0.0
+autoCLI-config>=0.1.1,<1.0.0
 einops>=0.8.1,<1.0.0
 cachetools>=6.2.0,<7.0.0
 e3nn>=0.5.7,<1.0.0

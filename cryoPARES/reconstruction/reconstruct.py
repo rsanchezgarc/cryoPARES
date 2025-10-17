@@ -9,7 +9,7 @@ from torch import multiprocessing
 import torch
 from progressBarDistributed import SharedMemoryProgressBar, SharedMemoryProgressBarWorker
 
-from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, inject_docs_from_config_params, CONFIG_PARAM
+from autoCLI_config import inject_defaults_from_config, inject_docs_from_config_params, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.reconstruction.reconstructor import Reconstructor
 

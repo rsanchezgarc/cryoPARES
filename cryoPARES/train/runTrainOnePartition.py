@@ -19,12 +19,12 @@ from pytorch_lightning.callbacks import (
 from lightning_fabric.utilities.seed import seed_everything
 
 from cryoPARES import constants
-from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, inject_docs_from_config_params, CONFIG_PARAM
+from autoCLI_config import inject_defaults_from_config, inject_docs_from_config_params, CONFIG_PARAM
 from cryoPARES.constants import DATA_SPLITS_BASENAME, TRAINING_DONE_TEMPLATE
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.reconstruction.reconstructor import reconstruct_starfile
 from cryoPARES.utils.paths import get_most_recent_file
-from cryoPARES.configManager.configParser import ConfigArgumentParser, ConfigOverrideSystem
+from autoCLI_config import ConfigArgumentParser, ConfigOverrideSystem
 
 
 class TrainerPartition:

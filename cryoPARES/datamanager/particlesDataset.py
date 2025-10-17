@@ -14,7 +14,7 @@ from torch.utils.data import Dataset
 from typing import Union, Literal, Optional, List, Tuple, Any, Dict
 
 from cryoPARES.cacheManager import get_cache
-from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
+from autoCLI_config import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.datamanager_config.particlesDataset_config import CtfCorrectionType, ImgNormalizationType
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.constants import RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES, \

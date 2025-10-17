@@ -15,7 +15,7 @@ from kornia.augmentation import RandomElasticTransform
 from scipy.spatial.transform import Rotation
 from torchvision.transforms.v2 import RandomErasing
 import torchvision.transforms.functional as transformF
-from cryoPARES.configManager.inject_defaults import inject_defaults_from_config, CONFIG_PARAM
+from autoCLI_config import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.constants import BATCH_PARTICLES_NAME
 

@@ -13,14 +13,14 @@ from torch import multiprocessing
 from progressBarDistributed import SharedMemoryProgressBar, SharedMemoryProgressBarWorker
 
 from cryoPARES import constants
-from cryoPARES.configManager.inject_defaults import CONFIG_PARAM, inject_defaults_from_config, inject_docs_from_config_params
+from autoCLI_config import CONFIG_PARAM, inject_defaults_from_config, inject_docs_from_config_params
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.reconstruction.reconstruct import create_shared_tensor
 from cryoPARES.inference.inferencer import SingleInferencer
 from cryoPARES.utils.paths import get_most_recent_file
 from cryoPARES.scripts.computeFsc import compute_fsc
 from cryoPARES.utils.reconstructionUtils import get_vol
-from cryoPARES.configManager.configParser import ConfigArgumentParser, ConfigOverrideSystem
+from autoCLI_config import ConfigArgumentParser, ConfigOverrideSystem
 from cryoPARES.utils.checkpointReader import CheckpointReader
 
 

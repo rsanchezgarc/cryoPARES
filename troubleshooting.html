@@ -1,0 +1,1294 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Troubleshooting Guide &mdash; CryoPARES 0.1.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=01f34227"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="API Reference" href="api/index.html" />
+    <link rel="prev" title="Command-Line Interface" href="cli.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            CryoPARES
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="training_guide.html">Training Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="training_guide.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="training_guide.html#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="training_guide.html#quick-start">Quick Start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="training_guide.html#training-parameters">Training Parameters</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#essential-parameters">Essential Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#data-configuration-parameters">Data Configuration Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#optimizer-configuration">Optimizer Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#model-architecture-parameters">Model Architecture Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#data-augmentation-parameters">Data Augmentation Parameters</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="training_guide.html#monitoring-training-with-tensorboard">Monitoring Training with TensorBoard</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#launching-tensorboard">Launching TensorBoard</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#key-metrics-to-monitor">Key Metrics to Monitor</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="training_guide.html#training-loss-loss">1. Training Loss (<code class="docutils literal notranslate"><span class="pre">loss</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="training_guide.html#validation-loss-val-loss">2. Validation Loss (<code class="docutils literal notranslate"><span class="pre">val_loss</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="training_guide.html#angular-error-geo-degs-val-geo-degs">3. Angular Error (<code class="docutils literal notranslate"><span class="pre">geo_degs</span></code>, <code class="docutils literal notranslate"><span class="pre">val_geo_degs</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="training_guide.html#median-angular-error-val-median-geo-degs">4. Median Angular Error (<code class="docutils literal notranslate"><span class="pre">val_median_geo_degs</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="training_guide.html#learning-rate-lr">5. Learning Rate (<code class="docutils literal notranslate"><span class="pre">lr</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="training_guide.html#visualization-rotation-matrices">6. Visualization: Rotation Matrices</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#example-tensorboard-monitoring-session">Example TensorBoard Monitoring Session</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="training_guide.html#overfitting-and-underfitting">Overfitting and Underfitting</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#what-is-overfitting">What is Overfitting?</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#what-is-underfitting">What is Underfitting?</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#the-sweet-spot">The Sweet Spot</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="training_guide.html#data-preprocessing">Data Preprocessing</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#image-size-and-sampling-rate">Image Size and Sampling Rate</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#masking">Masking</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#ctf-correction">CTF Correction</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="training_guide.html#advanced-training-options">Advanced Training Options</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#continue-training">Continue Training</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#fine-tuning">Fine-tuning</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#half-set-training">Half-Set Training</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#simulated-pre-training">Simulated Pre-training</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#model-compilation">Model Compilation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#debugging-overfitting-on-small-batches">Debugging: Overfitting on Small Batches</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="training_guide.html#troubleshooting-training-issues">Troubleshooting Training Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#training-is-very-slow">Training is very slow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#out-of-memory-errors">Out of memory errors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#too-many-open-files-error">“Too many open files” error</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#loss-is-nan">Loss is NaN</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#model-not-improving">Model not improving</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#validation-loss-jumps-around">Validation loss jumps around</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="training_guide.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="configuration_guide.html">Configuration Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="configuration_guide.html#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="configuration_guide.html#configuration-system-overview">Configuration System Overview</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="configuration_guide.html#configuration-sources-in-order-of-precedence">Configuration Sources (in order of precedence)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="configuration_guide.html#using-config-overrides">Using Config Overrides</a></li>
+<li class="toctree-l3"><a class="reference internal" href="configuration_guide.html#using-yaml-config-files">Using YAML Config Files</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="configuration_guide.html#viewing-available-options">Viewing Available Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="configuration_guide.html#configuration-hierarchy">Configuration Hierarchy</a></li>
+<li class="toctree-l2"><a class="reference internal" href="configuration_guide.html#reading-configuration-files">Reading Configuration Files</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="configuration_guide.html#configuration-file-locations">Configuration File Locations</a></li>
+<li class="toctree-l3"><a class="reference internal" href="configuration_guide.html#how-to-read-configuration-files">How to Read Configuration Files</a></li>
+<li class="toctree-l3"><a class="reference internal" href="configuration_guide.html#example-finding-training-parameters">Example: Finding Training Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="configuration_guide.html#example-finding-nested-parameters">Example: Finding Nested Parameters</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="configuration_guide.html#quick-parameter-reference">Quick Parameter Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="configuration_guide.html#saving-and-loading-configurations">Saving and Loading Configurations</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="configuration_guide.html#exporting-current-configuration">Exporting Current Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="configuration_guide.html#reusing-a-configuration">Reusing a Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="configuration_guide.html#overriding-loaded-config">Overriding Loaded Config</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="configuration_guide.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="cli.html">Command-Line Interface</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#cryopares-train"><code class="docutils literal notranslate"><span class="pre">cryopares_train</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#usage">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#parameters">Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#configuration-overrides">Configuration Overrides</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#view-all-config-options">View All Config Options</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#examples">Examples</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#important-notes">Important Notes</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#cryopares-infer"><code class="docutils literal notranslate"><span class="pre">cryopares_infer</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id1">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id2">Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id3">Configuration Overrides</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id4">Examples</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#output-files">Output Files</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id5">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#cryopares-projmatching"><code class="docutils literal notranslate"><span class="pre">cryopares_projmatching</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id6">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id7">Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#example">Example</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#cryopares-reconstruct"><code class="docutils literal notranslate"><span class="pre">cryopares_reconstruct</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id8">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id9">Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id10">Example</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#compactify-checkpoint"><code class="docutils literal notranslate"><span class="pre">compactify_checkpoint</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id11">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#required-arguments">Required Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#optional-arguments">Optional Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id12">Examples</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#what-s-included">What’s Included</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#size-reduction">Size Reduction</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#using-compactified-checkpoints">Using Compactified Checkpoints</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#utility-scripts">Utility Scripts</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#gmm-histogram-analysis">GMM Histogram Analysis</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#fsc-computation">FSC Computation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#pose-comparison">Pose Comparison</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#learning-curve-visualization">Learning Curve Visualization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#star-file-histograms">STAR File Histograms</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#id13">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Troubleshooting Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#installation-issues">Installation Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#pip-install-fails-with-dependency-conflicts">pip install fails with dependency conflicts</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#importerror-no-module-named-cryopares">ImportError: No module named ‘cryoPARES’</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#cuda-version-mismatch">CUDA version mismatch</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#configuration-issues">Configuration Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#type-mismatch-errors-when-using-config">Type mismatch errors when using –config</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#file-system-issues">File System Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#too-many-open-files-error">“Too many open files” error</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#permission-denied-when-writing-outputs">Permission denied when writing outputs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#particle-files-not-found">Particle files not found</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#memory-issues">Memory Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#out-of-memory-oom-during-training">Out of memory (OOM) during training</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#out-of-memory-during-inference">Out of memory during inference</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#ram-exhausted-when-loading-data">RAM exhausted when loading data</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#training-issues">Training Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#loss-becomes-nan">Loss becomes NaN</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#training-doesn-t-improve">Training doesn’t improve</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#validation-loss-higher-than-training-loss">Validation loss higher than training loss</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#training-crashes-with-killed">Training crashes with “Killed”</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#checkpoints-not-saving">Checkpoints not saving</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#inference-issues">Inference Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#predicted-poses-are-random">Predicted poses are random</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#reconstruction-is-blurry">Reconstruction is blurry</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#no-particles-passed-confidence-threshold">“No particles passed confidence threshold”</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#inference-slower-than-expected">Inference slower than expected</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#data-issues">Data Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#ctf-parameters-missing">CTF parameters missing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#orientation-columns-missing">Orientation columns missing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#particles-are-poorly-centered">Particles are poorly centered</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#different-sampling-rate-in-data-vs-reference">Different sampling rate in data vs. reference</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#performance-issues">Performance Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#training-is-very-slow">Training is very slow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#inference-is-very-slow">Inference is very slow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#data-loading-is-bottleneck">Data loading is bottleneck</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#cuda-gpu-issues">CUDA/GPU Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#cuda-out-of-memory-but-gpu-seems-empty">“CUDA out of memory” but GPU seems empty</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#multiple-gpus-not-being-used">Multiple GPUs not being used</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#gpu-slower-than-expected">GPU slower than expected</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#output-quality-issues">Output Quality Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#reconstruction-has-artifacts">Reconstruction has artifacts</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#fsc-is-lower-than-expected">FSC is lower than expected</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#reconstructed-map-has-wrong-hand">Reconstructed map has wrong hand</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#getting-more-help">Getting More Help</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#enable-debug-mode">Enable Debug Mode</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#check-logs">Check Logs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#report-issues">Report Issues</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#see-also">See Also</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="api/index.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api/index.html#core-modules">Core Modules</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/training.html">Training API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api/training.html#module-cryoPARES.train.train">Main Training Module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/training.html#module-cryoPARES.train.runTrainOnePartition">Training Execution</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="api/inference.html">Inference API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api/inference.html#module-cryoPARES.inference.inferencer">Single Inferencer</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/inference.html#module-cryoPARES.inference.infer">Distributed Inference</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/inference.html#daemon-mode">Daemon Mode</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="api/projection_matching.html">Projection Matching API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api/projection_matching.html#module-cryoPARES.projmatching.projMatcher">Projection Matcher</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/projection_matching.html#module-cryoPARES.projmatching.projmatching">Command-Line Interface</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="api/reconstruction.html">Reconstruction API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api/reconstruction.html#module-cryoPARES.reconstruction.reconstructor">Reconstructor</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/reconstruction.html#module-cryoPARES.reconstruction.reconstruct">Command-Line Interface</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="api/data_management.html">Data Management API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api/data_management.html#module-cryoPARES.datamanager.datamanager">Data Manager</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/data_management.html#module-cryoPARES.datamanager.particlesDataset">Particles Dataset</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/data_management.html#module-cryoPARES.datamanager.augmentations">Augmentations</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/data_management.html#module-cryoPARES.datamanager.ctf.rfft_ctf">CTF Correction</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="api/models.html">Models API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api/models.html#module-cryoPARES.models.model">PyTorch Lightning Model</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/models.html#module-cryoPARES.models.image2sphere.image2sphere">Image2Sphere Network</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/models.html#image-encoders">Image Encoders</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/models.html#module-cryoPARES.models.directionalNormalizer.directionalNormalizer">Directional Normalizer</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="api/utils.html">Utilities API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api/utils.html#checkpoint-management">Checkpoint Management</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/utils.html#module-cryoPARES.utils.paths">Path Utilities</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/utils.html#module-cryoPARES.utils.torchUtils">PyTorch Utilities</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/utils.html#module-cryoPARES.utils.reconstructionUtils">Reconstruction Utilities</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/utils.html#geometry-utilities">Geometry Utilities</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Additional Resources</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference external" href="https://github.com/rsanchezgarc/cryoPARES">GitHub Repository</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://www.biorxiv.org/content/10.1101/2025.03.04.641536v2">Paper</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">CryoPARES</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Troubleshooting Guide</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/troubleshooting.md.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="troubleshooting-guide">
+<h1>Troubleshooting Guide<a class="headerlink" href="#troubleshooting-guide" title="Link to this heading"></a></h1>
+<p>This guide covers common issues and their solutions when using CryoPARES.</p>
+<section id="table-of-contents">
+<h2>Table of Contents<a class="headerlink" href="#table-of-contents" title="Link to this heading"></a></h2>
+<ul class="simple">
+<li><p><a class="reference internal" href="#installation-issues"><span class="xref myst">Installation Issues</span></a></p></li>
+<li><p><a class="reference internal" href="#configuration-issues"><span class="xref myst">Configuration Issues</span></a></p></li>
+<li><p><a class="reference internal" href="#file-system-issues"><span class="xref myst">File System Issues</span></a></p></li>
+<li><p><a class="reference internal" href="#memory-issues"><span class="xref myst">Memory Issues</span></a></p></li>
+<li><p><a class="reference internal" href="#training-issues"><span class="xref myst">Training Issues</span></a></p></li>
+<li><p><a class="reference internal" href="#inference-issues"><span class="xref myst">Inference Issues</span></a></p></li>
+<li><p><a class="reference internal" href="#data-issues"><span class="xref myst">Data Issues</span></a></p></li>
+<li><p><a class="reference internal" href="#performance-issues"><span class="xref myst">Performance Issues</span></a></p></li>
+<li><p><a class="reference internal" href="#cudagpu-issues"><span class="xref myst">CUDA/GPU Issues</span></a></p></li>
+<li><p><a class="reference internal" href="#output-quality-issues"><span class="xref myst">Output Quality Issues</span></a></p></li>
+</ul>
+</section>
+<hr class="docutils" />
+<section id="installation-issues">
+<h2>Installation Issues<a class="headerlink" href="#installation-issues" title="Link to this heading"></a></h2>
+<section id="pip-install-fails-with-dependency-conflicts">
+<h3>pip install fails with dependency conflicts<a class="headerlink" href="#pip-install-fails-with-dependency-conflicts" title="Link to this heading"></a></h3>
+<p><strong>Symptoms:</strong></p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">ERROR</span><span class="p">:</span> <span class="n">pip</span><span class="s1">&#39;s dependency resolver does not currently take into account all the packages</span>
+</pre></div>
+</div>
+<p><strong>Solution:</strong></p>
+<ol class="arabic simple">
+<li><p>Create a fresh conda environment:</p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>conda<span class="w"> </span>create<span class="w"> </span>-n<span class="w"> </span>cryopares_fresh<span class="w"> </span><span class="nv">python</span><span class="o">=</span><span class="m">3</span>.12
+conda<span class="w"> </span>activate<span class="w"> </span>cryopares_fresh
+</pre></div>
+</div>
+<ol class="arabic simple" start="2">
+<li><p>Install in order:</p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pip<span class="w"> </span>install<span class="w"> </span>git+https://github.com/rsanchezgarc/cryoPARES.git
+</pre></div>
+</div>
+</section>
+<section id="importerror-no-module-named-cryopares">
+<h3>ImportError: No module named ‘cryoPARES’<a class="headerlink" href="#importerror-no-module-named-cryopares" title="Link to this heading"></a></h3>
+<p><strong>Symptoms:</strong></p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="ne">ImportError</span><span class="p">:</span> <span class="n">No</span> <span class="n">module</span> <span class="n">named</span> <span class="s1">&#39;cryoPARES&#39;</span>
+</pre></div>
+</div>
+<p><strong>Solutions:</strong></p>
+<ol class="arabic simple">
+<li><p>Verify installation:</p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pip<span class="w"> </span>list<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>cryoPARES
+</pre></div>
+</div>
+<ol class="arabic simple" start="2">
+<li><p>If using development install, check you’re in the right directory:</p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="nb">cd</span><span class="w"> </span>/path/to/cryoPARES
+pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.
+</pre></div>
+</div>
+<ol class="arabic simple" start="3">
+<li><p>Check Python environment:</p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>which<span class="w"> </span>python
+<span class="c1"># Should point to your conda environment</span>
+</pre></div>
+</div>
+</section>
+<section id="cuda-version-mismatch">
+<h3>CUDA version mismatch<a class="headerlink" href="#cuda-version-mismatch" title="Link to this heading"></a></h3>
+<p><strong>Symptoms:</strong></p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="ne">RuntimeError</span><span class="p">:</span> <span class="n">CUDA</span> <span class="n">error</span><span class="p">:</span> <span class="n">no</span> <span class="n">kernel</span> <span class="n">image</span> <span class="ow">is</span> <span class="n">available</span> <span class="k">for</span> <span class="n">execution</span> <span class="n">on</span> <span class="n">the</span> <span class="n">device</span>
+</pre></div>
+</div>
+<p><strong>Solution:</strong></p>
+<p>Reinstall PyTorch with correct CUDA version:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Check CUDA version</span>
+nvidia-smi
+
+<span class="c1"># Install matching PyTorch (example for CUDA 11.8)</span>
+pip<span class="w"> </span>install<span class="w"> </span>--force-reinstall<span class="w"> </span>numpy<span class="w"> </span>scikit-image<span class="w"> </span>scipy<span class="w"> </span>torch<span class="w"> </span>torchvision<span class="w"> </span>--index-url<span class="w"> </span>https://download.pytorch.org/whl/cu118
+pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.
+</pre></div>
+</div>
+</section>
+</section>
+<hr class="docutils" />
+<section id="configuration-issues">
+<h2>Configuration Issues<a class="headerlink" href="#configuration-issues" title="Link to this heading"></a></h2>
+<section id="type-mismatch-errors-when-using-config">
+<h3>Type mismatch errors when using –config<a class="headerlink" href="#type-mismatch-errors-when-using-config" title="Link to this heading"></a></h3>
+<p><strong>Symptoms:</strong></p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="ne">TypeError</span><span class="p">:</span> <span class="n">argument</span> <span class="n">must</span> <span class="n">be</span> <span class="nb">int</span><span class="p">,</span> <span class="ow">not</span> <span class="nb">float</span>
+<span class="ne">ValueError</span><span class="p">:</span> <span class="n">could</span> <span class="ow">not</span> <span class="n">convert</span> <span class="n">string</span> <span class="n">to</span> <span class="nb">float</span>
+</pre></div>
+</div>
+<p><strong>Cause:</strong> Parameter types must match exactly when using <code class="docutils literal notranslate"><span class="pre">--config</span></code> overrides.</p>
+<p><strong>Solution:</strong></p>
+<p><strong>Always match the parameter type:</strong></p>
+<ol class="arabic">
+<li><p><strong>For float parameters</strong> - include a decimal point:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Correct:</span>
+--config<span class="w"> </span>train.learning_rate<span class="o">=</span>1e-3
+--config<span class="w"> </span>datamanager.particlesDataset.sampling_rate_angs_for_nnet<span class="o">=</span><span class="m">2</span>.0
+
+<span class="c1"># Wrong:</span>
+--config<span class="w"> </span>train.learning_rate<span class="o">=</span><span class="m">1</span><span class="w">      </span><span class="c1"># Missing decimal - will fail!</span>
+--config<span class="w"> </span><span class="nv">sampling_rate_angs_for_nnet</span><span class="o">=</span><span class="m">2</span><span class="w">  </span><span class="c1"># Missing decimal - will fail!</span>
+</pre></div>
+</div>
+</li>
+<li><p><strong>For int parameters</strong> - do NOT include a decimal point:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Correct:</span>
+--config<span class="w"> </span>models.image2sphere.lmax<span class="o">=</span><span class="m">8</span>
+--config<span class="w"> </span>train.n_epochs<span class="o">=</span><span class="m">100</span>
+
+<span class="c1"># Wrong:</span>
+--config<span class="w"> </span>models.image2sphere.lmax<span class="o">=</span><span class="m">8</span>.0<span class="w">    </span><span class="c1"># Has decimal - will fail!</span>
+--config<span class="w"> </span>train.n_epochs<span class="o">=</span><span class="m">100</span>.0<span class="w">            </span><span class="c1"># Has decimal - will fail!</span>
+</pre></div>
+</div>
+</li>
+<li><p><strong>Check parameter types:</strong></p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python<span class="w"> </span>-m<span class="w"> </span>cryopares_train<span class="w"> </span>--show-config<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>parameter_name
+<span class="c1"># Look for (int) or (float) annotation</span>
+</pre></div>
+</div>
+</li>
+</ol>
+</section>
+</section>
+<hr class="docutils" />
+<section id="file-system-issues">
+<h2>File System Issues<a class="headerlink" href="#file-system-issues" title="Link to this heading"></a></h2>
+<section id="too-many-open-files-error">
+<h3>“Too many open files” error<a class="headerlink" href="#too-many-open-files-error" title="Link to this heading"></a></h3>
+<p><strong>Symptoms:</strong></p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="ne">OSError</span><span class="p">:</span> <span class="p">[</span><span class="n">Errno</span> <span class="mi">24</span><span class="p">]</span> <span class="n">Too</span> <span class="n">many</span> <span class="nb">open</span> <span class="n">files</span>
+</pre></div>
+</div>
+<p><strong>Root cause:</strong> CryoPARES opens one file handler for each <code class="docutils literal notranslate"><span class="pre">.mrcs</span></code> file in the .star file.</p>
+<p><strong>Solutions:</strong></p>
+<ol class="arabic simple">
+<li><p><strong>Immediate fix:</strong> Increase file descriptor limit:</p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="nb">ulimit</span><span class="w"> </span>-n<span class="w"> </span><span class="m">65536</span>
+</pre></div>
+</div>
+<ol class="arabic simple" start="2">
+<li><p><strong>Permanent fix:</strong> Add to <code class="docutils literal notranslate"><span class="pre">.bashrc</span></code> or <code class="docutils literal notranslate"><span class="pre">.bash_profile</span></code>:</p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;ulimit -n 65536&quot;</span><span class="w"> </span>&gt;&gt;<span class="w"> </span>~/.bashrc
+<span class="nb">source</span><span class="w"> </span>~/.bashrc
+</pre></div>
+</div>
+<p>If you cannot set it to a large enough number, join your particles stacsk into a smaller number of .mrcs files</p>
+<ol class="arabic simple" start="3">
+<li><p><strong>System-wide fix</strong> (requires root):</p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Edit /etc/security/limits.conf</span>
+sudo<span class="w"> </span>nano<span class="w"> </span>/etc/security/limits.conf
+
+<span class="c1"># Add these lines:</span>
+*<span class="w"> </span>soft<span class="w"> </span>nofile<span class="w"> </span><span class="m">65536</span>
+*<span class="w"> </span>hard<span class="w"> </span>nofile<span class="w"> </span><span class="m">65536</span>
+</pre></div>
+</div>
+<ol class="arabic simple" start="4">
+<li><p><strong>Verify limit:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="nb">ulimit</span><span class="w"> </span>-n
+<span class="c1"># Should show 65536 or higher</span>
+</pre></div>
+</div>
+</section>
+<section id="permission-denied-when-writing-outputs">
+<h3>Permission denied when writing outputs<a class="headerlink" href="#permission-denied-when-writing-outputs" title="Link to this heading"></a></h3>
+<p><strong>Symptoms:</strong></p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="ne">PermissionError</span><span class="p">:</span> <span class="p">[</span><span class="n">Errno</span> <span class="mi">13</span><span class="p">]</span> <span class="n">Permission</span> <span class="n">denied</span><span class="p">:</span> <span class="s1">&#39;/path/to/output&#39;</span>
+</pre></div>
+</div>
+<p><strong>Solutions:</strong></p>
+<ol class="arabic simple">
+<li><p>Check directory permissions:</p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>ls<span class="w"> </span>-ld<span class="w"> </span>/path/to/output
+</pre></div>
+</div>
+<ol class="arabic simple" start="2">
+<li><p>Create directory with correct permissions:</p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>mkdir<span class="w"> </span>-p<span class="w"> </span>/path/to/output
+chmod<span class="w"> </span><span class="m">755</span><span class="w"> </span>/path/to/output
+</pre></div>
+</div>
+<ol class="arabic simple" start="3">
+<li><p>Use a different output directory:</p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--train_save_dir<span class="w"> </span>~/cryopares_outputs/
+</pre></div>
+</div>
+</section>
+<section id="particle-files-not-found">
+<h3>Particle files not found<a class="headerlink" href="#particle-files-not-found" title="Link to this heading"></a></h3>
+<p><strong>Symptoms:</strong></p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="ne">FileNotFoundError</span><span class="p">:</span> <span class="n">Particle</span> <span class="n">file</span> <span class="ow">not</span> <span class="n">found</span><span class="p">:</span> <span class="o">/</span><span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">particles</span><span class="o">/...</span>
+</pre></div>
+</div>
+<p><strong>Solutions:</strong></p>
+<ol class="arabic simple">
+<li><p><strong>Check <code class="docutils literal notranslate"><span class="pre">--particles_dir</span></code> argument:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># If .star file has relative paths like:</span>
+<span class="c1"># MotionCorr/job01/particles_001.mrcs</span>
+<span class="c1">#And the MotionCorr directory is at  /path/to/relion/project/</span>
+
+<span class="c1"># Use:</span>
+--particles_dir<span class="w"> </span>/path/to/relion/project/
+</pre></div>
+</div>
+<ol class="arabic simple" start="2">
+<li><p><strong>Verify .star file paths:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>head<span class="w"> </span>-20<span class="w"> </span>/path/to/particles.star
+<span class="c1"># Check the _rlnImageName column</span>
+</pre></div>
+</div>
+<ol class="arabic simple" start="3">
+<li><p><strong>Make paths absolute:</strong></p></li>
+</ol>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">starfile</span>
+<span class="n">df</span> <span class="o">=</span> <span class="n">starfile</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="s1">&#39;/path/to/particles.star&#39;</span><span class="p">)</span>
+<span class="n">df</span><span class="p">[</span><span class="s1">&#39;rlnImageName&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s1">&#39;rlnImageName&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span>
+    <span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="sa">f</span><span class="s1">&#39;/absolute/path/</span><span class="si">{</span><span class="n">x</span><span class="si">}</span><span class="s1">&#39;</span>
+<span class="p">)</span>
+<span class="n">starfile</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">df</span><span class="p">,</span> <span class="s1">&#39;particles_absolute.star&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+</section>
+<hr class="docutils" />
+<section id="memory-issues">
+<h2>Memory Issues<a class="headerlink" href="#memory-issues" title="Link to this heading"></a></h2>
+<section id="out-of-memory-oom-during-training">
+<h3>Out of memory (OOM) during training<a class="headerlink" href="#out-of-memory-oom-during-training" title="Link to this heading"></a></h3>
+<p><strong>Symptoms:</strong></p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="ne">RuntimeError</span><span class="p">:</span> <span class="n">CUDA</span> <span class="n">out</span> <span class="n">of</span> <span class="n">memory</span><span class="o">.</span> <span class="n">Tried</span> <span class="n">to</span> <span class="n">allocate</span> <span class="n">X</span><span class="o">.</span><span class="n">XX</span> <span class="n">GiB</span>
+</pre></div>
+</div>
+<p><strong>Solutions:</strong></p>
+<ol class="arabic simple">
+<li><p><strong>Reduce batch size:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--batch_size<span class="w"> </span><span class="m">16</span>
+</pre></div>
+</div>
+<p>You can compensate, up to a certain point, the batch reduction by increasing accumulate_gra_batches to
+keep the effective batch size (batch_size x accumulate_grad_batches) constant</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--config<span class="w"> </span>train.accumulate_grad_batches<span class="o">=</span><span class="m">32</span>
+<span class="c1"># Maintains effective batch size while reducing memory</span>
+</pre></div>
+</div>
+<ol class="arabic simple" start="2">
+<li><p><strong>Reduce image size:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--config<span class="w"> </span>datamanager.particlesDataset.image_size_px_for_nnet<span class="o">=</span><span class="m">96</span>
+</pre></div>
+</div>
+<p>and/or</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--config<span class="w"> </span>datamanager.particlesDataset.sampling_rate_angs_for_nnet<span class="o">=</span><span class="m">2</span>.0
+</pre></div>
+</div>
+<p>Note that larger sampling rate implies smaller images.
+Don’t try to reduce the image size at inference, it won’t work, as the checkpoint is prepared for the training size</p>
+<ol class="arabic simple" start="3">
+<li><p><strong>Reduce model complexity:</strong></p></li>
+</ol>
+<p>There are several parameters that severely contribute to the model size. Decrease them to have a smaller
+network.</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--config<span class="w"> </span>models.image2sphere.lmax<span class="o">=</span><span class="m">10</span><span class="w"> </span><span class="c1">#Default is 12</span>
+</pre></div>
+</div>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--config<span class="w">  </span>models.image2sphere.so3components.i2sprojector.sphere_fdim<span class="o">=</span><span class="m">256</span><span class="w"> </span><span class="c1">#Default is 512</span>
+</pre></div>
+</div>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--config<span class="w">  </span>models.image2sphere.so3components.s2conv.f_out<span class="o">=</span><span class="m">32</span><span class="w"> </span><span class="c1">#Default is 64</span>
+</pre></div>
+</div>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--config<span class="w"> </span>models.image2sphere.imageencoder.out_channels<span class="o">=</span><span class="m">256</span>
+</pre></div>
+</div>
+</section>
+<section id="out-of-memory-during-inference">
+<h3>Out of memory during inference<a class="headerlink" href="#out-of-memory-during-inference" title="Link to this heading"></a></h3>
+<p><strong>Solutions:</strong></p>
+<ol class="arabic simple">
+<li><p><strong>Reduce inference batch size:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--batch_size<span class="w"> </span><span class="m">16</span>
+</pre></div>
+</div>
+</section>
+<section id="ram-exhausted-when-loading-data">
+<h3>RAM exhausted when loading data<a class="headerlink" href="#ram-exhausted-when-loading-data" title="Link to this heading"></a></h3>
+<p><strong>Symptoms:</strong></p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="ne">MemoryError</span><span class="p">:</span> <span class="n">Unable</span> <span class="n">to</span> <span class="n">allocate</span> <span class="n">array</span>
+</pre></div>
+</div>
+<p><strong>Solutions:</strong></p>
+<ol class="arabic simple">
+<li><p><strong>Disable in-memory caching:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--config<span class="w"> </span>datamanager.particlesDataset.store_data_in_memory<span class="o">=</span>False
+</pre></div>
+</div>
+<ol class="arabic simple" start="2">
+<li><p><strong>Reduce number of workers:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--num_dataworkers<span class="w"> </span><span class="m">2</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="training-issues">
+<h2>Training Issues<a class="headerlink" href="#training-issues" title="Link to this heading"></a></h2>
+<section id="loss-becomes-nan">
+<h3>Loss becomes NaN<a class="headerlink" href="#loss-becomes-nan" title="Link to this heading"></a></h3>
+<p><strong>Symptoms:</strong></p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">loss</span><span class="p">:</span> <span class="n">nan</span><span class="p">,</span> <span class="n">geo_degs</span><span class="p">:</span> <span class="n">nan</span>
+</pre></div>
+</div>
+<p><strong>Causes and solutions:</strong></p>
+<ol class="arabic simple">
+<li><p><strong>Learning rate too high:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--config<span class="w"> </span>train.learning_rate<span class="o">=</span>1e-4
+</pre></div>
+</div>
+<ol class="arabic simple" start="2">
+<li><p><strong>Numerical instability:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--config<span class="w"> </span>train.weight_decay<span class="o">=</span>1e-6<span class="w">  </span><span class="c1"># Reduce regularization</span>
+</pre></div>
+</div>
+<ol class="arabic simple" start="3">
+<li><p><strong>Bad data:</strong>
+Check for corrupted particles or extreme values in .star file</p></li>
+</ol>
+</section>
+<section id="training-doesn-t-improve">
+<h3>Training doesn’t improve<a class="headerlink" href="#training-doesn-t-improve" title="Link to this heading"></a></h3>
+<p><strong>Symptoms:</strong></p>
+<ul class="simple">
+<li><p>Loss plateaus immediately</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">val_geo_degs</span></code> &gt; 30° after many epochs</p></li>
+</ul>
+<p><strong>Diagnostic steps:</strong></p>
+<ol class="arabic simple">
+<li><p><strong>Verify data is pre-aligned:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Check that .star file contains orientation columns:</span>
+<span class="c1"># _rlnAngleRot, _rlnAngleTilt, _rlnAnglePsi</span>
+grep<span class="w"> </span><span class="s2">&quot;rlnAngle&quot;</span><span class="w"> </span>/path/to/particles.star
+</pre></div>
+</div>
+<ol class="arabic simple" start="2">
+<li><p><strong>Test overfitting capability:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python<span class="w"> </span>-m<span class="w"> </span>cryopares_train<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--symmetry<span class="w"> </span>C1<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--particles_star_fname<span class="w"> </span>data.star<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--train_save_dir<span class="w"> </span>/tmp/overfit_test<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--n_epochs<span class="w"> </span><span class="m">100</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--overfit_batches<span class="w"> </span><span class="m">10</span>
+</pre></div>
+</div>
+<ol class="arabic simple" start="3">
+<li><p><strong>Check symmetry:</strong>
+Wrong symmetry can make training impossible.</p></li>
+<li><p><strong>Increase learning rate:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--config<span class="w"> </span>train.learning_rate<span class="o">=</span>5e-3
+</pre></div>
+</div>
+<ol class="arabic simple" start="5">
+<li><p><strong>Increase model capacity:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--config<span class="w"> </span>models.image2sphere.lmax<span class="o">=</span><span class="m">14</span>
+</pre></div>
+</div>
+</section>
+<section id="validation-loss-higher-than-training-loss">
+<h3>Validation loss higher than training loss<a class="headerlink" href="#validation-loss-higher-than-training-loss" title="Link to this heading"></a></h3>
+<p><strong>Normal:</strong> Small gap (&lt; 20%) is expected and healthy.</p>
+<p><strong>Concerning:</strong> Large gap (&gt; 50%) indicates overfitting.</p>
+<p><strong>Solutions for overfitting:</strong></p>
+<ol class="arabic simple">
+<li><p><strong>Increase regularization:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--config<span class="w"> </span>train.weight_decay<span class="o">=</span>1e-4
+</pre></div>
+</div>
+<ol class="arabic simple" start="2">
+<li><p><strong>Reduce model complexity:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--config<span class="w"> </span>models.image2sphere.lmax<span class="o">=</span><span class="m">10</span>
+</pre></div>
+</div>
+<ol class="arabic simple" start="3">
+<li><p><strong>More training data:</strong>
+Use more particles in .star file</p></li>
+<li><p><strong>Check for data leakage:</strong>
+Ensure train/val split is correct</p></li>
+</ol>
+</section>
+<section id="training-crashes-with-killed">
+<h3>Training crashes with “Killed”<a class="headerlink" href="#training-crashes-with-killed" title="Link to this heading"></a></h3>
+<p><strong>Symptoms:</strong>
+Process killed with no error message.</p>
+<p><strong>Cause:</strong> System OOM (out of RAM, not GPU memory).</p>
+<p><strong>Solutions:</strong></p>
+<ol class="arabic simple">
+<li><p><strong>Reduce workers:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--num_dataworkers<span class="w"> </span><span class="m">2</span>
+</pre></div>
+</div>
+<ol class="arabic simple" start="2">
+<li><p><strong>Reduce batch size:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--batch_size<span class="w"> </span><span class="m">16</span>
+</pre></div>
+</div>
+<ol class="arabic simple" start="3">
+<li><p><strong>Monitor memory:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>watch<span class="w"> </span>-n<span class="w"> </span><span class="m">1</span><span class="w"> </span>free<span class="w"> </span>-h
+</pre></div>
+</div>
+</section>
+<section id="checkpoints-not-saving">
+<h3>Checkpoints not saving<a class="headerlink" href="#checkpoints-not-saving" title="Link to this heading"></a></h3>
+<p><strong>Symptoms:</strong>
+No <code class="docutils literal notranslate"><span class="pre">.ckpt</span></code> files in <code class="docutils literal notranslate"><span class="pre">train_save_dir/version_0/half1/checkpoints/</span></code></p>
+<p><strong>Solutions:</strong></p>
+<ol class="arabic simple">
+<li><p><strong>Check disk space:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>df<span class="w"> </span>-h<span class="w"> </span>/path/to/train_save_dir
+</pre></div>
+</div>
+<ol class="arabic simple" start="2">
+<li><p><strong>Check write permissions:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>ls<span class="w"> </span>-ld<span class="w"> </span>/path/to/train_save_dir
+</pre></div>
+</div>
+<ol class="arabic simple" start="3">
+<li><p><strong>Verify training completes at least one epoch:</strong>
+Check logs for validation step completion</p></li>
+</ol>
+</section>
+</section>
+<hr class="docutils" />
+<section id="inference-issues">
+<h2>Inference Issues<a class="headerlink" href="#inference-issues" title="Link to this heading"></a></h2>
+<section id="predicted-poses-are-random">
+<h3>Predicted poses are random<a class="headerlink" href="#predicted-poses-are-random" title="Link to this heading"></a></h3>
+<p><strong>Symptoms:</strong></p>
+<ul class="simple">
+<li><p>Angular error &gt; 90°</p></li>
+<li><p>Reconstruction looks like noise</p></li>
+</ul>
+<p><strong>Causes and solutions:</strong></p>
+<ol class="arabic simple">
+<li><p><strong>Wrong checkpoint directory:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Should point to version_0, not to half1 or half2</span>
+--checkpoint_dir<span class="w"> </span>/path/to/training/version_0
+<span class="c1"># NOT: /path/to/training/version_0/half1</span>
+</pre></div>
+</div>
+<ol class="arabic simple" start="2">
+<li><p><strong>Model not trained:</strong>
+Check training logs to verify training completed</p></li>
+<li><p><strong>Different molecule:</strong>
+Model trained on different protein than inference data</p></li>
+<li><p><strong>Wrong symmetry:</strong>
+Verify symmetry matches training</p></li>
+</ol>
+</section>
+<section id="reconstruction-is-blurry">
+<h3>Reconstruction is blurry<a class="headerlink" href="#reconstruction-is-blurry" title="Link to this heading"></a></h3>
+<p><strong>Causes and solutions:</strong></p>
+<ol class="arabic simple">
+<li><p><strong>Insufficient local refinement:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--config<span class="w"> </span>projmatching.grid_distance_degs<span class="o">=</span><span class="m">10</span>.0
+</pre></div>
+</div>
+<p>Note. Increasing this parameter will make running times and memory consumption massively grow.</p>
+<ol class="arabic simple" start="2">
+<li><p><strong>Too strict confidence filtering:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--config<span class="w"> </span>inference.directional_zscore_thr<span class="o">=</span><span class="m">1</span>.5
+</pre></div>
+</div>
+<ol class="arabic simple" start="3">
+<li><p><strong>Not enough particles passing filter:</strong>
+Check output .star file size</p></li>
+<li><p><strong>Wrong reference map:</strong>
+Provide better reference:</p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--reference_map<span class="w"> </span>/path/to/good_reference.mrc
+</pre></div>
+</div>
+</section>
+<section id="no-particles-passed-confidence-threshold">
+<h3>“No particles passed confidence threshold”<a class="headerlink" href="#no-particles-passed-confidence-threshold" title="Link to this heading"></a></h3>
+<p><strong>Symptoms:</strong></p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="ne">Warning</span><span class="p">:</span> <span class="n">No</span> <span class="n">particles</span> <span class="n">passed</span> <span class="n">directional_zscore_thr</span><span class="o">=</span><span class="mf">2.0</span>
+</pre></div>
+</div>
+<p><strong>Solutions:</strong></p>
+<ol class="arabic simple">
+<li><p><strong>Lower threshold:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--config<span class="w"> </span>inference.directional_zscore_thr<span class="o">=</span><span class="m">1</span>.0
+</pre></div>
+</div>
+<ol class="arabic simple" start="2">
+<li><p><strong>Disable filtering:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--config<span class="w"> </span>inference.directional_zscore_thr<span class="o">=</span>None
+</pre></div>
+</div>
+<ol class="arabic simple" start="3">
+<li><p><strong>Check if model and data match:</strong>
+Verify you’re using the correct trained model</p></li>
+</ol>
+</section>
+<section id="inference-slower-than-expected">
+<h3>Inference slower than expected<a class="headerlink" href="#inference-slower-than-expected" title="Link to this heading"></a></h3>
+<p><strong>Solutions:</strong></p>
+<ol class="arabic simple">
+<li><p><strong>Increase batch size:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--batch_size<span class="w"> </span><span class="m">64</span>
+</pre></div>
+</div>
+<p>But this increases GPU memory consumption</p>
+<ol class="arabic simple" start="2">
+<li><p><strong>Reduce top_k predictions:</strong>
+If you enabled inference.top_k_poses_nnet&gt;1, then decrease the number</p></li>
+<li></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--config<span class="w"> </span>inference.top_k_poses_nnet<span class="o">=</span><span class="m">1</span>
+</pre></div>
+</div>
+<ol class="arabic simple" start="3">
+<li><p><strong>Skip reconstruction if not needed:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--config<span class="w"> </span>inference.skip_reconstruction<span class="o">=</span>True
+</pre></div>
+</div>
+<ol class="arabic simple" start="4">
+<li><p><strong>Use GPU:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--config<span class="w"> </span>inference.use_cuda<span class="o">=</span>True
+</pre></div>
+</div>
+<ol class="arabic simple" start="5">
+<li><p><strong>Compile model:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--compile_model
+</pre></div>
+</div>
+</section>
+</section>
+<hr class="docutils" />
+<section id="data-issues">
+<h2>Data Issues<a class="headerlink" href="#data-issues" title="Link to this heading"></a></h2>
+<section id="ctf-parameters-missing">
+<h3>CTF parameters missing<a class="headerlink" href="#ctf-parameters-missing" title="Link to this heading"></a></h3>
+<p><strong>Symptoms:</strong></p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="ne">KeyError</span><span class="p">:</span> <span class="s1">&#39;_rlnDefocusU&#39;</span>
+</pre></div>
+</div>
+<p><strong>Solution:</strong></p>
+<p>CryoPARES requires CTF parameters in .star file. Ensure your .star file was generated after CTF estimation (e.g., CTFFIND or Gctf in RELION).</p>
+<p>Required CTF columns:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">_rlnDefocusU</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">_rlnDefocusV</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">_rlnDefocusAngle</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">_rlnVoltage</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">_rlnSphericalAberration</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">_rlnAmplitudeContrast</span></code></p></li>
+</ul>
+</section>
+<section id="orientation-columns-missing">
+<h3>Orientation columns missing<a class="headerlink" href="#orientation-columns-missing" title="Link to this heading"></a></h3>
+<p><strong>Symptoms:</strong></p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="ne">KeyError</span><span class="p">:</span> <span class="s1">&#39;_rlnAngleRot&#39;</span>
+</pre></div>
+</div>
+<p><strong>Solution:</strong></p>
+<p>For <strong>training</strong>, you need pre-aligned particles with:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">_rlnAngleRot</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">_rlnAngleTilt</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">_rlnAnglePsi</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">_rlnOriginXAngst</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">_rlnOriginYAngst</span></code></p></li>
+</ul>
+<p>For <strong>inference</strong>, orientations are optional (will be predicted).</p>
+</section>
+<section id="particles-are-poorly-centered">
+<h3>Particles are poorly centered<a class="headerlink" href="#particles-are-poorly-centered" title="Link to this heading"></a></h3>
+<p><strong>Symptoms:</strong></p>
+<ul class="simple">
+<li><p>High angular errors</p></li>
+<li><p>Poor reconstruction quality</p></li>
+</ul>
+<p><strong>Solution:</strong></p>
+<p>Re-center particles in RELION:</p>
+<ol class="arabic simple">
+<li><p>Extract particles with larger box size</p></li>
+<li><p>Run 2D or 3D classification</p></li>
+<li><p>Re-extract centered particles</p></li>
+</ol>
+</section>
+<section id="different-sampling-rate-in-data-vs-reference">
+<h3>Different sampling rate in data vs. reference<a class="headerlink" href="#different-sampling-rate-in-data-vs-reference" title="Link to this heading"></a></h3>
+<p><strong>Symptoms:</strong></p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="ne">RuntimeError</span><span class="p">:</span> <span class="n">Size</span> <span class="n">mismatch</span> <span class="n">between</span> <span class="n">particles</span> <span class="ow">and</span> <span class="n">reference</span>
+</pre></div>
+</div>
+<p><strong>Solution:</strong></p>
+<p>CryoPARES handles rescaling automatically, but verify:</p>
+<ol class="arabic simple">
+<li><p><strong>Sampling rates are specified in .star file:</strong>
+Check for <code class="docutils literal notranslate"><span class="pre">_rlnImagePixelSize</span></code> or <code class="docutils literal notranslate"><span class="pre">_rlnDetectorPixelSize</span></code></p></li>
+<li><p><strong>Reference map has correct pixel size:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Check with mrcfile</span>
+python<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;import mrcfile; print(mrcfile.open(&#39;ref.mrc&#39;).voxel_size)&quot;</span>
+</pre></div>
+</div>
+</section>
+</section>
+<hr class="docutils" />
+<section id="performance-issues">
+<h2>Performance Issues<a class="headerlink" href="#performance-issues" title="Link to this heading"></a></h2>
+<section id="training-is-very-slow">
+<h3>Training is very slow<a class="headerlink" href="#training-is-very-slow" title="Link to this heading"></a></h3>
+<p><strong>Diagnostic:</strong></p>
+<p>Check if GPU is being used:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">())</span>  <span class="c1"># Should be True</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">device_count</span><span class="p">())</span>   <span class="c1"># Should be &gt; 0</span>
+</pre></div>
+</div>
+<p><strong>Solutions:</strong></p>
+<ol class="arabic simple">
+<li><p><strong>Enable model compilation:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--compile_model
+</pre></div>
+</div>
+<ol class="arabic simple" start="2">
+<li><p><strong>Increase batch size:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--batch_size<span class="w"> </span><span class="m">64</span>
+</pre></div>
+</div>
+<ol class="arabic simple" start="3">
+<li><p><strong>Reduce image size:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--config<span class="w"> </span>datamanager.particlesDataset.image_size_px_for_nnet<span class="o">=</span><span class="m">96</span>
+</pre></div>
+</div>
+<ol class="arabic simple" start="4">
+<li><p><strong>Use multiple GPUs:</strong>
+CryoPARES automatically uses all available GPUs</p></li>
+<li><p><strong>Reduce model complexity:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--config<span class="w"> </span>models.image2sphere.lmax<span class="o">=</span><span class="m">12</span>
+</pre></div>
+</div>
+<ol class="arabic simple" start="6">
+<li><p><strong>Check data loading is not bottleneck:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--num_dataworkers<span class="w"> </span><span class="m">8</span>
+</pre></div>
+</div>
+<p>You might want to use <code class="docutils literal notranslate"><span class="pre">top</span></code>/<code class="docutils literal notranslate"><span class="pre">htop</span></code> to monitor CPU usage as well as IO. If you see your workers in S status,
+it is a sign of IO bottleneck.</p>
+<ol class="arabic simple" start="7">
+<li><p><strong>Use faster precision:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--config<span class="w"> </span><span class="nv">float32_matmul_precision</span><span class="o">=</span><span class="s2">&quot;medium&quot;</span>
+</pre></div>
+</div>
+</section>
+<section id="inference-is-very-slow">
+<h3>Inference is very slow<a class="headerlink" href="#inference-is-very-slow" title="Link to this heading"></a></h3>
+<p><strong>Solutions:</strong></p>
+<ol class="arabic simple">
+<li><p><strong>Increase batch size:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--batch_size<span class="w"> </span><span class="m">64</span>
+</pre></div>
+</div>
+<ol class="arabic simple" start="2">
+<li><p><strong>Reduce angular search range:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--config<span class="w"> </span>projmatching.grid_distance_degs<span class="o">=</span><span class="m">4</span>.0
+</pre></div>
+</div>
+<ol class="arabic simple" start="3">
+<li><p><strong>Skip local refinement (if acceptable): and reconstruction</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--config<span class="w"> </span>inference.skip_localrefinement<span class="o">=</span>True<span class="w"> </span>inference.skip_reconstruction<span class="o">=</span>True
+</pre></div>
+</div>
+<ol class="arabic simple" start="4">
+<li><p><strong>Use coarser search:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--config<span class="w"> </span>projmatching.grid_step_degs<span class="o">=</span><span class="m">3</span>.0
+</pre></div>
+</div>
+</section>
+<section id="data-loading-is-bottleneck">
+<h3>Data loading is bottleneck<a class="headerlink" href="#data-loading-is-bottleneck" title="Link to this heading"></a></h3>
+<p><strong>Symptoms:</strong></p>
+<ul class="simple">
+<li><p>GPU utilization &lt; 50%</p></li>
+<li><p>High CPU usage from data workers</p></li>
+</ul>
+<p><strong>Solutions:</strong></p>
+<ol class="arabic simple">
+<li><p><strong>Increase workers:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--num_dataworkers<span class="w"> </span><span class="m">8</span>
+</pre></div>
+</div>
+<ol class="arabic simple" start="2">
+<li><p><strong>Use faster storage:</strong>
+Move data to local SSD instead of network drive</p></li>
+<li><p><strong>Reduce preprocessing:</strong>
+Ensure images don’t require heavy rescaling</p></li>
+</ol>
+</section>
+</section>
+<hr class="docutils" />
+<section id="cuda-gpu-issues">
+<h2>CUDA/GPU Issues<a class="headerlink" href="#cuda-gpu-issues" title="Link to this heading"></a></h2>
+<section id="cuda-out-of-memory-but-gpu-seems-empty">
+<h3>“CUDA out of memory” but GPU seems empty<a class="headerlink" href="#cuda-out-of-memory-but-gpu-seems-empty" title="Link to this heading"></a></h3>
+<p><strong>Cause:</strong> Memory fragmentation.</p>
+<p><strong>Solutions:</strong></p>
+<ol class="arabic simple">
+<li><p><strong>Restart training:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Clear GPU memory</span>
+nvidia-smi
+<span class="c1"># Kill any zombie processes</span>
+</pre></div>
+</div>
+<ol class="arabic simple" start="2">
+<li><p><strong>Reduce batch size:</strong>
+Even if GPU shows free memory, fragmentation can prevent allocation</p></li>
+</ol>
+</section>
+<section id="multiple-gpus-not-being-used">
+<h3>Multiple GPUs not being used<a class="headerlink" href="#multiple-gpus-not-being-used" title="Link to this heading"></a></h3>
+<p><strong>Diagnostic:</strong></p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>nvidia-smi
+<span class="c1"># Only GPU 0 shows activity</span>
+</pre></div>
+</div>
+<p><strong>Solution:</strong></p>
+<p>CryoPARES uses PyTorch Lightning’s automatic multi-GPU training. To force specific GPUs:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="nv">CUDA_VISIBLE_DEVICES</span><span class="o">=</span><span class="m">0</span>,1,2,3<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>cryopares_train<span class="w"> </span>...
+</pre></div>
+</div>
+</section>
+<section id="gpu-slower-than-expected">
+<h3>GPU slower than expected<a class="headerlink" href="#gpu-slower-than-expected" title="Link to this heading"></a></h3>
+<p><strong>Solutions:</strong></p>
+<ol class="arabic simple">
+<li><p><strong>Check GPU is not throttling:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>nvidia-smi<span class="w"> </span>--query-gpu<span class="o">=</span>temperature.gpu,clocks.current.graphics<span class="w"> </span>--format<span class="o">=</span>csv
+</pre></div>
+</div>
+<ol class="arabic simple" start="2">
+<li><p><strong>Ensure not using integrated graphics:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>nvidia-smi<span class="w"> </span>--query-gpu<span class="o">=</span>name<span class="w"> </span>--format<span class="o">=</span>csv
+</pre></div>
+</div>
+<ol class="arabic simple" start="3">
+<li><p><strong>Update NVIDIA drivers:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>nvidia-smi
+<span class="c1"># Check driver version, update if old</span>
+</pre></div>
+</div>
+</section>
+</section>
+<hr class="docutils" />
+<section id="output-quality-issues">
+<h2>Output Quality Issues<a class="headerlink" href="#output-quality-issues" title="Link to this heading"></a></h2>
+<section id="reconstruction-has-artifacts">
+<h3>Reconstruction has artifacts<a class="headerlink" href="#reconstruction-has-artifacts" title="Link to this heading"></a></h3>
+<p><strong>Causes and solutions:</strong></p>
+<ol class="arabic simple">
+<li><p><strong>Overfitting to noise:</strong></p>
+<ul class="simple">
+<li><p>Use <code class="docutils literal notranslate"><span class="pre">directional_zscore_thr</span></code> to filter low-confidence particles</p></li>
+<li><p>Use matching half-sets (default behavior)</p></li>
+</ul>
+</li>
+<li><p><strong>CTF correction issues:</strong></p>
+<ul class="simple">
+<li><p>Verify CTF parameters are correct</p></li>
+</ul>
+</li>
+<li><p><strong>Mask too tight:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--config<span class="w"> </span>datamanager.particlesDataset.mask_radius_angs<span class="o">=</span><span class="m">150</span><span class="w">  </span><span class="c1"># Increase</span>
+</pre></div>
+</div>
+<ol class="arabic simple" start="4">
+<li><p><strong>Insufficient particles:</strong>
+Check how many particles passed filtering</p></li>
+</ol>
+</section>
+<section id="fsc-is-lower-than-expected">
+<h3>FSC is lower than expected<a class="headerlink" href="#fsc-is-lower-than-expected" title="Link to this heading"></a></h3>
+<p><strong>Solutions:</strong></p>
+<ol class="arabic simple">
+<li><p><strong>More thorough local refinement:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--config<span class="w"> </span>projmatching.grid_distance_degs<span class="o">=</span><span class="m">10</span>.0<span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>projmatching.grid_step_degs<span class="o">=</span><span class="m">1</span>.0
+</pre></div>
+</div>
+<ol class="arabic simple" start="2">
+<li><p><strong>Filter particles more aggressively:</strong></p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--config<span class="w"> </span>inference.directional_zscore_thr<span class="o">=</span><span class="m">2</span>.5
+</pre></div>
+</div>
+</section>
+<section id="reconstructed-map-has-wrong-hand">
+<h3>Reconstructed map has wrong hand<a class="headerlink" href="#reconstructed-map-has-wrong-hand" title="Link to this heading"></a></h3>
+<p><strong>Solution:</strong></p>
+<p>The model learns the hand from training data. If training data had wrong hand, flip reference map:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">mrcfile</span>
+<span class="n">vol</span> <span class="o">=</span> <span class="n">mrcfile</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s1">&#39;volume.mrc&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">data</span>
+<span class="n">vol_flipped</span> <span class="o">=</span> <span class="n">vol</span><span class="p">[:,</span> <span class="p">:,</span> <span class="p">::</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>  <span class="c1"># Flip along z</span>
+<span class="n">mrcfile</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s1">&#39;volume_flipped.mrc&#39;</span><span class="p">,</span> <span class="n">vol_flipped</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+</section>
+<hr class="docutils" />
+<section id="getting-more-help">
+<h2>Getting More Help<a class="headerlink" href="#getting-more-help" title="Link to this heading"></a></h2>
+<section id="enable-debug-mode">
+<h3>Enable Debug Mode<a class="headerlink" href="#enable-debug-mode" title="Link to this heading"></a></h3>
+<p>For more verbose output:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python<span class="w"> </span>-m<span class="w"> </span>cryopares_train<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--show_debug_stats<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>...<span class="w"> </span>other<span class="w"> </span>args<span class="w"> </span>...
+</pre></div>
+</div>
+</section>
+<section id="check-logs">
+<h3>Check Logs<a class="headerlink" href="#check-logs" title="Link to this heading"></a></h3>
+<p>Training logs are saved to:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">train_save_dir</span><span class="o">/</span><span class="n">version_0</span><span class="o">/</span><span class="n">half</span><span class="o">*/</span>
+</pre></div>
+</div>
+</section>
+<section id="report-issues">
+<h3>Report Issues<a class="headerlink" href="#report-issues" title="Link to this heading"></a></h3>
+<p>If you encounter a bug:</p>
+<ol class="arabic simple">
+<li><p><strong>Check existing issues:</strong> https://github.com/rsanchezgarc/cryoPARES/issues</p></li>
+<li><p><strong>Provide:</strong></p>
+<ul class="simple">
+<li><p>Full command used</p></li>
+<li><p>Error message and stack trace</p></li>
+<li><p>CryoPARES version: <code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">show</span> <span class="pre">cryopares</span></code></p></li>
+<li><p>PyTorch version: <code class="docutils literal notranslate"><span class="pre">python</span> <span class="pre">-c</span> <span class="pre">&quot;import</span> <span class="pre">torch;</span> <span class="pre">print(torch.__version__)&quot;</span></code></p></li>
+<li><p>CUDA version: <code class="docutils literal notranslate"><span class="pre">nvidia-smi</span></code></p></li>
+</ul>
+</li>
+<li><p><strong>Minimal reproducible example:</strong>
+Create smallest possible example that shows the bug</p></li>
+</ol>
+</section>
+</section>
+<hr class="docutils" />
+<section id="see-also">
+<h2>See Also<a class="headerlink" href="#see-also" title="Link to this heading"></a></h2>
+<ul class="simple">
+<li><p><a class="reference internal" href="training_guide.html"><span class="std std-doc">Training Guide</span></a> - Training best practices</p></li>
+<li><p><a class="reference internal" href="configuration_guide.html"><span class="std std-doc">Configuration Guide</span></a> - All configuration parameters</p></li>
+<li><p><a class="reference external" href="https://rsanchezgarc.github.io/cryoPARES/api/">API Reference</a> - Detailed API documentation</p></li>
+</ul>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="cli.html" class="btn btn-neutral float-left" title="Command-Line Interface" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="api/index.html" class="btn btn-neutral float-right" title="API Reference" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Ruben Sanchez-Garcia.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

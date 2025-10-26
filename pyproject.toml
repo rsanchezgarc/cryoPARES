@@ -38,5 +38,6 @@ cryopares_projmatching = "cryoPARES.projmatching.projmatching:main"
 dependencies = {file = ["requirements.txt"]}
 version = {attr = "cryoPARES.__version__"}
 
-[tool.setuptools]
-packages = ["cryoPARES"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["cryoPARES*"]

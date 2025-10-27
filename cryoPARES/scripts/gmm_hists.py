@@ -545,7 +545,7 @@ def _plot_gmms(dist_bad, dist_good, threshold, gmms, gmm_labels, method, show_pl
             plt.plot(X, w * stats.norm.pdf(X, m, s), styles[i], alpha=0.7,
                      label=f"{label} Comp {j+1} (μ={m:.2f}, σ={s:.2f}, w={w:.2f})")
 
-    plt.axvline(threshold, color="g", label=f"Threshold {threshold:.2f} ({method.split("(")[0]})")
+    plt.axvline(threshold, color="g", label=f"Threshold {threshold:.2f} ({method.split('(')[0]})")
     plt.xlabel("Score")
     plt.ylabel("Density")
     plt.title("GMM fitting on score distributions")

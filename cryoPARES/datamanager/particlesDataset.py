@@ -161,7 +161,9 @@ class ParticlesDataset(Dataset, ABC):
         return self.particles.sampling_rate
 
     def original_image_size(self) -> int:
-        return self.particles.optics_md["rlnImageSize"].values
+        images_sizes = set([int(x) for x in self.particles.optics_md["rlnImageSize"].values])
+        assert len(images_sizes) == 1, "Error, several rlnImageSize contained in the starfile. Only one rlnImageSize per starfile is supported"
+        return images_sizes.pop()
 
     @property
     def augmenter(self) -> AugmenterBase:
@@ -222,13 +224,14 @@ class ParticlesDataset(Dataset, ABC):
     def _normalizeNone(self, img):
         return img
 
-    def _correctCtfPhase(self, img, md_row):
-        ctf, wimg = correct_ctf(img, float(self.particles.optics_md["rlnImagePixelSize"].item()),
+    def _correctCtfPhase(self, img, md_row, optics_data):
+
+        ctf, wimg = correct_ctf(img, float(optics_data["rlnImagePixelSize"].item()),
                                 dfu=md_row["rlnDefocusU"], dfv=md_row["rlnDefocusV"],
                                 dfang=md_row["rlnDefocusAngle"],
-                                volt=float(self.particles.optics_md["rlnVoltage"][0]),
-                                cs=float(self.particles.optics_md["rlnSphericalAberration"][0]),
-                                w=float(self.particles.optics_md["rlnAmplitudeContrast"][0]),
+                                volt=float(optics_data["rlnVoltage"][0]),
+                                cs=float(optics_data["rlnSphericalAberration"][0]),
+                                w=float(optics_data["rlnAmplitudeContrast"][0]),
                                 mode=self.ctf_correction, fftshift=True)
         wimg = torch.clamp(wimg, img.min(), img.max())
         wimg = torch.nan_to_num(wimg, nan=img.mean())
@@ -239,7 +242,7 @@ class ParticlesDataset(Dataset, ABC):
         ctf = ctf.real
         return img, ctf
 
-    def _correctCtfNone(self, img, md_row):
+    def _correctCtfNone(self, img, md_row, optics_group_num):
         return img, None
 
     def _getIdx(self, item: int) -> Tuple[str, torch.Tensor, Tuple[torch.Tensor,torch.Tensor,torch.Tensor],
@@ -251,15 +254,17 @@ class ParticlesDataset(Dataset, ABC):
             print(f"Error retrieving item {item}")
             raise
 
+        optics_group_num = int(md_row['rlnOpticsGroup'])
+        optics_data = self.particles.optics_md.query(f'rlnOpticsGroup == {optics_group_num}')
 
         iid = md_row[RELION_IMAGE_FNAME]
         img_ori = torch.FloatTensor(img_ori)
-        img, ctf_ori = self._correctCtf(img_ori.unsqueeze(0), md_row)
+        img, ctf_ori = self._correctCtf(img_ori.unsqueeze(0), md_row, optics_data)
 
         if img.isnan().any():
             raise RuntimeError(f"Error, img with idx {item} has NAN")
 
-        img = self.resizeImage(img)
+        img = self.resizeImage(img, optics_data)
         img = self._normalize(img) #I changed the order of the normalization call, in cesped it was before ctf correction
 
         degEuler = torch.FloatTensor([md_row.get(name, 0) for name in RELION_ANGLES_NAMES])
@@ -272,9 +277,9 @@ class ParticlesDataset(Dataset, ABC):
     def symmetry_group(self):
         return R.create_group(self.symmetry.upper())
 
-    def resizeImage(self, img):
+    def resizeImage(self, img, optics_data):
 
-        ori_pixelSize = float(self.particles.optics_md["rlnImagePixelSize"].item())
+        ori_pixelSize = float(optics_data["rlnImagePixelSize"].item())
         img, pad_info, crop_info = resize_and_padCrop_tensorBatch(img.unsqueeze(0),
                                                                   ori_pixelSize,
                                                                   self.sampling_rate_angs_for_nnet,
@@ -300,7 +305,8 @@ class ParticlesDataset(Dataset, ABC):
         rotMat = torch.FloatTensor(rotMat)
 
         if self.apply_mask_to_img:
-            mask = self._getParticleMask(self.nnet_image_size_px, sampling_rate=self.sampling_rate, mask_radius_angs=self.mask_radius_angs)[1]
+            mask = self._getParticleMask(self.nnet_image_size_px, sampling_rate=self.sampling_rate,
+                                         mask_radius_angs=self.mask_radius_angs)[1]
             prepro_img *= mask
 
         batch = {BATCH_IDS_NAME: iid,

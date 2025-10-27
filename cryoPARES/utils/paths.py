@@ -26,7 +26,7 @@ def find_configs_root() -> Path:
 @functools.cache
 def find_project_root() -> Path:
     """Find the project root by looking for pyproject.toml"""
-    return _find_directory_with_marker('pyproject.toml')
+    return Path(os.path.dirname(find_configs_root()))
 
 
 def get_most_recent_file(folder_path: str, template: str) -> str | None:
@@ -66,3 +66,6 @@ def get_most_recent_file(folder_path: str, template: str) -> str | None:
 
 FNAME_TYPE = Union[PathLike, str]
 MAP_AS_ARRAY_OR_FNAME_TYPE = Union[FNAME_TYPE, torch.Tensor, np.ndarray]
+
+if __name__ == "__main__":
+    print(find_project_root())

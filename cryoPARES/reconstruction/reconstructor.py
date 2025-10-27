@@ -530,9 +530,9 @@ class ReconstructionParticlesDataset(Dataset):
             optics_group_num = int(md_row['rlnOpticsGroup'])
             optics_data = self.particles.optics_md.query(f'rlnOpticsGroup == {optics_group_num}')
 
-            volt = float(optics_data["rlnVoltage"][0])
-            cs = float(optics_data["rlnSphericalAberration"][0])
-            w = float(optics_data["rlnAmplitudeContrast"][0])
+            volt = float(optics_data["rlnVoltage"].item())
+            cs = float(optics_data["rlnSphericalAberration"].item())
+            w = float(optics_data["rlnAmplitudeContrast"].item())
             iid = md_row[RELION_IMAGE_FNAME]
             ctf = compute_ctf_rfft(
                 img.shape[-2],

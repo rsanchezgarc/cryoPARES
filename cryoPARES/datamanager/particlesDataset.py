@@ -229,9 +229,9 @@ class ParticlesDataset(Dataset, ABC):
         ctf, wimg = correct_ctf(img, float(optics_data["rlnImagePixelSize"].item()),
                                 dfu=md_row["rlnDefocusU"], dfv=md_row["rlnDefocusV"],
                                 dfang=md_row["rlnDefocusAngle"],
-                                volt=float(optics_data["rlnVoltage"][0]),
-                                cs=float(optics_data["rlnSphericalAberration"][0]),
-                                w=float(optics_data["rlnAmplitudeContrast"][0]),
+                                volt=float(optics_data["rlnVoltage"].item()),
+                                cs=float(optics_data["rlnSphericalAberration"].item()),
+                                w=float(optics_data["rlnAmplitudeContrast"].item()),
                                 mode=self.ctf_correction, fftshift=True)
         wimg = torch.clamp(wimg, img.min(), img.max())
         wimg = torch.nan_to_num(wimg, nan=img.mean())

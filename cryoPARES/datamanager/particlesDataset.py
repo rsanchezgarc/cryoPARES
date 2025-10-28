@@ -290,7 +290,7 @@ class ParticlesDataset(Dataset, ABC):
 
     def __getitem(self, item):
         iid, prepro_img, (degEuler, xyShiftAngs, confidence), md_dict, (img_ori, ctf_ori)= self._getIdx(item)
-
+        # 0/0 #TODO: This is for debugging
         if self.augmenter is not None:
             prepro_img, degEuler, shift, _ = self.augmenter(prepro_img,  # 1xSxS image expected
                                                             degEuler,

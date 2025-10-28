@@ -1,6 +1,5 @@
 import gc
 import os
-import subprocess
 import sys
 import warnings
 import torch
@@ -24,6 +23,7 @@ from cryoPARES.constants import DATA_SPLITS_BASENAME, TRAINING_DONE_TEMPLATE
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.reconstruction.reconstructor import reconstruct_starfile
 from cryoPARES.utils.paths import get_most_recent_file
+from cryoPARES.utils.subprocessUtils import run_subprocess_with_error_summary
 from autoCLI_config import ConfigArgumentParser, ConfigOverrideSystem
 
 
@@ -271,9 +271,10 @@ class TrainerPartition:
                         **kwargs
                     )
                     print(cmd)  # TODO: Use loggers
-                    subprocess.run(
+                    run_subprocess_with_error_summary(
                         cmd.split(),
-                        cwd=os.path.abspath(os.path.join(__file__, "..", "..", "..")), check=True
+                        cwd=os.path.abspath(os.path.join(__file__, "..", "..", "..")),
+                        description=f"Reconstructing volume for {self.partition}"
                     )
             else:
                 warnings.warn("No validation particles found, directional percentiles were not computed")
@@ -347,9 +348,10 @@ def execute_trainOnePartition(**kwargs):
     if config_args:
         cmd += " --config " + " ".join(config_args)
     print(cmd)  # TODO: Use loggers
-    subprocess.run(
+    run_subprocess_with_error_summary(
         cmd.split(),
-        cwd=os.path.abspath(os.path.join(__file__, "..", "..", "..")), check=True
+        cwd=os.path.abspath(os.path.join(__file__, "..", "..", "..")),
+        description=f"Training partition {kwargs.get('partition', 'unknown')}"
     )
 
 

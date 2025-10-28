@@ -21,6 +21,14 @@ def worker(worker_id, *args, **kwargs):
     except Exception as e:
         print(f"[Worker {worker_id}] Exception occurred: {e}", file=sys.stderr)
         traceback.print_exc()
+
+        # Print error summary for easier debugging
+        from cryoPARES.utils.errorFormatting import print_error_summary
+        print_error_summary(
+            e,
+            description=f"Reconstruction worker {worker_id}",
+            worker_id=worker_id
+        )
         raise e
 
 

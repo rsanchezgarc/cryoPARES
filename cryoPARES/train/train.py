@@ -2,7 +2,6 @@ import glob
 import json
 import os
 import shutil
-import subprocess
 import warnings
 
 import psutil
@@ -14,6 +13,7 @@ from typing import Optional, List, Literal
 from argParseFromDoc import generate_command_for_argparseFromDoc
 
 from cryoPARES import constants
+from cryoPARES.utils.subprocessUtils import run_subprocess_with_error_summary
 from autoCLI_config import inject_defaults_from_config, inject_docs_from_config_params, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.constants import DATA_SPLITS_BASENAME
@@ -250,9 +250,10 @@ class Trainer:
                             **simulation_kwargs
                         )
                         print(cmd)
-                        subprocess.run(
+                        run_subprocess_with_error_summary(
                             cmd.split(),
-                            cwd=os.path.abspath(os.path.join(__file__, "..", "..", "..")), check=True
+                            cwd=os.path.abspath(os.path.join(__file__, "..", "..", "..")),
+                            description="Simulating particles for pre-training"
                         )
                         print(f"simulated data was generated at {simulation_dir}")
                         sim_star_fnames.append(os.path.join(simulation_dir, "projections.star"))
@@ -358,9 +359,10 @@ class Trainer:
             if config_args is not None:
                 cmd += " --config " + " ".join(config_args)
             print(cmd)
-            subprocess.run(
+            run_subprocess_with_error_summary(
                 cmd.split(),
-                cwd=os.path.abspath(os.path.join(__file__, "..", "..", "..")), check=True
+                cwd=os.path.abspath(os.path.join(__file__, "..", "..", "..")),
+                description=f"Running inference on {outdirbasename} particles"
             )
         if partition in ["half1", "half2"]:
             star_fnames = glob.glob(osp.join(results_dir+"_*", f"*_{partition}.star"))

@@ -294,19 +294,27 @@ class Trainer:
                     overfit_batches=self.overfit_batches,
                     config_args=config_args
                 )
+                print(f"\nFinished training for partition {partition}.")
                 if self.junk_particles_star_fname:
-                    # if self.junk_particles_dir:
                     junk_stars = self._infer_particles(self.junk_particles_star_fname, self.junk_particles_dir,
-                                                  partition, outdirbasename="junk")
-                    val_stars = glob.glob(osp.join(self.experiment_root, partition, DATA_SPLITS_BASENAME, "val",
-                                                   "*-particles.star"))
+                                                  partition, outdirbasename="junk", config_args=config_args)
+
                     if self.particles_dir is None:
                         particles_dir = [os.path.dirname(x) for x in self.particles_star_fname]
                     else:
                         particles_dir = self.particles_dir
+
+                    val_stars = glob.glob(osp.join(self.experiment_root, partition, DATA_SPLITS_BASENAME, "val",
+                                                   "*-particles*.star"))
+                    assert val_stars, (f"Error, no validation data found at "
+                                       f"{os.path.join(self.experiment_root, partition, DATA_SPLITS_BASENAME, 'val')}.")
                     val_stars = self._infer_particles(val_stars,
                                                       particles_dir,
-                                                      partition, outdirbasename="val")
+                                                      partition, outdirbasename="val",
+                                                      config_args=config_args)
+                    assert val_stars, (f"Error, no validation predictions found")
+                    assert junk_stars, (f"Error, no junk_stars predictions found")
+                    #TODO: compare_prob_hists breaks when multiple gpus are used
                     compare_prob_hists(fname_good=val_stars, fname_bad=junk_stars, show_plots=False,
                                        plot_fname=osp.join(self.experiment_root, partition,"directional_threshold.png"),
                                        symmetry=self.symmetry, compute_gmm=True)
@@ -323,7 +331,7 @@ class Trainer:
         with open(osp.join(self.experiment_root, finetune_checkpoint_base), "w") as f:
             f.write(f"finetuneCheckpoint: {self.finetune_checkpoint_dir}")
 
-    def _infer_particles(self, particles_star_fnames, particles_dirs, partition, outdirbasename):
+    def _infer_particles(self, particles_star_fnames, particles_dirs, partition, outdirbasename, config_args=None):
         from cryoPARES.inference.infer import distributed_inference
         results_dir = osp.join(self.experiment_root, partition, "inference", outdirbasename)
         if particles_dirs is None:
@@ -347,12 +355,17 @@ class Trainer:
                 python_executable=sys.executable,
                 **infer_kwars
             )
+            if config_args is not None:
+                cmd += " --config " + " ".join(config_args)
             print(cmd)
             subprocess.run(
                 cmd.split(),
                 cwd=os.path.abspath(os.path.join(__file__, "..", "..", "..")), check=True
             )
-        star_fnames = glob.glob(osp.join(results_dir+"_*", f"particles*_{partition}.star"))
+        if partition in ["half1", "half2"]:
+            star_fnames = glob.glob(osp.join(results_dir+"_*", f"*_{partition}.star"))
+        else:
+            star_fnames = glob.glob(osp.join(results_dir+"_*", f"*.star"))
         return star_fnames
 def main():
     os.environ[constants.PROJECT_NAME + "__ENTRY_POINT"] = "train.py"

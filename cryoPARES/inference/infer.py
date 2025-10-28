@@ -7,17 +7,14 @@ from typing import Optional, Literal, List, Dict, Any
 import numpy as np
 import pandas as pd
 import torch
-import starfile  # fast STAR I/O
+import starfile
 
 from torch import multiprocessing
 from progressBarDistributed import SharedMemoryProgressBar, SharedMemoryProgressBarWorker
-
 from cryoPARES import constants
 from autoCLI_config import CONFIG_PARAM, inject_defaults_from_config, inject_docs_from_config_params
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.reconstruction.reconstruct import create_shared_tensor
-from cryoPARES.inference.inferencer import SingleInferencer
-from cryoPARES.utils.paths import get_most_recent_file
 from cryoPARES.scripts.computeFsc import compute_fsc
 from cryoPARES.utils.reconstructionUtils import get_vol
 from autoCLI_config import ConfigArgumentParser, ConfigOverrideSystem
@@ -115,6 +112,8 @@ def distributed_inference(
     - For **n_jobs > 1**, particles are split by half-set and distributed across workers; model half
       selection follows the resolved policy per half to avoid cross-half coupling.
     """
+
+    from cryoPARES.inference.inferencer import SingleInferencer
 
     torch.set_float32_matmul_precision(main_config.inference.float32_matmul_precision)
 
@@ -512,6 +511,7 @@ def _worker(worker_id,
             torch.cuda.set_device(dev_index)
 
     ConfigOverrideSystem.update_config_from_dataclass(main_config, main_config_updated, verbose=False)
+    from cryoPARES.inference.inferencer import SingleInferencer
 
     if _INFERENCER is None:
         inferencer = SingleInferencer(**inferencer_init_kwargs)
@@ -587,7 +587,6 @@ def main():
         os.unlink(temp_config_path)
 
     ConfigOverrideSystem.update_config_from_configstrings(main_config, config_args, verbose=True)
-
     distributed_inference(**vars(args))
 
 

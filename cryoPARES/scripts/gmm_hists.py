@@ -186,6 +186,7 @@ def _read_particles_star(paths: List[str], root_dir: Optional[str], label: str) 
             if k not in tab.columns:
                 raise KeyError(f"Missing column '{k}' in {label} ({p})")
         out.append(tab)
+    assert len(out) == len(paths) and len(out) > 0, f"Error reading paths {paths} (out {out})"
     df = pd.concat(out, ignore_index=True)
     return df
 
@@ -882,9 +883,9 @@ def compare_prob_hists(
     # Print dataset statistics
     print(f"GOOD n={len(parts_good)}")
     print(parts_good[score_name].describe())
-    print("BAD n={len(parts_bad)}")
+    print(f"BAD n={len(parts_bad)}")
     print(parts_bad[score_name].describe())
-    print(" BG n={len(parts_bg)}")
+    print(f" BG n={len(parts_bg)}")
 
     # Compute background quantile if applicable (useful diagnostic for MODE 1)
     if len(parts_bg) > 0 and len(parts_good) > 0:

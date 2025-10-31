@@ -133,7 +133,7 @@ See Also
 - `cryoPARES.inference.infer`: Uses directional z-scores for particle filtering
 - `cryoPARES.datamanager.particlesDataset`: Dataset class that applies thresholds
 """
-
+import json
 import os
 from typing import Optional, List, Tuple
 
@@ -560,6 +560,8 @@ def _plot_gmms(dist_bad, dist_good, threshold, gmms, gmm_labels, method, show_pl
 
     if out_base:
         plt.savefig(f"{out_base}_gmm.png", bbox_inches="tight", dpi=150)
+        with open(f"{out_base}_directional_zscore_threshold.json", "w") as f:
+            json.dump({"threshold": threshold, "method": method}, f)
     if show_plots:
         plt.show()
     plt.close()
@@ -937,7 +939,8 @@ def compare_prob_hists(
             low_pct=low_pct, up_pct=up_pct, fallback_method=fallback_method, fn_cost=fn_cost
         )
         if thr is not None:
-            print(f"GMM threshold: {thr:.6f} (method={method})")
+            print(f"\n--------------------------------------------\n"
+                  f"GMM threshold: {thr:.5f} (method={method}).\nYou can use {thr:.5f} as the --directional_zscore_thr when running inference to perform automatic particle prunning ")
         return thr, gmms, method
 
     return None

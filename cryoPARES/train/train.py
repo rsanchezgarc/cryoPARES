@@ -26,21 +26,16 @@ class Trainer:
     @inject_docs_from_config_params
     @inject_defaults_from_config(main_config.train, update_config_with_args=True)
     def __init__(self, symmetry: str, particles_star_fname: List[str], train_save_dir: str,
+                 image_size_px_for_nnet: int,
                  particles_dir: Optional[List[str]] = None, n_epochs: int = CONFIG_PARAM(),
-                 batch_size: int = CONFIG_PARAM(), #CONFIG_PARAM status with update_config_with_args gets updated in config directly
-                 num_dataworkers: int = CONFIG_PARAM(config=main_config.datamanager), #CONFIG_PARAM status with update_config_with_args gets updated in config directly
-                 image_size_px_for_nnet: int = CONFIG_PARAM(config=main_config.datamanager.particlesdataset), #CONFIG_PARAM status with update_config_with_args gets updated in config directly
-                 sampling_rate_angs_for_nnet: float = CONFIG_PARAM(config=main_config.datamanager.particlesdataset), # CONFIG_PARAM status with update_config_with_args gets updated in config directly
-                 mask_radius_angs: Optional[float] = CONFIG_PARAM(config=main_config.datamanager.particlesdataset), # CONFIG_PARAM status with update_config_with_args gets updated in config directly
-                 split_halves: bool = True,
-                 continue_checkpoint_dir: Optional[str] = None, finetune_checkpoint_dir: Optional[str] = None,
-                 compile_model: bool = False,
-                 val_check_interval: Optional[float] = None,
-                 overfit_batches: Optional[int] = None,
+                 batch_size: int = CONFIG_PARAM(), num_dataworkers: int = CONFIG_PARAM(config=main_config.datamanager),
+                 sampling_rate_angs_for_nnet: float = CONFIG_PARAM(config=main_config.datamanager.particlesdataset),
+                 mask_radius_angs: Optional[float] = CONFIG_PARAM(config=main_config.datamanager.particlesdataset),
+                 split_halves: bool = True, continue_checkpoint_dir: Optional[str] = None,
+                 finetune_checkpoint_dir: Optional[str] = None, compile_model: bool = False,
+                 val_check_interval: Optional[float] = None, overfit_batches: Optional[int] = None,
                  map_fname_for_simulated_pretraining: Optional[List[str]] = None,
-                 junk_particles_star_fname: Optional[List[str]] = None,
-                 junk_particles_dir: Optional[List[str]] = None,
-                 ):
+                 junk_particles_star_fname: Optional[List[str]] = None, junk_particles_dir: Optional[List[str]] = None):
         """
         Train a model on particle data.
 
@@ -48,11 +43,11 @@ class Trainer:
             symmetry: {symmetry}
             particles_star_fname: {particles_star_fname}
             train_save_dir: {train_save_dir}
+            image_size_px_for_nnet: {image_size_px_for_nnet}
             particles_dir: {particles_dir}
             n_epochs: {n_epochs}
             batch_size: {batch_size}
             num_dataworkers: {num_dataworkers}
-            image_size_px_for_nnet: {image_size_px_for_nnet}
             sampling_rate_angs_for_nnet: {sampling_rate_angs_for_nnet}
             mask_radius_angs: {mask_radius_angs}
             split_halves: {split_halves}
@@ -80,6 +75,8 @@ class Trainer:
         self.map_fname_for_simulated_pretraining = map_fname_for_simulated_pretraining
         self.junk_particles_star_fname = junk_particles_star_fname
         self.junk_particles_dir = junk_particles_dir
+        main_config.datamanager.particlesdataset.image_size_px_for_nnet = image_size_px_for_nnet
+
         if self.junk_particles_star_fname:
             if self.junk_particles_dir:
                 assert len(self.junk_particles_star_fname) == len(self.junk_particles_dir), ("Error, the"
@@ -93,6 +90,7 @@ class Trainer:
                                                  "finetune_checkpoint_dir is not a valid option")
 
         self._validate_inputs()
+
         self._setup_training_dir(train_save_dir)
 
     def _validate_inputs(self):
@@ -388,6 +386,6 @@ if __name__ == "__main__":
     """
 
 python -m cryoPARES.train.train  \
---symmetry C1 --particles_star_fname /home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles.star  --train_save_dir /tmp/cryoPARES_train/ --n_epochs 1 --overfit_batches 20 --batch_size 4 --config models.image2sphere.lmax=6 models.image2sphere.so3components.i2sprojector.hp_order=2 models.image2sphere.so3components.s2conv.hp_order=2 models.image2sphere.so3components.so3outputgrid.hp_order=2  models.image2sphere.imageencoder.encoderArtchitecture="resnet" models.image2sphere.imageencoder.resnet.resnetName="resnet18" datamanager.num_dataworkers=1
+--symmetry C1 --image_size_px_for_nnet 160 --particles_star_fname /home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles.star  --train_save_dir /tmp/cryoPARES_train/ --n_epochs 1 --overfit_batches 20 --batch_size 4 --config models.image2sphere.lmax=6 models.image2sphere.so3components.i2sprojector.hp_order=2 models.image2sphere.so3components.s2conv.hp_order=2 models.image2sphere.so3components.so3outputgrid.hp_order=2  models.image2sphere.imageencoder.encoderArtchitecture="resnet" models.image2sphere.imageencoder.resnet.resnetName="resnet18" datamanager.num_dataworkers=1
  
     """

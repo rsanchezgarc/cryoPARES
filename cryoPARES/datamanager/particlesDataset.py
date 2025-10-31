@@ -71,7 +71,7 @@ class ParticlesDataset(Dataset, ABC):
         elif perImg_normalization == "noiseStats":
             self._normalize = self._normalizeNoiseStats
         elif perImg_normalization == "subtractMean":
-            self._normalize = self.confidences_normalizeSubtractMean
+            self._normalize = self._normalizeSubtractMean
         else:
             ValueError(f"Error, perImg_normalization {perImg_normalization} wrong option")
 
@@ -216,6 +216,8 @@ class ParticlesDataset(Dataset, ABC):
         noiseRegion = img[:, backgroundMask]
         meanImg = noiseRegion.mean()
         stdImg = noiseRegion.std()
+        if torch.isnan(stdImg) or torch.isinf(stdImg) or stdImg == 0 or noiseRegion.numel() == 0:
+            raise RuntimeError(f"Invalid standard deviation for particle normalization: {stdImg.item()}. Did you select wrong particle or masks sizes?")
         return (img - meanImg) / stdImg
 
     def _normalizeSubtractMean(self, img):

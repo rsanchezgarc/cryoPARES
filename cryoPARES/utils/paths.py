@@ -64,6 +64,37 @@ def get_most_recent_file(folder_path: str, template: str) -> str | None:
         return None
 
 
+def convert_config_args_to_absolute_paths(config_args):
+    """
+    Convert any relative YAML file paths in config_args to absolute paths.
+
+    This is important for subprocess propagation, where relative paths may be
+    resolved relative to a different working directory.
+
+    Args:
+        config_args: List of config strings (e.g., ['config.yaml', 'train.n_epochs=100'])
+
+    Returns:
+        List of config strings with YAML file paths converted to absolute paths,
+        or None if config_args is None
+    """
+    if config_args is None:
+        return None
+
+    converted_args = []
+    for arg in config_args:
+        # Check if it's a YAML file path (not a key=value assignment)
+        if (arg.endswith('.yaml') or arg.endswith('.yml')) and '=' not in arg:
+            # Convert to absolute path
+            abs_path = os.path.abspath(arg)
+            converted_args.append(abs_path)
+        else:
+            # Keep key=value assignments unchanged
+            converted_args.append(arg)
+
+    return converted_args
+
+
 FNAME_TYPE = Union[PathLike, str]
 MAP_AS_ARRAY_OR_FNAME_TYPE = Union[FNAME_TYPE, torch.Tensor, np.ndarray]
 

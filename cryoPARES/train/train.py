@@ -19,7 +19,7 @@ from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.constants import DATA_SPLITS_BASENAME
 from cryoPARES.scripts.gmm_hists import compare_prob_hists
 from cryoPARES.utils.checkpointUtils import get_best_checkpoint
-from cryoPARES.utils.paths import get_most_recent_file
+from cryoPARES.utils.paths import get_most_recent_file, convert_config_args_to_absolute_paths
 
 
 class Trainer:
@@ -377,6 +377,8 @@ def main():
     parser = ConfigArgumentParser(prog="train_cryoPARES", config_obj=main_config, verbose=True)
     parser.add_args_from_function(Trainer.__init__)
     args, config_args = parser.parse_args()
+    # Convert any relative config file paths to absolute paths for subprocess propagation
+    config_args = convert_config_args_to_absolute_paths(config_args)
     Trainer(**vars(args)).run(config_args)
 
 

@@ -19,6 +19,7 @@ from cryoPARES.scripts.computeFsc import compute_fsc
 from cryoPARES.utils.reconstructionUtils import get_vol
 from autoCLI_config import ConfigArgumentParser, ConfigOverrideSystem
 from cryoPARES.utils.checkpointReader import CheckpointReader
+from cryoPARES.utils.paths import convert_config_args_to_absolute_paths
 
 
 # -----------------------------
@@ -567,6 +568,8 @@ def main():
                                   config_obj=main_config)
     parser.add_args_from_function(distributed_inference)
     args, config_args = parser.parse_args()
+    # Convert any relative config file paths to absolute paths for consistency
+    config_args = convert_config_args_to_absolute_paths(config_args)
 
     # Support both directory and ZIP checkpoints
     if args.checkpoint_dir.endswith('.zip'):

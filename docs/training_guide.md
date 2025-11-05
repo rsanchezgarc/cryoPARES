@@ -281,18 +281,25 @@ Then open your browser to `http://localhost:6006`
 
 #### 3. Angular Error (`geo_degs`, `val_geo_degs`)
 
-- Average angular error in degrees
-- **Goal:** As low as possible (typically < 15° for good models)
+- Average angular error in degrees. 
+- **Goal:** As low as possible (typically < 15° for good models, but depends on the quality of the training particles subest. 
+We have seen successful models with errors as high as 25°)
 - `val_geo_degs` is the key metric for final model quality
-- It is easier to check for overfitting comparing `geo_degs` vs `val_geo_degs`
+- It is easier to check for overfitting comparing `geo_degs` vs `val_geo_degs`. If `geo_degs` improves but `val_geo_degs`
+does not, you are in the overfitting regime.
 
 #### 4. Median Angular Error (`val_median_geo_degs`)
 
-- More robust than mean to outliers
+- More robust to outliers than the mean, this metric reports the largest angular error among the best-aligned 50% of particles.
 - Should also decrease during training
 - **Goal:** As low as possible (typically < 8° for good models)
 - `val_geo_degs` and `val_median_geo_degs` represent the same property, but aggregated in a different manner.
-They should follow the same trends.
+They should follow the same trends. 
+- If the `val_geo_degs` value is much larger than `val_median_geo_degs`, it suggests a heavy tail of large errors—often due to
+junk or misaligned particles. Consider improving the training set via:
+  - Consensus alignments (e.g., remove particles with conflicting orientations between cryoSPARC and RELION). 
+  - Particle pruning (drop obvious outliers or low-quality picks). 
+  - Additional filtering/classification steps as needed.
 
 #### 5. Learning Rate (`lr`)
 
@@ -322,7 +329,7 @@ tensorboard --logdir experiments/run_001/version_0
 # Monitor these curves:
 # 1. loss (should decrease smoothly)
 # 2. val_loss (should track loss)
-# 3. val_geo_degs (target: < 5 degrees)
+# 3. val_geo_degs (target: < 20 degrees) /val_median_geo_degs (target: <8 degrees)
 # 4. Learning rate (should stay constant, then drop on plateau)
 ```
 

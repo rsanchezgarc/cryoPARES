@@ -22,11 +22,60 @@ from cryoPARES.utils.checkpointUtils import get_best_checkpoint
 from cryoPARES.utils.paths import get_most_recent_file, convert_config_args_to_absolute_paths
 
 
+def _check_if_in_config_args(param_path: str) -> bool:
+    """
+    Check if a parameter will be provided via --config at parse time.
+
+    This inspects sys.argv to see if --config is present and would provide the given
+    parameter (either via key=value or in a YAML file).
+
+    Args:
+        param_path: The config path to check (e.g., 'datamanager.particlesdataset.image_size_px_for_nnet')
+
+    Returns:
+        True if --config appears to provide this parameter, False otherwise
+    """
+    import sys
+
+    # If --config is not present, definitely not in config
+    if '--config' not in sys.argv:
+        return False
+
+    # Find all --config values
+    try:
+        config_idx = sys.argv.index('--config')
+        # Collect all config arguments until next flag or end
+        config_args = []
+        for i in range(config_idx + 1, len(sys.argv)):
+            if sys.argv[i].startswith('--'):
+                break
+            config_args.append(sys.argv[i])
+
+        # Check if any config arg is a key=value containing our parameter
+        for arg in config_args:
+            if '=' in arg and param_path in arg:
+                return True
+            # If it's a YAML file, we'd need to load it to check - too complex
+            # for this pre-parse check, so we conservatively assume it might be there
+            if arg.endswith('.yaml') or arg.endswith('.yml'):
+                return True  # Assume config file might contain it
+
+        return False
+    except (ValueError, IndexError):
+        return False
+
+
 class Trainer:
     @inject_docs_from_config_params
     @inject_defaults_from_config(main_config.train, update_config_with_args=True)
     def __init__(self, symmetry: str, particles_star_fname: List[str], train_save_dir: str,
-                 image_size_px_for_nnet: int,
+                 # image_size_px_for_nnet is REQUIRED, but can be provided via --config or CLI.
+                 # Uses is_required_arg_for_cli_fun to check sys.argv and determine if it
+                 # should be marked as required for argparse.
+                 image_size_px_for_nnet: Optional[int] = CONFIG_PARAM(
+                     config=main_config.datamanager.particlesdataset,
+                     is_required_arg_for_cli_fun=lambda: not _check_if_in_config_args('datamanager.particlesdataset.image_size_px_for_nnet')
+                 ),
                  particles_dir: Optional[List[str]] = None, n_epochs: int = CONFIG_PARAM(),
                  batch_size: int = CONFIG_PARAM(), num_dataworkers: int = CONFIG_PARAM(config=main_config.datamanager),
                  sampling_rate_angs_for_nnet: float = CONFIG_PARAM(config=main_config.datamanager.particlesdataset),
@@ -75,8 +124,20 @@ class Trainer:
         self.map_fname_for_simulated_pretraining = map_fname_for_simulated_pretraining
         self.junk_particles_star_fname = junk_particles_star_fname
         self.junk_particles_dir = junk_particles_dir
-        main_config.datamanager.particlesdataset.image_size_px_for_nnet = image_size_px_for_nnet
 
+        # Validate and set image_size_px_for_nnet
+        # Note: This is a safety check. The main validation happens in main() after
+        # --config is processed. This check catches the case where Trainer() is called
+        # directly (not via main()), or if something goes wrong with config injection.
+        if image_size_px_for_nnet is not None:
+            main_config.datamanager.particlesdataset.image_size_px_for_nnet = image_size_px_for_nnet
+        else:
+            raise ValueError(
+                "image_size_px_for_nnet is required. Provide it via:\n"
+                "  --image_size_px_for_nnet VALUE\n"
+                "  --config datamanager.particlesdataset.image_size_px_for_nnet=VALUE\n"
+                "  --config FILE.yaml (containing datamanager.particlesdataset.image_size_px_for_nnet)"
+            )
         if self.junk_particles_star_fname:
             if self.junk_particles_dir:
                 assert len(self.junk_particles_star_fname) == len(self.junk_particles_dir), ("Error, the"
@@ -372,14 +433,20 @@ def main():
     print("---------------------------------------")
     print(" ".join(sys.argv))
     print("---------------------------------------")
-    from autoCLI_config import ConfigArgumentParser, export_config_to_yaml
+    from autoCLI_config import ConfigArgumentParser
 
     parser = ConfigArgumentParser(prog="train_cryoPARES", config_obj=main_config, verbose=True)
     parser.add_args_from_function(Trainer.__init__)
+
+    # Parse arguments
+    # Note: image_size_px_for_nnet uses is_required_arg_for_cli_fun in CONFIG_PARAM
+    # to intelligently determine if it should be required based on --config presence
     args, config_args = parser.parse_args()
+
     # Convert any relative config file paths to absolute paths for subprocess propagation
+    kwargs = vars(args)
     config_args = convert_config_args_to_absolute_paths(config_args)
-    Trainer(**vars(args)).run(config_args)
+    Trainer(**kwargs).run(config_args)
 
 
 if __name__ == "__main__":

@@ -31,7 +31,7 @@ class ParticlesDataset_config():
     }
 
     sampling_rate_angs_for_nnet: float = 1.5
-    image_size_px_for_nnet: int = 160
+    image_size_px_for_nnet: Optional[int] = None
     store_data_in_memory: bool = True
     mask_radius_angs: Optional[float] = None #If None, use a circular mask of radius Box/2
     apply_mask_to_img: bool = True # If True, apply the mask to the the image, otherwise, use it only for computing normalization stats

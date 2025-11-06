@@ -382,50 +382,31 @@ class CryoEMSimulator:
                 R_sim = _deg_eulers_to_R(euls_gt + angle_jit)
                 projs = self._project(R_sim)  # (B, H, W)
 
-                # Apply shifts (ground-truth + jitter) in batch
+                # Apply shifts (ground-truth + jitter) in batch - fully vectorized!
                 total_shifts_px = shifts_gt_px + shift_jit_px  # (B, 2)
                 # Relion convention: shifts are corrections, so negate
                 shift_vectors = torch.stack([-total_shifts_px[:, 1], -total_shifts_px[:, 0]], dim=1)  # (B, 2): [-y, -x]
 
-                # Apply shifts to all projections
-                projs_shifted = []
-                for i in range(B):
-                    if total_shifts_px[i, 0] != 0 or total_shifts_px[i, 1] != 0:
-                        proj_shifted = fourier_shift_image_2d(projs[i], shifts=shift_vectors[i])
-                    else:
-                        proj_shifted = projs[i]
-                    projs_shifted.append(proj_shifted)
-                projs = torch.stack(projs_shifted, dim=0)  # (B, H, W)
+                # Apply shifts to all projections at once (batch operation)
+                projs = fourier_shift_image_2d(projs, shifts=shift_vectors)  # (B, H, W)
 
                 # Apply CTF in batch (if all have same bfactor or all None)
                 if apply_ctf:
-                    out_imgs = []
                     # Check if we can batch CTF (all bfactors are None or a constant)
                     unique_bfactors = set(bfactors)
-                    if len(unique_bfactors) == 1:
-                        # All same bfactor - can batch!
-                        bfactor = list(unique_bfactors)[0]
-                        for i in range(B):
-                            _, out_img = corrupt_with_ctf(
-                                image=projs[i], sampling_rate=px_A,
-                                dfu=dfu_batch[i], dfv=dfv_batch[i], dfang=dfang_batch[i],
-                                volt=volt_kV, cs=cs_mm, w=amp_contrast,
-                                phase_shift=phase_shift_batch[i], bfactor=bfactor, fftshift=True
-                            )
-                            out_imgs.append(out_img)
-                    else:
-                        # Different bfactors - process individually
-                        for i in range(B):
-                            _, out_img = corrupt_with_ctf(
-                                image=projs[i], sampling_rate=px_A,
-                                dfu=dfu_batch[i], dfv=dfv_batch[i], dfang=dfang_batch[i],
-                                volt=volt_kV, cs=cs_mm, w=amp_contrast,
-                                phase_shift=phase_shift_batch[i], bfactor=bfactors[i], fftshift=True
-                            )
-                            out_imgs.append(out_img)
-                    out_imgs = torch.stack(out_imgs, dim=0)  # (B, H, W)
-                else:
-                    out_imgs = projs
+                    bfactor = list(unique_bfactors)[0] if len(unique_bfactors) == 1 else None
+
+                    # Apply CTF in-place to avoid memory accumulation
+                    for i in range(B):
+                        bf = bfactor if bfactor is not None else bfactors[i]
+                        _, projs[i] = corrupt_with_ctf(
+                            image=projs[i], sampling_rate=px_A,
+                            dfu=dfu_batch[i], dfv=dfv_batch[i], dfang=dfang_batch[i],
+                            volt=volt_kV, cs=cs_mm, w=amp_contrast,
+                            phase_shift=phase_shift_batch[i], bfactor=bf, fftshift=True
+                        )
+
+                out_imgs = projs
 
             else:
                 # noise_additive mode - still needs per-particle processing for subtraction
@@ -434,7 +415,9 @@ class CryoEMSimulator:
                 R_jit = _deg_eulers_to_R(euls_gt + angle_jit)
                 projs_jit = self._project(R_jit)  # (B, H, W)
 
-                out_imgs = []
+                # Pre-allocate output tensor to avoid list building
+                out_imgs = torch.zeros((B, H_part, W_part), device=self.device, dtype=torch.float32)
+
                 for i in range(B):
                     particle = torch.as_tensor(imgs[i], device=self.device, dtype=torch.float32)
 
@@ -480,20 +463,30 @@ class CryoEMSimulator:
                     X_jit = ctf * P_jit
                     signal_jit = torch.fft.irfft2(a_fit * X_jit, s=(H_part, W_part))
 
-                    out_img = noise_only + signal_jit
-                    out_imgs.append(out_img)
+                    # Write directly to pre-allocated tensor
+                    out_imgs[i] = noise_only + signal_jit
 
-                out_imgs = torch.stack(out_imgs, dim=0)  # (B, H, W)
+                    # Explicit cleanup to help garbage collector
+                    del particle, ctf, proj_gt, noise_only, proj_jit, P_jit, X_jit, signal_jit
 
-            # Add Gaussian noise to entire batch
+            # Add Gaussian noise to entire batch (vectorized!)
             if snr is not None and snr > 0:
-                for i in range(B):
-                    sig_var = float(torch.var(out_imgs[i]))
-                    noise_std = math.sqrt(sig_var / snr) if sig_var > 0 else 1.0
-                    out_imgs[i] += torch.randn_like(out_imgs[i]) * noise_std
+                # Compute variance for each image in the batch
+                sig_vars = torch.var(out_imgs, dim=(-2, -1))  # (B,)
+                noise_stds = torch.sqrt(sig_vars / snr).clamp(min=1e-6)  # (B,)
+                noise = torch.randn_like(out_imgs) * noise_stds.view(B, 1, 1)
+                out_imgs += noise
 
             # Convert entire batch to numpy and add to buffer
             batch_np = out_imgs.detach().cpu().numpy().astype(np.float32)  # (B, H, W)
+
+            # Explicit cleanup of GPU tensors to prevent memory accumulation
+            del out_imgs, projs, euls_gt, angle_jit, shift_jit_px
+            del dfu_batch, dfv_batch, dfang_batch, phase_shift_batch, shifts_gt_px
+            if simulation_mode != "central_slice":
+                del projs_gt, projs_jit
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
             # Add batch to buffer
             if buffer is None:

@@ -280,8 +280,7 @@ class Trainer:
                 if check_if_training_partion_done(self.experiment_root, partition):
                     continue
                 if self.map_fname_for_simulated_pretraining:
-                    # TODO: Implement multi-gpu for simulate_particles
-                    from cryoPARES.simulation.simulateParticles import run_simulation
+                    from cryoPARES.simulation.simulateParticlesHelper import run_simulation
                     sim_star_fnames = []
                     sim_dirs = []
                     for sim_idx, fname in enumerate(self.map_fname_for_simulated_pretraining):
@@ -296,13 +295,12 @@ class Trainer:
                             batch_size=self.batch_size,
                             num_workers=self.num_dataworkers,
                             apply_ctf=True,
-                            use_gpu=main_config.train.use_cuda,
-                            gpus=",".join([str(x) for x in range(torch.cuda.device_count())]), #TODO: homogenize API to use list rather than str
+                            device="cuda:0" if main_config.train.use_cuda and torch.cuda.is_available() else "cpu",
                             simulation_mode="central_slice",  #"noise_additive",
                             snr=main_config.train.snr_for_simulation,  #None
                         )
                         cmd = generate_command_for_argparseFromDoc(
-                            "cryoPARES.simulation.simulateParticles",
+                            "cryoPARES.simulation.simulateParticlesHelper",
                             fun=run_simulation,
                             use_module=True,
                             python_executable=sys.executable,

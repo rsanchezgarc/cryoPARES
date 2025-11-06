@@ -202,18 +202,43 @@ def subtract_projection_T0(
 # ======================== Dataset / DataLoader ======================== #
 
 class ParticlesDatasetLite(Dataset):
-    """Lightweight dataset wrapper for ParticlesStarSet."""
+    """
+    Lightweight dataset wrapper for ParticlesStarSet.
 
-    def __init__(self, pset: ParticlesStarSet, need_images: bool, px_A: float):
-        self.pset = pset
+    Multiprocessing-safe: Each worker process initializes its own ParticlesStarSet
+    with fresh file handles to avoid deadlocks.
+    """
+
+    def __init__(self, star_fname: str, particles_dir: Optional[str], need_images: bool, px_A: float):
+        # Store initialization parameters instead of the ParticlesStarSet object
+        # Each worker will create its own instance
+        self.star_fname = star_fname
+        self.particles_dir = particles_dir
         self.need_images = need_images
         self.px_A = px_A
 
+        # These will be initialized lazily per worker
+        self._pset = None
+        self._length = None
+
+        # Initialize in main process to get length
+        temp_pset = ParticlesStarSet(star_fname, particlesDir=particles_dir)
+        self._length = len(temp_pset)
+        # Don't keep temp_pset reference to avoid file handle issues
+
+    def _ensure_pset(self):
+        """Lazy initialization of ParticlesStarSet in each worker process."""
+        if self._pset is None:
+            self._pset = ParticlesStarSet(self.star_fname, particlesDir=self.particles_dir)
+
     def __len__(self) -> int:
-        return len(self.pset)
+        return self._length
 
     def __getitem__(self, idx: int):
-        img, md_row = self.pset[idx]
+        # Ensure this worker has its own ParticlesStarSet instance
+        self._ensure_pset()
+
+        img, md_row = self._pset[idx]
         if self.need_images:
             img = torch.as_tensor(img, dtype=torch.float32)
         else:
@@ -364,12 +389,23 @@ class CryoEMSimulator:
         cs_mm = float(optics_row.get("rlnSphericalAberration", 2.7))
         amp_contrast = float(optics_row.get("rlnAmplitudeContrast", 0.07))
 
-        # Setup data loader
+        # Setup data loader with multiprocessing support
+        # Each worker will lazily initialize its own ParticlesStarSet to avoid file handle conflicts
         need_images = (simulation_mode == "noise_additive")
-        ds = ParticlesDatasetLite(pset, need_images=need_images, px_A=px_A)
+        star_fname = pset.starFname
+        particles_dir = getattr(pset, 'particlesDir', None)
+        ds = ParticlesDatasetLite(
+            star_fname=star_fname,
+            particles_dir=particles_dir,
+            need_images=need_images,
+            px_A=px_A
+        )
+        # Enable pin_memory for faster CPU->GPU transfer when using CUDA
+        use_pin_memory = self.device.type == 'cuda'
         loader = DataLoader(
             ds, batch_size=batch_size, shuffle=False,
-            num_workers=num_workers, collate_fn=_collate, pin_memory=False
+            num_workers=num_workers, collate_fn=_collate,
+            pin_memory=use_pin_memory, persistent_workers=num_workers > 0
         )
 
         # RNG for jitter

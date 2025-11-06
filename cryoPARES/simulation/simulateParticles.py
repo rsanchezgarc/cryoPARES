@@ -253,15 +253,17 @@ def main():
     args = parser.parse_args()
 
     # Determine execution mode
-    if args.num_gpus <= 0:
-        raise ValueError(f"num_gpus must be positive, got {args.num_gpus}")
+    if args.num_gpus < 0:
+        raise ValueError(f"num_gpus must be non-negative, got {args.num_gpus}")
 
     available_gpus = torch.cuda.device_count()
-    if args.num_gpus > available_gpus:
-        print(f"Warning: Requested {args.num_gpus} GPUs but only {available_gpus} available. Using {available_gpus}.")
-        args.num_gpus = available_gpus
 
-    if available_gpus == 0:
+    # Force CPU mode if num_gpus=0
+    if args.num_gpus == 0:
+        print("Running on CPU (num_gpus=0)")
+        use_gpu = False
+        device = "cpu"
+    elif available_gpus == 0:
         print("No GPUs available, running on CPU")
         args.num_gpus = 1
         use_gpu = False
@@ -271,6 +273,9 @@ def main():
         use_gpu = True
         device = "cuda:0"
     else:
+        if args.num_gpus > available_gpus:
+            print(f"Warning: Requested {args.num_gpus} GPUs but only {available_gpus} available. Using {available_gpus}.")
+            args.num_gpus = available_gpus
         print(f"Running on {args.num_gpus} GPUs in parallel")
         use_gpu = True
         device = None

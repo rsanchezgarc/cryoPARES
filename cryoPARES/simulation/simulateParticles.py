@@ -62,14 +62,6 @@ def _get_px_A_from_optics_row(row) -> float:
     raise ValueError("No pixel size found in optics/particles")
 
 
-def _batch_angles_deg(md_rows: List[pd.Series], device) -> torch.Tensor:
-    """Extract Euler angles (Rot/Tilt/Psi) from STAR rows as (B,3) tensor."""
-    return torch.tensor(
-        [[float(row.get(k, 0.0)) for k in RELION_ANGLES_NAMES] for row in md_rows],
-        device=device, dtype=torch.float32
-    )
-
-
 def _sample_angle_jitter(B: int, max_deg: float, frac: float, device, gen=None) -> torch.Tensor:
     """Sample random angle jitter for a fraction of particles."""
     if max_deg <= 0.0 or frac <= 0.0:
@@ -212,9 +204,10 @@ def subtract_projection_T0(
 class ParticlesDatasetLite(Dataset):
     """Lightweight dataset wrapper for ParticlesStarSet."""
 
-    def __init__(self, pset: ParticlesStarSet, need_images: bool):
+    def __init__(self, pset: ParticlesStarSet, need_images: bool, px_A: float):
         self.pset = pset
         self.need_images = need_images
+        self.px_A = px_A
 
     def __len__(self) -> int:
         return len(self.pset)
@@ -225,13 +218,56 @@ class ParticlesDatasetLite(Dataset):
             img = torch.as_tensor(img, dtype=torch.float32)
         else:
             img = None
-        return idx, md_row, img
+
+        # Extract metadata here on CPU during data loading
+        # This happens in parallel with GPU computation!
+        angles = [float(md_row.get(k, 0.0)) for k in RELION_ANGLES_NAMES]
+
+        dfu = float(md_row.get("rlnDefocusU", 15000.0))
+        dfv = float(md_row.get("rlnDefocusV", 15000.0))
+        dfang = float(md_row.get("rlnDefocusAngle", 0.0))
+        phase_shift = float(md_row.get("rlnPhaseShift", 0.0)) if "rlnPhaseShift" in md_row else 0.0
+        bfac_val = md_row.get("rlnCtfBfactor", None)
+        bfactor = None if _isnan_or_none(bfac_val) else float(bfac_val)
+
+        sx_A = float(md_row.get(RELION_SHIFTS_NAMES[0], 0.0))
+        sy_A = float(md_row.get(RELION_SHIFTS_NAMES[1], 0.0))
+        shifts = [sx_A / self.px_A, sy_A / self.px_A]
+
+        return {
+            'idx': idx,
+            'img': img,
+            'angles': angles,
+            'ctf': (dfu, dfv, dfang, phase_shift, bfactor),
+            'shifts': shifts,
+        }
 
 
 def _collate(batch):
-    """Collate function for DataLoader."""
-    idxs, md_rows, imgs = zip(*batch)
-    return list(idxs), list(md_rows), list(imgs)
+    """Collate function that pre-organizes data into arrays."""
+    # Separate data types
+    idxs = [item['idx'] for item in batch]
+    imgs = [item['img'] for item in batch]
+
+    # Stack metadata into arrays (on CPU)
+    angles = np.array([item['angles'] for item in batch], dtype=np.float32)
+    shifts = np.array([item['shifts'] for item in batch], dtype=np.float32)
+
+    # CTF params
+    ctf_data = [item['ctf'] for item in batch]
+    dfu = np.array([c[0] for c in ctf_data], dtype=np.float32)
+    dfv = np.array([c[1] for c in ctf_data], dtype=np.float32)
+    dfang = np.array([c[2] for c in ctf_data], dtype=np.float32)
+    phase_shift = np.array([c[3] for c in ctf_data], dtype=np.float32)
+    bfactors = [c[4] for c in ctf_data]
+
+    return {
+        'idxs': idxs,
+        'imgs': imgs,
+        'angles': angles,
+        'shifts': shifts,
+        'ctf': (dfu, dfv, dfang, phase_shift, bfactors),
+    }
 
 
 # ======================== Simulator Class ======================== #
@@ -330,7 +366,7 @@ class CryoEMSimulator:
 
         # Setup data loader
         need_images = (simulation_mode == "noise_additive")
-        ds = ParticlesDatasetLite(pset, need_images=need_images)
+        ds = ParticlesDatasetLite(pset, need_images=need_images, px_A=px_A)
         loader = DataLoader(
             ds, batch_size=batch_size, shuffle=False,
             num_workers=num_workers, collate_fn=_collate, pin_memory=False
@@ -360,22 +396,29 @@ class CryoEMSimulator:
         total_particles = len(pset)
         pbar = tqdm(total=total_particles, desc="Simulating particles", unit="particle", disable=disable_tqdm)
 
-        for batch_idx, (idxs, md_rows, imgs) in enumerate(loader):
-            B = len(md_rows)
+        for batch_idx, batch_data in enumerate(loader):
+            imgs = batch_data['imgs']
+            B = len(imgs)
 
             # Get particle size from first batch with images
             if need_images and imgs[0] is not None:
                 H_part = int(imgs[0].shape[-2])
                 W_part = int(imgs[0].shape[-1])
 
+            # Convert pre-processed numpy arrays to GPU tensors (fast!)
+            euls_gt = torch.from_numpy(batch_data['angles']).to(self.device, dtype=torch.float32)
+            shifts_gt_px = torch.from_numpy(batch_data['shifts']).to(self.device, dtype=torch.float32)
+
+            # CTF parameters (already extracted on CPU during data loading)
+            dfu_np, dfv_np, dfang_np, phase_shift_np, bfactors = batch_data['ctf']
+            dfu_batch = torch.from_numpy(dfu_np).to(self.device, dtype=torch.float32)
+            dfv_batch = torch.from_numpy(dfv_np).to(self.device, dtype=torch.float32)
+            dfang_batch = torch.from_numpy(dfang_np).to(self.device, dtype=torch.float32)
+            phase_shift_batch = torch.from_numpy(phase_shift_np).to(self.device, dtype=torch.float32)
+
             # Sample jitter
-            euls_gt = _batch_angles_deg(md_rows, device=self.device)
             angle_jit = _sample_angle_jitter(B, angle_jitter_deg, angle_jitter_frac, device=self.device, gen=gen)
             shift_jit_px = _sample_shift_jitter_px(B, shift_jitter_A, shift_jitter_frac, px_A, device=self.device, gen=gen)
-
-            # Extract CTF parameters and shifts for entire batch
-            dfu_batch, dfv_batch, dfang_batch, phase_shift_batch, bfactors = _batch_ctf_params(md_rows, device=self.device)
-            shifts_gt_px = _batch_shifts_px(md_rows, px_A, device=self.device)  # (B, 2)
 
             # Generate projections
             if simulation_mode == "central_slice":

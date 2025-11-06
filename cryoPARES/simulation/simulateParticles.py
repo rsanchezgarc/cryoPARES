@@ -1,198 +1,67 @@
 """
-Cryo-EM particle simulator CLI - supports single and multi-GPU execution.
+Cryo-EM particle simulator CLI — single or multi-GPU.
 
-This script provides a unified interface for particle simulation that automatically
-handles both single-GPU and multi-GPU execution based on the --num_gpus parameter.
+This script provides a unified interface for particle simulation that
+automatically handles single-GPU/CPU or multi-GPU execution based on --num_gpus.
 """
 
 import os
 import argparse
-from typing import Optional
+from typing import Optional, List
+
+import numpy as np
 import torch
-import torch.multiprocessing as mp
 
-import starfile
-from starstack.particlesStar import ParticlesStarSet
-
-# Import core functionality from helper module
-from cryoPARES.simulation.simulateParticlesHelper import run_simulation
-
-
-def _worker_process(
-        gpu_id: int,
-        particle_range: tuple,
-        volume: str,
-        in_star: str,
-        output_dir: str,
-        basename: str,
-        images_per_file: int,
-        batch_size: int,
-        num_workers: int,
-        apply_ctf: bool,
-        snr: Optional[float],
-        simulation_mode: str,
-        angle_jitter_deg: float,
-        angle_jitter_frac: float,
-        shift_jitter_A: float,
-        shift_jitter_frac: float,
-        sub_bp_lo_A: float,
-        sub_bp_hi_A: float,
-        sub_power_q: float,
-        random_seed: Optional[int],
-        disable_tqdm: bool,
-):
-    """Worker process for a single GPU in multi-GPU mode."""
-    # Set GPU device
-    device = f"cuda:{gpu_id}"
-
-    # Load full particle set and create shard
-    pset_full = ParticlesStarSet(in_star)
-    start_idx, end_idx = particle_range
-
-    # Create a subset STAR file for this shard
-    shard_star = os.path.join(output_dir, f".shard_{gpu_id}.star")
-    particles_df = pset_full.particles_md.iloc[start_idx:end_idx].copy()
-
-    star_dict = {"particles": particles_df}
-    if hasattr(pset_full, "optics_md") and pset_full.optics_md is not None:
-        star_dict["optics"] = pset_full.optics_md
-    starfile.write(star_dict, shard_star, overwrite=True)
-
-    # Run simulation on this shard
-    shard_basename = f"{basename}_gpu{gpu_id}"
-    out_star = run_simulation(
-        volume=volume,
-        in_star=shard_star,
-        output_dir=output_dir,
-        basename=shard_basename,
-        images_per_file=images_per_file,
-        batch_size=batch_size,
-        num_workers=num_workers,
-        apply_ctf=apply_ctf,
-        snr=snr,
-        device=device,
-        simulation_mode=simulation_mode,
-        angle_jitter_deg=angle_jitter_deg,
-        angle_jitter_frac=angle_jitter_frac,
-        shift_jitter_A=shift_jitter_A,
-        shift_jitter_frac=shift_jitter_frac,
-        sub_bp_lo_A=sub_bp_lo_A,
-        sub_bp_hi_A=sub_bp_hi_A,
-        sub_power_q=sub_power_q,
-        random_seed=random_seed + gpu_id if random_seed is not None else None,
-        disable_tqdm=disable_tqdm or (gpu_id != 0),  # Only show progress on GPU 0
-    )
-
-    # Clean up temporary shard star file
-    os.remove(shard_star)
-
-    print(f"[GPU {gpu_id}] Complete: {out_star}")
+# Use the APIs exposed by the helper you integrated earlier
+# (both single-run and multi-GPU sharded run)
+from cryoPARES.simulation.simulateParticlesHelper import (
+    run_simulation,
+    run_simulation_sharded,
+)
 
 
-def run_simulation_multi_gpu(
-        volume: str,
-        in_star: str,
-        output_dir: str,
-        basename: str,
-        images_per_file: int,
-        batch_size: int,
-        num_workers: int,
-        apply_ctf: bool,
-        snr: Optional[float],
-        num_gpus: int,
-        simulation_mode: str,
-        angle_jitter_deg: float,
-        angle_jitter_frac: float,
-        shift_jitter_A: float,
-        shift_jitter_frac: float,
-        sub_bp_lo_A: float,
-        sub_bp_hi_A: float,
-        sub_power_q: float,
-        random_seed: Optional[int],
-        disable_tqdm: bool,
-) -> str:
-    """
-    Run particle simulation across multiple GPUs using data parallelism.
+def _validate_args(args: argparse.Namespace) -> None:
+    if args.images_per_file <= 0:
+        raise ValueError("--images_per_file must be > 0")
+    if args.batch_size <= 0:
+        raise ValueError("--batch_size must be > 0")
+    if args.num_workers < 0:
+        raise ValueError("--num_workers must be >= 0")
+    if args.num_gpus < 0:
+        raise ValueError("--num_gpus must be >= 0")
+    if not os.path.exists(args.volume):
+        raise FileNotFoundError(f"Volume not found: {args.volume}")
+    if not os.path.exists(args.in_star):
+        raise FileNotFoundError(f"STAR not found: {args.in_star}")
+    os.makedirs(args.output_dir, exist_ok=True)
 
-    Args:
-        num_gpus: Number of GPUs to use
-        ... (other args same as run_simulation)
 
-    Returns:
-        Path to merged output STAR file
-    """
-    import pandas as pd
+def _resolve_device(num_gpus: int) -> (str, List[int]):
+    """Return (device_string_for_single, gpu_id_list_for_multi)."""
+    available = torch.cuda.device_count()
+    if num_gpus == 0 or available == 0:
+        # CPU path
+        return "cpu", []
+    if num_gpus == 1:
+        return "cuda:0", []
+    # Multi-GPU
+    use = min(num_gpus, available)
+    return "", list(range(use))  # device not used in sharded path
 
-    print(f"Running simulation across {num_gpus} GPUs")
-    os.makedirs(output_dir, exist_ok=True)
 
-    # Load particle set to determine sharding
-    pset = ParticlesStarSet(in_star)
-    total_particles = len(pset)
-    particles_per_gpu = (total_particles + num_gpus - 1) // num_gpus
-
-    # Calculate particle ranges for each GPU
-    particle_ranges = []
-    for i in range(num_gpus):
-        start_idx = i * particles_per_gpu
-        end_idx = min((i + 1) * particles_per_gpu, total_particles)
-        if start_idx < total_particles:
-            particle_ranges.append((start_idx, end_idx))
-
-    # Spawn worker processes
-    mp.set_start_method('spawn', force=True)
-    processes = []
-    for gpu_id, (start_idx, end_idx) in enumerate(particle_ranges):
-        p = mp.Process(
-            target=_worker_process,
-            args=(
-                gpu_id, (start_idx, end_idx), volume, in_star, output_dir,
-                basename, images_per_file, batch_size, num_workers, apply_ctf, snr,
-                simulation_mode, angle_jitter_deg, angle_jitter_frac,
-                shift_jitter_A, shift_jitter_frac, sub_bp_lo_A, sub_bp_hi_A,
-                sub_power_q, random_seed, disable_tqdm,
-            )
-        )
-        p.start()
-        processes.append(p)
-
-    # Wait for all processes to complete
-    for p in processes:
-        p.join()
-
-    # Merge output STAR files
-    print("Merging results from all GPUs...")
-    merged_particles = []
-    optics_df = None
-
-    for gpu_id in range(len(particle_ranges)):
-        gpu_star = os.path.join(output_dir, f"{basename}_gpu{gpu_id}.star")
-        if os.path.exists(gpu_star):
-            star_data = starfile.read(gpu_star)
-            if isinstance(star_data, dict):
-                merged_particles.append(star_data["particles"])
-                if "optics" in star_data and optics_df is None:
-                    optics_df = star_data["optics"]
-            else:
-                merged_particles.append(star_data)
-
-    # Write merged STAR file
-    merged_df = pd.concat(merged_particles, ignore_index=True)
-    out_star = os.path.join(output_dir, f"{basename}.star")
-
-    star_dict = {"particles": merged_df}
-    if optics_df is not None:
-        star_dict["optics"] = optics_df
-    starfile.write(star_dict, out_star, overwrite=True)
-
-    print(f"Merged {len(merged_df)} particles into: {out_star}")
-    return out_star
+def _maybe_seed(seed: Optional[int]) -> None:
+    if seed is None:
+        return
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 
 def main():
     parser = argparse.ArgumentParser(
         description="Cryo-EM particle simulator with single/multi-GPU support",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
     # Required arguments
@@ -202,136 +71,178 @@ def main():
 
     # Output options
     parser.add_argument("--basename", default="stack", help="Output basename")
-    parser.add_argument("--images_per_file", type=int, default=10_000,
-                        help="Number of images per output MRC file")
+    parser.add_argument(
+        "--images_per_file",
+        type=int,
+        default=10_000,
+        help="Number of images per output MRC file",
+    )
 
     # Processing options
-    parser.add_argument("--batch_size", type=int, default=128,
-                        help="Batch size for GPU processing")
-    parser.add_argument("--num_workers", type=int, default=0,
-                        help="Number of CPU workers for data loading")
-    parser.add_argument("--num_gpus", type=int, default=1,
-                        help="Number of GPUs to use (1=single GPU, >1=multi-GPU)")
+    parser.add_argument("--batch_size", type=int, default=128, help="Batch size")
+    parser.add_argument("--num_workers", type=int, default=0, help="DataLoader workers")
+    parser.add_argument(
+        "--num_gpus",
+        type=int,
+        default=1,
+        help="Number of GPUs to use (0=CPU, 1=single GPU, >1=multi-GPU sharded)",
+    )
 
     # CTF and noise options
-    parser.add_argument("--apply_ctf", action="store_true", default=True,
-                        help="Apply CTF to projections")
-    parser.add_argument("--no_ctf", dest="apply_ctf", action="store_false",
-                        help="Do not apply CTF")
-    parser.add_argument("--snr", type=float, default=None,
-                        help="Signal-to-noise ratio (add Gaussian noise)")
+    parser.add_argument(
+        "--apply_ctf",
+        action="store_true",
+        default=True,
+        help="Apply CTF to projections",
+    )
+    parser.add_argument(
+        "--no_ctf", dest="apply_ctf", action="store_false", help="Do not apply CTF"
+    )
+    parser.add_argument(
+        "--snr",
+        type=float,
+        default=None,
+        help="Signal-to-noise ratio (Gaussian noise added if set)",
+    )
 
     # Simulation mode
-    parser.add_argument("--simulation_mode", choices=["central_slice", "noise_additive"],
-                        default="central_slice",
-                        help="Simulation mode: central_slice (forward model) or noise_additive (subtraction)")
+    parser.add_argument(
+        "--simulation_mode",
+        choices=["central_slice", "noise_additive"],
+        default="central_slice",
+        help="Forward model ('central_slice') or subtraction ('noise_additive')",
+    )
 
     # Jitter options
-    parser.add_argument("--angle_jitter_deg", type=float, default=0.0,
-                        help="Maximum angular jitter in degrees")
-    parser.add_argument("--angle_jitter_frac", type=float, default=0.0,
-                        help="Fraction of particles to apply angular jitter")
-    parser.add_argument("--shift_jitter_A", type=float, default=0.0,
-                        help="Maximum shift jitter in Angstroms")
-    parser.add_argument("--shift_jitter_frac", type=float, default=0.0,
-                        help="Fraction of particles to apply shift jitter")
+    parser.add_argument(
+        "--angle_jitter_deg", type=float, default=0.0, help="Max angular jitter (deg)"
+    )
+    parser.add_argument(
+        "--angle_jitter_frac",
+        type=float,
+        default=0.0,
+        help="Fractional angular jitter scale",
+    )
+    parser.add_argument(
+        "--shift_jitter_A", type=float, default=0.0, help="Max shift jitter (Å)"
+    )
+    parser.add_argument(
+        "--shift_jitter_frac",
+        type=float,
+        default=0.0,
+        help="Fractional shift jitter scale",
+    )
 
     # Subtraction parameters (for noise_additive mode)
-    parser.add_argument("--sub_bp_lo_A", type=float, default=40.0,
-                        help="Subtraction bandpass low-resolution cutoff (Angstroms)")
-    parser.add_argument("--sub_bp_hi_A", type=float, default=8.0,
-                        help="Subtraction bandpass high-resolution cutoff (Angstroms)")
-    parser.add_argument("--sub_power_q", type=float, default=0.30,
-                        help="Subtraction power quantile threshold")
+    parser.add_argument(
+        "--sub_bp_lo_A",
+        type=float,
+        default=8.0,
+        help="Subtraction bandpass low-resolution cutoff (Å)",
+    )
+    parser.add_argument(
+        "--sub_bp_hi_A",
+        type=float,
+        default=20.0,
+        help="Subtraction bandpass high-resolution cutoff (Å)",
+    )
+    parser.add_argument(
+        "--sub_power_q",
+        type=float,
+        default=0.85,
+        help="Subtraction power quantile threshold (0-1)",
+    )
 
-    # Other options
-    parser.add_argument("--random_seed", type=int, default=None,
-                        help="Random seed for reproducibility")
-    parser.add_argument("--disable_tqdm", action="store_true",
-                        help="Disable progress bar")
+    # Misc
+    parser.add_argument("--px_A", type=float, default=1.0, help="Pixel size (Å)")
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="Override device for single-run (e.g., 'cuda:0' or 'cpu'). "
+             "Ignored for multi-GPU.",
+    )
+    parser.add_argument("--random_seed", type=int, default=None, help="Random seed")
+    parser.add_argument(
+        "--disable_tqdm", action="store_true", help="Disable progress bar"
+    )
 
     args = parser.parse_args()
+    _validate_args(args)
+    _maybe_seed(args.random_seed)
 
-    # Determine execution mode
-    if args.num_gpus < 0:
-        raise ValueError(f"num_gpus must be non-negative, got {args.num_gpus}")
+    # Decide device(s)
+    auto_device, gpu_ids = _resolve_device(args.num_gpus)
+    device = args.device if args.device is not None else auto_device
 
-    available_gpus = torch.cuda.device_count()
-
-    # Force CPU mode if num_gpus=0
-    if args.num_gpus == 0:
-        print("Running on CPU (num_gpus=0)")
-        use_gpu = False
-        device = "cpu"
-    elif available_gpus == 0:
-        print("No GPUs available, running on CPU")
-        args.num_gpus = 1
-        use_gpu = False
-        device = "cpu"
-    elif args.num_gpus == 1:
-        print("Running on single GPU")
-        use_gpu = True
-        device = "cuda:0"
-    else:
-        if args.num_gpus > available_gpus:
-            print(f"Warning: Requested {args.num_gpus} GPUs but only {available_gpus} available. Using {available_gpus}.")
-            args.num_gpus = available_gpus
-        print(f"Running on {args.num_gpus} GPUs in parallel")
-        use_gpu = True
-        device = None
-
-    # Run simulation
-    if args.num_gpus > 1 and available_gpus > 1:
-        # Multi-GPU mode
-        out_star = run_simulation_multi_gpu(
+    # Dispatch
+    if len(gpu_ids) > 1:
+        print(f"Running on {len(gpu_ids)} GPUs in parallel: {gpu_ids}")
+        # Use the helper's sharded multi-GPU implementation
+        out_paths = run_simulation_sharded(
             volume=args.volume,
             in_star=args.in_star,
             output_dir=args.output_dir,
             basename=args.basename,
             images_per_file=args.images_per_file,
             batch_size=args.batch_size,
-            num_workers=args.num_workers,
+            simulation_mode=args.simulation_mode,
             apply_ctf=args.apply_ctf,
             snr=args.snr,
-            num_gpus=args.num_gpus,
-            simulation_mode=args.simulation_mode,
             angle_jitter_deg=args.angle_jitter_deg,
             angle_jitter_frac=args.angle_jitter_frac,
             shift_jitter_A=args.shift_jitter_A,
             shift_jitter_frac=args.shift_jitter_frac,
+            bandpass_lo_A=6.0,             # kept for API symmetry; unused in helper core currently
+            bandpass_hi_A=25.0,            # kept for API symmetry; unused in helper core currently
             sub_bp_lo_A=args.sub_bp_lo_A,
             sub_bp_hi_A=args.sub_bp_hi_A,
             sub_power_q=args.sub_power_q,
-            random_seed=args.random_seed,
+            px_A=args.px_A,
+            gpus=gpu_ids,
+            normalize_volume=False,
             disable_tqdm=args.disable_tqdm,
         )
-    else:
-        # Single GPU/CPU mode
-        out_star = run_simulation(
-            volume=args.volume,
-            in_star=args.in_star,
-            output_dir=args.output_dir,
-            basename=args.basename,
-            images_per_file=args.images_per_file,
-            batch_size=args.batch_size,
-            num_workers=args.num_workers,
-            apply_ctf=args.apply_ctf,
-            snr=args.snr,
-            use_gpu=use_gpu,
-            device=device,
-            simulation_mode=args.simulation_mode,
-            angle_jitter_deg=args.angle_jitter_deg,
-            angle_jitter_frac=args.angle_jitter_frac,
-            shift_jitter_A=args.shift_jitter_A,
-            shift_jitter_frac=args.shift_jitter_frac,
-            sub_bp_lo_A=args.sub_bp_lo_A,
-            sub_bp_hi_A=args.sub_bp_hi_A,
-            sub_power_q=args.sub_power_q,
-            random_seed=args.random_seed,
-            disable_tqdm=args.disable_tqdm,
-        )
+        # The sharded helper returns list of MRC stacks; if you also want a merged STAR,
+        # do that in a downstream step (the helper focuses on stack generation).
+        print("Stacks written:")
+        for p in out_paths:
+            print("  ", p)
+        return
 
-    print(f"\nSimulation complete. Output STAR: {out_star}")
+    # Single GPU or CPU
+    if device:
+        print(f"Running single-run on device: {device}")
+    else:
+        # Should not happen, but keep safe default
+        device = "cpu"
+        print("Running single-run on device: cpu (fallback)")
+
+    _ = run_simulation(
+        volume=args.volume,
+        in_star=args.in_star,
+        output_dir=args.output_dir,
+        basename=args.basename,
+        images_per_file=args.images_per_file,
+        batch_size=args.batch_size,
+        simulation_mode=args.simulation_mode,
+        apply_ctf=args.apply_ctf,
+        snr=args.snr,
+        num_workers=args.num_workers,
+        angle_jitter_deg=args.angle_jitter_deg,
+        angle_jitter_frac=args.angle_jitter_frac,
+        shift_jitter_A=args.shift_jitter_A,
+        shift_jitter_frac=args.shift_jitter_frac,
+        sub_bp_lo_A=args.sub_bp_lo_A,
+        sub_bp_hi_A=args.sub_bp_hi_A,
+        sub_power_q=args.sub_power_q,
+        px_A=args.px_A,
+        device=device,
+        normalize_volume=False,
+        disable_tqdm=args.disable_tqdm,
+    )
+    # Note: run_simulation returns list[str] of stack paths.
+    # Write a STAR in your pipeline step if you need one.
 
 
 if __name__ == "__main__":

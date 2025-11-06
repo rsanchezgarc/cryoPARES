@@ -1,74 +1,21 @@
 """
-Consensus Alignment from Multiple RELION Star Files
-====================================================
+Consensus Alignment from Multiple RELION Star Files (with Optics Groups)
+========================================================================
 
-This script computes consensus alignment from two or more RELION star files by matching
-equivalent particles based on micrograph name and coordinates, computing angular errors
-between poses, and applying consensus operations.
-
-Algorithm
----------
-1. **Particle Matching**: Match equivalent particles across star files using:
-   - rlnMicrographName
-   - rlnCoordinateX
-   - rlnCoordinateY
-
-2. **Angular Error Computation**: Calculate angular distance between equivalent particles
-   considering molecular symmetry.
-
-3. **Consensus Operations**: Apply one of three strategies:
-   - **drop**: Discard particles with error > threshold (default: 5 degrees)
-   - **average**: Compute geodesic average pose for all particles
-   - **combined**: Average poses, then drop particles with high residual error
-
-4. **Metadata Management**: Retain metadata from first star file by default, with options
-   to incorporate specific columns from other star files.
-
-Usage Examples
---------------
-# Drop particles with high angular error
-python -m cryoPARES.scripts.consensus_alignment \\
-    --input_stars run1.star run2.star run3.star \\
-    --output_star consensus.star \\
-    --symmetry C1 \\
-    --consensus_mode drop \\
-    --angular_threshold_degs 5.0
-
-# Compute geodesic average of all poses
-python -m cryoPARES.scripts.consensus_alignment \\
-    --input_stars run1.star run2.star \\
-    --output_star consensus.star \\
-    --symmetry C1 \\
-    --consensus_mode average
-
-# Combined: average then filter
-python -m cryoPARES.scripts.consensus_alignment \\
-    --input_stars run1.star run2.star run3.star \\
-    --output_star consensus.star \\
-    --symmetry C1 \\
-    --consensus_mode combined \\
-    --angular_threshold_degs 3.0
-
-# Incorporate specific metadata columns from other star files
-python -m cryoPARES.scripts.consensus_alignment \\
-    --input_stars aligned1.star aligned2.star \\
-    --output_star consensus.star \\
-    --symmetry C1 \\
-    --consensus_mode average \\
-    --merge_columns rlnClassNumber rlnLogLikeliContribution
-
-Key Features
-------------
-- Handles partial matches: only processes particles present in ALL input star files
-- Supports all point group symmetries (C, D, T, O, I)
-- Computes geodesic average on SO(3) for rotation matrices
-- Comprehensive statistics: angular errors, retention rates, per-file contributions
-- Validates coordinate matching with configurable tolerance (default: 0.5 pixels)
+Changes vs. your original:
+- Reads RELION optics groups (data_optics table) when present.
+- Verifies optics compatibility: for every matched particle, the optics row
+  referenced in each input STAR must match (all shared columns except
+  rlnOpticsGroup). If not, the script raises with a concise diff.
+- Writes an optics table in the result (preferring the first file's optics
+  definitions) and subsets it to only the optics groups used in output.
+- Continues to support STARs without optics; in that case, optics handling is skipped.
 """
 
 import os
 import warnings
-from typing import List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -88,6 +35,14 @@ PRIMARY_KEYS = ["rlnMicrographName", "rlnCoordinateX", "rlnCoordinateY"]
 COORDINATE_TOLERANCE_PX = 0.5
 
 
+@dataclass
+class StarTables:
+    """Container for one STAR file's relevant tables."""
+    particles: pd.DataFrame
+    optics: Optional[pd.DataFrame]  # may be None if file has no optics table
+    path: str
+
+
 def _normalize_micrograph_paths(df: pd.DataFrame, root_dir: Optional[str]) -> pd.DataFrame:
     """
     Normalize rlnMicrographName to improve matching across star files.
@@ -105,46 +60,69 @@ def _normalize_micrograph_paths(df: pd.DataFrame, root_dir: Optional[str]) -> pd
         return os.path.basename(p)
 
     df = df.copy()
-    df["rlnMicrographName"] = df["rlnMicrographName"].map(_to_rel_or_base)
+    if "rlnMicrographName" in df.columns:
+        df["rlnMicrographName"] = df["rlnMicrographName"].map(_to_rel_or_base)
     return df
 
 
-def _read_star_file(fpath: str, root_dir: Optional[str]) -> pd.DataFrame:
-    """Read RELION star file and return particles table."""
+def _read_star_file(fpath: str, root_dir: Optional[str]) -> StarTables:
+    """Read RELION star file and return particles (& optics if present)."""
     if not os.path.isfile(fpath):
         raise FileNotFoundError(f"Star file not found: {fpath}")
 
     data = starfile.read(fpath)
 
-    # Get particles table (usually named 'particles')
+    particles = None
+    optics = None
+
     if isinstance(data, dict):
-        if 'particles' in data:
-            df = data['particles']
+        # Standard RELION naming
+        if "particles" in data:
+            particles = data["particles"]
         else:
-            # Try to get the last table (common convention)
-            df = list(data.values())[-1]
+            # Fallback: use last table
+            particles = list(data.values())[-1]
+        if "optics" in data:
+            optics = data["optics"]
     else:
-        df = data
+        particles = data
 
     # Normalize micrograph paths
-    df = _normalize_micrograph_paths(df, root_dir)
+    particles = _normalize_micrograph_paths(particles, root_dir)
 
-    # Verify required columns
+    # Verify required columns in particles
     for key in PRIMARY_KEYS:
-        if key not in df.columns:
+        if key not in particles.columns:
             raise KeyError(f"Missing required column '{key}' in {fpath}")
 
     for angle_col in RELION_ANGLES_NAMES:
-        if angle_col not in df.columns:
+        if angle_col not in particles.columns:
             raise KeyError(f"Missing required angle column '{angle_col}' in {fpath}")
 
-    return df
+    # If optics present, verify rlnOpticsGroup exists in particles
+    if optics is not None:
+        if "rlnOpticsGroup" not in particles.columns:
+            raise KeyError(
+                f"Found an optics table in '{fpath}' but particles lack 'rlnOpticsGroup'"
+            )
+        if "rlnOpticsGroup" not in optics.columns:
+            raise KeyError(
+                f"Optics table in '{fpath}' lacks 'rlnOpticsGroup'"
+            )
+
+        # Ensure optics group IDs are integers for robust merging
+        optics = optics.copy()
+        optics["rlnOpticsGroup"] = optics["rlnOpticsGroup"].astype(int)
+        particles = particles.copy()
+        particles["rlnOpticsGroup"] = particles["rlnOpticsGroup"].astype(int)
+
+    return StarTables(particles=particles, optics=optics, path=fpath)
 
 
 def _match_particles_across_files(
-    dfs: List[pd.DataFrame],
+    stars: List[StarTables],
     coordinate_tolerance: float = COORDINATE_TOLERANCE_PX
-) -> Tuple[List[pd.DataFrame], pd.DataFrame]:
+) -> Tuple[List[pd.DataFrame], pd.DataFrame, pd.Index]:
     """
     Match particles across multiple star files using PRIMARY_KEYS.
 
@@ -154,9 +132,12 @@ def _match_particles_across_files(
     Returns:
         matched_dfs: List of dataframes with matched particles (same order as input)
         match_info: DataFrame with matching statistics
+        original_order_indices: Indices to restore original order of first file
     """
-    if len(dfs) < 2:
+    if len(stars) < 2:
         raise ValueError("Need at least 2 star files for consensus alignment")
+
+    dfs = [s.particles.copy() for s in stars]
 
     # Round coordinates for fuzzy matching
     for i, df in enumerate(dfs):
@@ -182,11 +163,26 @@ def _match_particles_across_files(
     matched_dfs = []
     for i, df in enumerate(dfs):
         df_matched = df[df['_match_key'].isin(common_keys)].copy()
+        # Remember original indices before sorting (only for first file)
+        if i == 0:
+            original_indices = df_matched.index.copy()
         df_matched = df_matched.sort_values('_match_key').reset_index(drop=True)
 
         # Remove temporary columns
         df_matched = df_matched.drop(columns=['_rlnCoordinateX_rounded', '_rlnCoordinateY_rounded', '_match_key'])
         matched_dfs.append(df_matched)
+
+    # Create mapping to restore original order of first file
+    # Build a dataframe with both original indices and match keys for first file
+    df0_for_mapping = dfs[0][dfs[0]['_match_key'].isin(common_keys)].copy()
+    df0_for_mapping['_original_idx'] = original_indices
+    df0_for_mapping = df0_for_mapping.sort_values('_match_key').reset_index(drop=True)
+    df0_for_mapping['_sorted_idx'] = df0_for_mapping.index
+
+    # Create a series that maps from sorted position to original position
+    # Then create the inverse mapping
+    df0_for_mapping = df0_for_mapping.sort_values('_original_idx').reset_index(drop=True)
+    sorted_to_original_map = df0_for_mapping['_sorted_idx'].values
 
     # Verify all dataframes have same number of particles in same order
     n_matched = len(matched_dfs[0])
@@ -197,12 +193,147 @@ def _match_particles_across_files(
     # Create match info
     match_info = pd.DataFrame({
         'file_idx': range(len(dfs)),
-        'n_original': [len(df) for df in dfs],
+        'file_path': [s.path for s in stars],
+        'n_original': [len(s.particles) for s in stars],
         'n_matched': [n_matched] * len(dfs),
-        'fraction_retained': [n_matched / len(df) for df in dfs]
+        'fraction_retained': [n_matched / len(s.particles) for s in stars]
     })
 
-    return matched_dfs, match_info
+    return matched_dfs, match_info, sorted_to_original_map
+
+
+def _build_optics_signature_maps(stars: List[StarTables]) -> List[Optional[Dict[int, Tuple[Tuple[str, ...], Tuple]]]]:
+    """
+    For each file, build a map from rlnOpticsGroup -> (columns, values) signature
+    (excluding rlnOpticsGroup itself). Used to compare optics rows across files.
+
+    Returns: list of dicts (or None if no optics in that file).
+    """
+    sig_maps: List[Optional[Dict[int, Tuple[Tuple[str, ...], Tuple]]]] = []
+    for s in stars:
+        if s.optics is None:
+            sig_maps.append(None)
+            continue
+        opt = s.optics.copy()
+        cols = [c for c in opt.columns if c != "rlnOpticsGroup"]
+        cols_sorted = tuple(sorted(cols))
+        # Normalize dtypes for robust equality
+        opt_norm = opt.copy()
+        for c in cols:
+            # Cast to string representation to avoid tiny float diffs causing false mismatches
+            opt_norm[c] = opt_norm[c].map(lambda v: None if pd.isna(v) else str(v))
+        d: Dict[int, Tuple[Tuple[str, ...], Tuple]] = {}
+        for _, row in opt_norm.iterrows():
+            grp = int(row["rlnOpticsGroup"])
+            sig = tuple(row[c] for c in cols_sorted)
+            d[grp] = (cols_sorted, sig)
+        sig_maps.append(d)
+    return sig_maps
+
+
+def _verify_optics_compatibility(
+    stars: List[StarTables],
+    matched_dfs: List[pd.DataFrame],
+    max_report: int = 10
+):
+    """
+    Ensure that for every matched particle, the referenced optics rows are identical
+    across files (comparing on the intersection of optics columns, excluding rlnOpticsGroup).
+
+    If any mismatch is found, raise ValueError describing the first few mismatches.
+    """
+    # Quick exit if none (or only some) files have optics
+    num_with_optics = sum(1 for s in stars if s.optics is not None)
+    if num_with_optics == 0:
+        print("No optics tables detected in any input STAR — skipping optics compatibility checks.")
+        return
+
+    if num_with_optics != len(stars):
+        warnings.warn(
+            "Some inputs have optics tables and others do not. "
+            "Optics compatibility cannot be fully verified; proceeding using the first file's optics (if present)."
+        )
+        return
+
+    # Build per-file signature maps
+    sig_maps = _build_optics_signature_maps(stars)
+
+    # Determine shared optics columns (excluding rlnOpticsGroup)
+    shared_cols = None
+    for s in stars:
+        cols = set(s.optics.columns) - {"rlnOpticsGroup"}
+        shared_cols = cols if shared_cols is None else (shared_cols & cols)
+    shared_cols = tuple(sorted(shared_cols)) if shared_cols else tuple()
+
+    # If no shared columns, nothing to compare (unlikely)
+    if not shared_cols:
+        warnings.warn("Optics tables have disjoint columns across files; skipping compatibility check.")
+        return
+
+    # Precompute normalized lookup tables for each file
+    # Map optics group -> dict(col -> str(value)) only for shared_cols
+    def norm_val(v):
+        return None if pd.isna(v) else str(v)
+
+    lookups: List[Dict[int, Dict[str, Optional[str]]]] = []
+    for s in stars:
+        d: Dict[int, Dict[str, Optional[str]]] = {}
+        if s.optics is None:
+            lookups.append(d)
+            continue
+        opt = s.optics.copy()
+        for _, row in opt.iterrows():
+            gid = int(row["rlnOpticsGroup"])
+            d[gid] = {c: norm_val(row[c]) for c in shared_cols}
+        lookups.append(d)
+
+    # Compare, particle-by-particle, the referenced optics rows
+    mismatches = []
+    n = len(matched_dfs[0])
+    for idx in range(n):
+        # collect the shared_cols dict for each file reference
+        refs = []
+        for fi, (s, df) in enumerate(zip(stars, matched_dfs)):
+            if s.optics is None:
+                refs.append((fi, None))
+                continue
+            gid = int(df.iloc[idx]["rlnOpticsGroup"])
+            refs.append((fi, lookups[fi].get(gid, None)))
+
+        # Skip if any file lacks optics
+        if any(r[1] is None for r in refs):
+            continue
+
+        # Compare all to the first
+        base = refs[0][1]
+        for fi, ref in refs[1:]:
+            if ref != base:
+                mismatches.append(
+                    (idx, [r[1] for r in refs])
+                )
+                break
+
+        if len(mismatches) >= max_report:
+            break
+
+    if mismatches:
+        # Prepare a concise message
+        lines = [
+            "Optics compatibility check FAILED: referenced optics rows differ across files "
+            f"for {len(mismatches)}+ matched particle(s). Showing up to {max_report}:"
+        ]
+        for idx, ref_list in mismatches:
+            row_desc = []
+            for fi, ref in enumerate(ref_list):
+                row_desc.append(f"[file {fi+1}] {ref}")
+            lines.append(f"  - particle idx {idx}: " + " | ".join(row_desc))
+        lines.append(
+            "Ensure that the input STARs reference identical optics (pixel size, voltage, Cs, etc.) "
+            "for the same particles, or re-export with consistent optics groups."
+        )
+        raise ValueError("\n".join(lines))
+    else:
+        print("Optics compatibility check PASSED across all matched particles.")
 
 
 def _compute_angular_errors(
@@ -270,7 +401,6 @@ def _compute_geodesic_average(
 
     return avg_rot
 
-
 def consensus_alignment(
     input_stars: List[str],
     output_star: str,
@@ -333,21 +463,29 @@ def consensus_alignment(
     # STEP 2: Read and match particles
     # ==================================================================================
     print("Reading input star files...")
-    dfs = [_read_star_file(fpath, root_dir) for fpath in input_stars]
+    stars = [_read_star_file(fpath, root_dir) for fpath in input_stars]
 
     print("\nMatching particles across files...")
-    matched_dfs, match_info = _match_particles_across_files(dfs, coordinate_tolerance)
+    matched_dfs, match_info, sorted_to_original_map = _match_particles_across_files(stars, coordinate_tolerance)
 
     print("\nMatching statistics:")
     print(match_info.to_string(index=False))
     print(f"\nCommon particles: {len(matched_dfs[0])}")
 
     # ==================================================================================
+    # STEP 2b: Optics compatibility check (if all files have optics)
+    # ==================================================================================
+    try:
+        _verify_optics_compatibility(stars, matched_dfs)
+    except ValueError as e:
+        # Surface the error with a clear prefix to help users spot optics issues quickly.
+        raise ValueError(f"Optics groups are not compatible across inputs:\n{e}") from None
+
+    # ==================================================================================
     # STEP 3: Extract rotation matrices
     # ==================================================================================
     print("\nExtracting rotation matrices...")
     rot_matrices_list = []
-
     for i, df in enumerate(matched_dfs):
         # Extract Euler angles
         angles = df[list(RELION_ANGLES_NAMES)].values  # [N, 3]
@@ -381,7 +519,7 @@ def consensus_alignment(
     # ==================================================================================
     print(f"\nApplying consensus operation: {consensus_mode}")
 
-    # Start with the first dataframe as base (will retain its metadata)
+    # Start with the first dataframe as base (will retain its metadata, including rlnOpticsGroup)
     consensus_df = matched_dfs[0].copy()
     n_original = len(consensus_df)
     retained_indices = None  # Track which particles were retained
@@ -461,24 +599,23 @@ def consensus_alignment(
         print(f"\nMerging additional metadata columns: {merge_columns}")
         for col in merge_columns:
             # Check which files have this column
-            has_col = [col in df.columns for df in matched_dfs]
+            has_col = [col in s.particles.columns for s in stars]
 
             if not any(has_col):
                 warnings.warn(f"Column '{col}' not found in any input file, skipping")
                 continue
 
             # For each file that has the column, add it with suffix
-            for i, (df, has) in enumerate(zip(matched_dfs, has_col)):
+            for i, (s, has) in enumerate(zip(stars, has_col)):
                 if has and i > 0:  # Skip first file (already in consensus_df)
                     new_col_name = f"{col}_file{i+1}"
 
                     # Need to match indices after potential filtering
                     if len(consensus_df) < n_original:
-                        # Filtering was applied, need to align indices
-                        # Match using primary keys
+                        # Filtering was applied, need to align by primary keys
                         merge_keys = PRIMARY_KEYS
                         merged = consensus_df.merge(
-                            df[merge_keys + [col]],
+                            s.particles[merge_keys + [col]],
                             on=merge_keys,
                             how='left',
                             suffixes=('', f'_file{i+1}')
@@ -486,13 +623,65 @@ def consensus_alignment(
                         consensus_df[new_col_name] = merged[col + f'_file{i+1}']
                     else:
                         # No filtering, direct assignment
-                        consensus_df[new_col_name] = df[col].values
+                        consensus_df[new_col_name] = s.particles[col].values
 
                     print(f"  Added column '{new_col_name}' from file {i+1}")
 
     # ==================================================================================
-    # STEP 7: Write output
+    # STEP 7: Prepare optics for output (subset + write)
     # ==================================================================================
+    output_tables: Dict[str, pd.DataFrame] = {}
+
+    # Always write particles
+    output_tables["particles"] = consensus_df
+
+    # Prefer optics from the first file if present, else from any file with optics
+    first_optics = stars[0].optics
+    if first_optics is not None and "rlnOpticsGroup" in consensus_df.columns:
+        used_groups = sorted(set(consensus_df["rlnOpticsGroup"].astype(int).tolist()))
+        optics_out = first_optics.copy()
+        optics_out["rlnOpticsGroup"] = optics_out["rlnOpticsGroup"].astype(int)
+        optics_out = optics_out[optics_out["rlnOpticsGroup"].isin(used_groups)].copy()
+
+        # Sanity: ensure all used groups are present
+        missing = set(used_groups) - set(optics_out["rlnOpticsGroup"].astype(int).tolist())
+        if missing:
+            raise ValueError(
+                "Output references optics group(s) not present in the first input's optics table: "
+                f"{sorted(missing)}. Ensure consistent optics groups or re-export inputs."
+            )
+
+        output_tables["optics"] = optics_out.reset_index(drop=True)
+        print(f"\nOptics table written with {len(optics_out)} group(s) from first input.")
+    else:
+        # If no optics in first file, but some later file has optics AND everyone passed compatibility,
+        # we could still include optics from that file. This is optional; we keep it simple and skip.
+        if any(s.optics is not None for s in stars):
+            warnings.warn(
+                "Optics present in some inputs but not in the first; "
+                "output will not include an optics table. (Particles still carry rlnOpticsGroup if present.)"
+            )
+
+    # ==================================================================================
+    # STEP 8: Restore original order and write output
+    # ==================================================================================
+    # Restore the original order of the first input file
+    # The sorted_to_original_map tells us: sorted_idx -> original_idx
+    # We need to reorder so that particles appear in the same order as the first input file
+    if len(consensus_df) == len(sorted_to_original_map):
+        # No particles were dropped, can restore order
+        reordered_consensus_df = consensus_df.iloc[sorted_to_original_map].reset_index(drop=True)
+        output_tables["particles"] = reordered_consensus_df
+
+        # Also need to reorder optics reference if present
+        if "optics" in output_tables:
+            # Optics groups are already correctly referenced, no need to change
+            pass
+    else:
+        # Some particles were dropped (drop/combined mode), cannot restore order
+        # Keep sorted order
+        pass
+
     print(f"\nWriting consensus alignment to: {output_star}")
 
     # Create output directory if needed
@@ -500,13 +689,16 @@ def consensus_alignment(
     if output_dir and not os.path.exists(output_dir):
         os.makedirs(output_dir, exist_ok=True)
 
-    # Write star file
-    starfile.write(consensus_df, output_star, overwrite=True)
+    # Write star file (write dict if we have optics, else just particles)
+    if "optics" in output_tables:
+        starfile.write(output_tables, output_star, overwrite=True)
+    else:
+        starfile.write(output_tables["particles"], output_star, overwrite=True)
 
     print(f"Successfully wrote {len(consensus_df)} particles to {output_star}")
 
     # ==================================================================================
-    # STEP 8: Print final statistics
+    # STEP 9: Print final statistics
     # ==================================================================================
     print(f"\n{'='*80}")
     print(f"FINAL STATISTICS")
@@ -525,20 +717,24 @@ def consensus_alignment(
         output_rot = euler_angles_to_matrix(output_angles_rad, RELION_EULER_CONVENTION)
 
         # Compute errors vs each input file
-        for i, rot_mat in enumerate(rot_matrices_list):
+        for i, df_in in enumerate(matched_dfs):
             # Match indices if filtering was applied
             if retained_indices is not None:
                 # Extract matching rows from input using stored indices
-                rot_mat_matched = rot_mat[retained_indices]
+                angles_in = df_in.iloc[retained_indices][list(RELION_ANGLES_NAMES)].values
             else:
-                rot_mat_matched = rot_mat
+                angles_in = df_in[list(RELION_ANGLES_NAMES)].values
+
+            angles_in_rad = torch.tensor(np.deg2rad(angles_in), dtype=torch.float32)
+            rot_mat_matched = euler_angles_to_matrix(angles_in_rad, RELION_EULER_CONVENTION)
 
             errors = rotation_error_with_sym(output_rot, rot_mat_matched, symmetry=symmetry)
-            errors_deg = torch.rad2deg(errors).numpy()
+            errors_deg_out = torch.rad2deg(errors).numpy()
 
-            print(f"  vs file {i+1}: mean={errors_deg.mean():.3f}°, "
-                  f"median={np.median(errors_deg):.3f}°, "
-                  f"max={errors_deg.max():.3f}°")
+            import numpy as _np  # scoped to avoid polluting top-level
+            print(f"  vs file {i+1}: mean={errors_deg_out.mean():.3f}°, "
+                  f"median={_np.median(errors_deg_out):.3f}°, "
+                  f"max={errors_deg_out.max():.3f}°")
 
     print(f"{'='*80}\n")
 

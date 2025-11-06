@@ -280,7 +280,7 @@ class Trainer:
                 if check_if_training_partion_done(self.experiment_root, partition):
                     continue
                 if self.map_fname_for_simulated_pretraining:
-                    # TODO: Implement simulate_particles
+                    # TODO: Implement multi-gpu for simulate_particles
                     from cryoPARES.simulation.simulateParticles import run_simulation
                     sim_star_fnames = []
                     sim_dirs = []

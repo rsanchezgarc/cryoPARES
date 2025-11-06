@@ -1,7 +1,16 @@
 """
-Test script for consensus_alignment.py using synthetic data.
+Diagnostic test for consensus_alignment.py using synthetic data.
 
-Creates fake star files with known poses and tests all consensus modes.
+Key improvements:
+- Computes ALL pose errors in matrix space using the project's converters:
+  euler_angles_to_matrix(...) + rotation_error_with_sym(...)
+- Cross-checks the averaged rotations in THREE ways:
+  (1) output file vs zero-noise reference (what you had)
+  (2) a recomputed average done INSIDE the test (same kernel as the script)
+  (3) output file vs the recomputed average (to test I/O conversion)
+
+If something goes wrong, this test prints targeted diagnostics so you
+can see whether the issue is in averaging, angle conversion, or matching.
 """
 
 import os
@@ -16,52 +25,30 @@ import torch
 from cryoPARES.constants import RELION_EULER_CONVENTION, RELION_ANGLES_NAMES
 from cryoPARES.scripts.consensus_alignment import consensus_alignment
 from cryoPARES.geometry.convert_angles import euler_angles_to_matrix
-from cryoPARES.geometry.metrics_angles import rotation_error_with_sym
+from cryoPARES.geometry.metrics_angles import rotation_error_with_sym, mean_rot_matrix
 
+
+# -------------------------- helpers --------------------------
 
 def read_star_particles(fpath: str) -> pd.DataFrame:
-    """Helper to read particles from star file, handling both DataFrame and dict formats."""
     data = starfile.read(fpath)
     return data if isinstance(data, pd.DataFrame) else data['particles']
 
 
 def create_fake_star_file(
     output_path: str,
-    n_particles: int = 100,
-    base_rotations: np.ndarray = None,
-    noise_degrees: float = 0.0,
-    seed: int = None
+    n_particles: int,
+    base_rotations: np.ndarray,
+    noise_degrees: float,
+    seed: int
 ) -> pd.DataFrame:
-    """
-    Create a fake RELION star file with synthetic particle data.
-
-    Args:
-        output_path: Where to save the star file
-        n_particles: Number of particles to generate
-        base_rotations: Optional [N, 3] base Euler angles (degrees). If None, random.
-        noise_degrees: Amount of Gaussian noise to add to angles (degrees)
-        seed: Random seed for reproducibility
-
-    Returns:
-        DataFrame with the generated particle data
-    """
     if seed is not None:
         np.random.seed(seed)
 
-    # Generate or use base rotations
-    if base_rotations is None:
-        # Generate random rotations
-        rots = Rotation.random(n_particles, random_state=seed)
-        angles = rots.as_euler(RELION_EULER_CONVENTION, degrees=True)
-    else:
-        angles = base_rotations.copy()
-
-    # Add noise if specified
+    angles = base_rotations.copy()
     if noise_degrees > 0:
-        noise = np.random.randn(n_particles, 3) * noise_degrees
-        angles += noise
+        angles = angles + np.random.randn(n_particles, 3) * noise_degrees
 
-    # Create particle dataframe
     particles = {
         'rlnImageName': [f'{i+1:06d}@fake_stack.mrcs' for i in range(n_particles)],
         'rlnMicrographName': [f'mic_{i // 10:03d}.mrc' for i in range(n_particles)],
@@ -79,46 +66,52 @@ def create_fake_star_file(
         'rlnSphericalAberration': [2.7] * n_particles,
         'rlnAmplitudeContrast': [0.1] * n_particles,
     }
-
     df = pd.DataFrame(particles)
-
-    # Write star file
     starfile.write(df, output_path, overwrite=True)
-
     return df
 
 
-def test_consensus_alignment():
-    """Run comprehensive tests on consensus_alignment script."""
+def _angles_deg_to_rot_torch(angles_deg: np.ndarray) -> torch.Tensor:
+    ang_rad = torch.tensor(np.deg2rad(angles_deg), dtype=torch.float32)
+    return euler_angles_to_matrix(ang_rad, RELION_EULER_CONVENTION)
 
+
+def _mean_err_deg(A: torch.Tensor, B: torch.Tensor, symmetry: str = 'C1') -> float:
+    errs = rotation_error_with_sym(A, B, symmetry=symmetry)
+    return float(torch.rad2deg(errs).mean().cpu().numpy())
+
+
+def _stack_inputs_to_rotmats(dfs):
+    """Return [N,K,3,3] torch rotation matrices from a list of particle DataFrames."""
+    mats = []
+    for df in dfs:
+        mats.append(_angles_deg_to_rot_torch(df[list(RELION_ANGLES_NAMES)].values))
+    return torch.stack(mats, dim=1)  # [N,K,3,3] (K = len(dfs))
+
+
+# -------------------------- the test --------------------------
+
+def test_consensus_alignment():
     print("\n" + "="*80)
-    print("CONSENSUS ALIGNMENT TEST")
+    print("CONSENSUS ALIGNMENT TEST (diagnostic)")
     print("="*80)
 
-    # Create temporary directory for test files
     test_dir = tempfile.mkdtemp(prefix='cryopares_consensus_test_')
     print(f"\nTest directory: {test_dir}")
 
     try:
-        # ======================================================================
-        # TEST 1: Generate synthetic data with known properties
-        # ======================================================================
-        print("\n" + "-"*80)
-        print("TEST 1: Generating synthetic star files")
-        print("-"*80)
-
+        # ------------------------------------------------------------------
+        # Synthetic data
+        # ------------------------------------------------------------------
         n_particles = 50
         seed = 42
 
-        # Generate base rotations (ground truth)
         np.random.seed(seed)
         base_rots = Rotation.random(n_particles, random_state=seed)
         base_angles = base_rots.as_euler(RELION_EULER_CONVENTION, degrees=True)
 
-        print(f"Generated {n_particles} particles with random poses")
-
-        # Create first file to establish coordinates and micrograph names
-        first_df = create_fake_star_file(
+        # create base file (0° noise)
+        df0 = create_fake_star_file(
             os.path.join(test_dir, 'particles_noise0.0.star'),
             n_particles=n_particles,
             base_rotations=base_angles,
@@ -126,308 +119,206 @@ def test_consensus_alignment():
             seed=seed
         )
 
-        # Store the fixed coordinates and micrograph names
-        fixed_coords_x = first_df['rlnCoordinateX'].values
-        fixed_coords_y = first_df['rlnCoordinateY'].values
-        fixed_micnames = first_df['rlnMicrographName'].values
-
         star_files = [os.path.join(test_dir, 'particles_noise0.0.star')]
         print(f"  Created {star_files[0]} (noise: 0.0°)")
 
-        # Create additional files with same coordinates but noisy angles
-        noise_levels = [2.0, 5.0]  # degrees
-
-        for i, noise in enumerate(noise_levels):
+        # make noisy clones with identical coordinates/micrographs
+        for i, noise in enumerate([2.0, 5.0]):
             fpath = os.path.join(test_dir, f'particles_noise{noise:.1f}.star')
-
-            # Generate noisy angles
             np.random.seed(seed + i + 1)
             noisy_angles = base_angles + np.random.randn(n_particles, 3) * noise
-
-            # Create dataframe with SAME coordinates but noisy angles
-            df = first_df.copy()
-            df['rlnAngleRot'] = noisy_angles[:, 0]
-            df['rlnAngleTilt'] = noisy_angles[:, 1]
-            df['rlnAnglePsi'] = noisy_angles[:, 2]
-
+            df = df0.copy()
+            for j, col in enumerate(RELION_ANGLES_NAMES):
+                df[col] = noisy_angles[:, j]
             starfile.write(df, fpath, overwrite=True)
             star_files.append(fpath)
             print(f"  Created {fpath} (noise: {noise}°)")
 
-        # ======================================================================
-        # TEST 2: Mode "drop" - filter high error particles
-        # ======================================================================
+        # ------------------------------------------------------------------
+        # Mode "average"
+        # ------------------------------------------------------------------
         print("\n" + "-"*80)
-        print("TEST 2: Consensus mode 'drop'")
+        print("TEST: Consensus mode 'average' (with diagnostics)")
         print("-"*80)
 
-        output_drop = os.path.join(test_dir, 'consensus_drop.star')
-
+        out_avg = os.path.join(test_dir, 'consensus_average.star')
         consensus_alignment(
             input_stars=star_files,
-            output_star=output_drop,
+            output_star=out_avg,
+            symmetry='C1',
+            consensus_mode='average'
+        )
+        assert os.path.exists(out_avg), "Output file not created"
+        df_avg = read_star_particles(out_avg)
+        assert len(df_avg) == n_particles, "Average mode should retain all particles"
+
+        # Build all matrices (project converters!)
+        avg_R  = _angles_deg_to_rot_torch(df_avg[list(RELION_ANGLES_NAMES)].values)     # [N,3,3]
+        ref_R  = _angles_deg_to_rot_torch(read_star_particles(star_files[0])[list(RELION_ANGLES_NAMES)].values)
+        noisy_R = _angles_deg_to_rot_torch(read_star_particles(star_files[2])[list(RELION_ANGLES_NAMES)].values)
+
+        # 1) Output vs reference
+        mean_err_avg = _mean_err_deg(avg_R, ref_R, 'C1')
+        mean_err_noisy = _mean_err_deg(noisy_R, ref_R, 'C1')
+        print(f"\n[Eval #1] vs reference:")
+        print(f"  Averaged poses: {mean_err_avg:.3f}°")
+        print(f"  Noisy (5°):     {mean_err_noisy:.3f}°")
+
+        # 2) Recompute the average inside the test (same kernel the script uses).
+        #    The script stacks per-file rotmats [N,K,3,3] and calls mean_rot_matrix(dim=1).
+        inputs_R = _stack_inputs_to_rotmats([read_star_particles(f) for f in star_files])  # [N,K,3,3]
+        avg_R_recomp, _ = mean_rot_matrix(inputs_R, dim=1, weights=None, compute_dispersion=False)
+        mean_err_recomp = _mean_err_deg(avg_R_recomp, ref_R, 'C1')
+        print(f"\n[Eval #2] recomputed mean_rot_matrix vs reference: {mean_err_recomp:.3f}°")
+
+        # 3) Output vs recomputed (checks round-trip/write path)
+        mean_err_out_vs_recomp = _mean_err_deg(avg_R, avg_R_recomp, 'C1')
+        print(f"[Eval #3] output vs recomputed mean: {mean_err_out_vs_recomp:.3f}°")
+
+        # Hard assertions:
+        # (A) The recomputed mean should beat the 5° noisy input (if averaging is correct)
+        assert mean_err_recomp < mean_err_noisy + 1e-6, (
+            f"Recomputed mean (matrix-space) is not better than noisy: "
+            f"{mean_err_recomp:.3f}° vs {mean_err_noisy:.3f}°"
+        )
+
+        # (B) The file we wrote should match the recomputed mean closely (I/O correctness)
+        assert mean_err_out_vs_recomp < 1.0, (
+            f"Output poses differ from recomputed mean by {mean_err_out_vs_recomp:.3f}° "
+            f"(suspect angle conversion / write path)."
+        )
+
+        # (C) And therefore output should beat the noisy input too
+        assert mean_err_avg < mean_err_noisy, "Averaging did not improve pose accuracy!"
+
+        print("\n✓ Average mode: all diagnostics OK")
+
+        # ------------------------------------------------------------------
+        # The rest of your original tests (drop/combined/partial/symmetry/merge)
+        # ------------------------------------------------------------------
+
+        print("\n" + "-"*80)
+        print("TEST: Consensus mode 'drop'")
+        print("-"*80)
+        out_drop = os.path.join(test_dir, 'consensus_drop.star')
+        consensus_alignment(
+            input_stars=star_files,
+            output_star=out_drop,
             symmetry='C1',
             consensus_mode='drop',
             angular_threshold_degs=10.0,
             coordinate_tolerance=0.5
         )
+        assert os.path.exists(out_drop)
+        df_drop = read_star_particles(out_drop)
+        print(f"✓ drop: Output has {len(df_drop)} particles (<= {n_particles})")
+        assert 0 < len(df_drop) <= n_particles
 
-        # Verify output exists
-        assert os.path.exists(output_drop), "Output file not created"
-
-        # Read and check output
-        df_drop = read_star_particles(output_drop)
-        print(f"\n✓ Mode 'drop': Output has {len(df_drop)} particles (started with {n_particles})")
-
-        # Verify it retained some particles (should drop particles with very high error)
-        assert len(df_drop) <= n_particles, "Output has more particles than input!"
-        assert len(df_drop) > 0, "All particles were dropped!"
-
-        # ======================================================================
-        # TEST 3: Mode "average" - geodesic averaging
-        # ======================================================================
         print("\n" + "-"*80)
-        print("TEST 3: Consensus mode 'average'")
+        print("TEST: Consensus mode 'combined'")
         print("-"*80)
-
-        output_avg = os.path.join(test_dir, 'consensus_average.star')
-
+        out_comb = os.path.join(test_dir, 'consensus_combined.star')
         consensus_alignment(
             input_stars=star_files,
-            output_star=output_avg,
-            symmetry='C1',
-            consensus_mode='average'
-        )
-
-        # Verify output
-        assert os.path.exists(output_avg), "Output file not created"
-        df_avg = read_star_particles(output_avg)
-        print(f"\n✓ Mode 'average': Output has {len(df_avg)} particles (all retained)")
-
-        # Should keep all particles in average mode
-        assert len(df_avg) == n_particles, "Average mode should retain all particles"
-
-        # Verify averaged poses are reasonable by comparing to the zero-noise reference
-        avg_angles = df_avg[list(RELION_ANGLES_NAMES)].values
-        avg_rots = Rotation.from_euler(RELION_EULER_CONVENTION, avg_angles, degrees=True)
-
-        # Compare with zero-noise file (our reference)
-        df_ref = read_star_particles(star_files[0])
-        ref_angles = df_ref[list(RELION_ANGLES_NAMES)].values
-        ref_rots = Rotation.from_euler(RELION_EULER_CONVENTION, ref_angles, degrees=True)
-
-        # Compare with highest noise file
-        df_noisy = read_star_particles(star_files[2])
-        noisy_angles = df_noisy[list(RELION_ANGLES_NAMES)].values
-        noisy_rots = Rotation.from_euler(RELION_EULER_CONVENTION, noisy_angles, degrees=True)
-
-        # Compute errors relative to zero-noise reference
-        errors_avg = []
-        errors_noisy = []
-        for i in range(n_particles):
-            # Error of averaged pose to reference
-            err_avg = (avg_rots[i].inv() * ref_rots[i]).magnitude()
-            errors_avg.append(np.degrees(err_avg))
-
-            # Error of noisy pose to reference
-            err_noisy = (noisy_rots[i].inv() * ref_rots[i]).magnitude()
-            errors_noisy.append(np.degrees(err_noisy))
-
-        mean_err_avg = np.mean(errors_avg)
-        mean_err_noisy = np.mean(errors_noisy)
-
-        print(f"  Mean error relative to zero-noise reference:")
-        print(f"    Averaged poses: {mean_err_avg:.3f}°")
-        print(f"    Noisy poses (5°): {mean_err_noisy:.3f}°")
-        print(f"  ✓ Averaging reduced error by {mean_err_noisy - mean_err_avg:.3f}°")
-
-        # Averaged should be better than the noisiest input
-        assert mean_err_avg < mean_err_noisy, "Averaging did not improve pose accuracy!"
-
-        # ======================================================================
-        # TEST 4: Mode "combined" - average + filter
-        # ======================================================================
-        print("\n" + "-"*80)
-        print("TEST 4: Consensus mode 'combined'")
-        print("-"*80)
-
-        output_combined = os.path.join(test_dir, 'consensus_combined.star')
-
-        consensus_alignment(
-            input_stars=star_files,
-            output_star=output_combined,
+            output_star=out_comb,
             symmetry='C1',
             consensus_mode='combined',
             angular_threshold_degs=8.0
         )
+        assert os.path.exists(out_comb)
+        df_comb = read_star_particles(out_comb)
+        print(f"✓ combined: Output has {len(df_comb)} particles")
+        assert 0 < len(df_comb) <= n_particles
 
-        # Verify output
-        assert os.path.exists(output_combined), "Output file not created"
-        df_combined = read_star_particles(output_combined)
-        print(f"\n✓ Mode 'combined': Output has {len(df_combined)} particles")
-
-        assert len(df_combined) <= n_particles, "Output has more particles than input!"
-        assert len(df_combined) > 0, "All particles were dropped!"
-
-        # ======================================================================
-        # TEST 5: Test with partial matching (different particles in files)
-        # ======================================================================
         print("\n" + "-"*80)
-        print("TEST 5: Partial matching (different particle sets)")
+        print("TEST: Partial matching")
         print("-"*80)
-
-        # Create two files with overlapping but different particles
-        df1 = create_fake_star_file(
-            os.path.join(test_dir, 'partial1.star'),
-            n_particles=40,
-            seed=100
-        )
-
-        df2 = create_fake_star_file(
-            os.path.join(test_dir, 'partial2.star'),
-            n_particles=40,
-            seed=200
-        )
-
-        # Modify coordinates so only ~30 particles overlap
+        df1 = create_fake_star_file(os.path.join(test_dir, 'partial1.star'), 40,
+                                    Rotation.random(40, random_state=100).as_euler(RELION_EULER_CONVENTION, True),
+                                    0.0, 100)
+        df2 = create_fake_star_file(os.path.join(test_dir, 'partial2.star'), 40,
+                                    Rotation.random(40, random_state=200).as_euler(RELION_EULER_CONVENTION, True),
+                                    0.0, 200)
         df2['rlnCoordinateX'] = df1['rlnCoordinateX'].iloc[:30].tolist() + df2['rlnCoordinateX'].iloc[30:].tolist()
         df2['rlnCoordinateY'] = df1['rlnCoordinateY'].iloc[:30].tolist() + df2['rlnCoordinateY'].iloc[30:].tolist()
         df2['rlnMicrographName'] = df1['rlnMicrographName'].iloc[:30].tolist() + df2['rlnMicrographName'].iloc[30:].tolist()
-
-        # Save modified df2
         starfile.write(df2, os.path.join(test_dir, 'partial2.star'), overwrite=True)
 
-        output_partial = os.path.join(test_dir, 'consensus_partial.star')
-
+        out_partial = os.path.join(test_dir, 'consensus_partial.star')
         consensus_alignment(
-            input_stars=[
-                os.path.join(test_dir, 'partial1.star'),
-                os.path.join(test_dir, 'partial2.star')
-            ],
-            output_star=output_partial,
+            input_stars=[os.path.join(test_dir, 'partial1.star'),
+                         os.path.join(test_dir, 'partial2.star')],
+            output_star=out_partial,
             symmetry='C1',
             consensus_mode='average'
         )
+        df_partial = read_star_particles(out_partial)
+        print(f"✓ partial: {len(df_partial)} common particles (expected ~30)")
+        assert 25 <= len(df_partial) <= 35
 
-        df_partial = read_star_particles(output_partial)
-        print(f"\n✓ Partial match: {len(df_partial)} common particles found (expected ~30)")
-        assert 25 <= len(df_partial) <= 35, "Unexpected number of matched particles"
-
-        # ======================================================================
-        # TEST 6: Test with symmetry
-        # ======================================================================
         print("\n" + "-"*80)
-        print("TEST 6: Symmetry handling (C2)")
+        print("TEST: Symmetry C2")
         print("-"*80)
-
-        # Create files where second file has 180° rotation (C2 symmetry)
-        df_sym1 = create_fake_star_file(
-            os.path.join(test_dir, 'sym1.star'),
-            n_particles=20,
-            seed=300
-        )
-
-        # Apply C2 rotation to second file
+        df_sym1 = create_fake_star_file(os.path.join(test_dir, 'sym1.star'), 20,
+                                        Rotation.random(20, random_state=300).as_euler(RELION_EULER_CONVENTION, True),
+                                        0.0, 300)
         angles1 = df_sym1[list(RELION_ANGLES_NAMES)].values
         rots1 = Rotation.from_euler(RELION_EULER_CONVENTION, angles1, degrees=True)
-
-        # C2 symmetry: 180° rotation around Z
-        c2_rot = Rotation.from_euler('Z', 180, degrees=True)
-        rots2 = rots1 * c2_rot
-        angles2 = rots2.as_euler(RELION_EULER_CONVENTION, degrees=True)
-
+        c2 = Rotation.from_euler('Z', 180, degrees=True)
+        angles2 = (c2 * rots1).as_euler(RELION_EULER_CONVENTION, degrees=True)
         df_sym2 = df_sym1.copy()
-        df_sym2['rlnAngleRot'] = angles2[:, 0]
-        df_sym2['rlnAngleTilt'] = angles2[:, 1]
-        df_sym2['rlnAnglePsi'] = angles2[:, 2]
-
+        df_sym2[RELION_ANGLES_NAMES[0]] = angles2[:, 0]
+        df_sym2[RELION_ANGLES_NAMES[1]] = angles2[:, 1]
+        df_sym2[RELION_ANGLES_NAMES[2]] = angles2[:, 2]
         starfile.write(df_sym2, os.path.join(test_dir, 'sym2.star'), overwrite=True)
 
-        output_sym = os.path.join(test_dir, 'consensus_sym.star')
-
+        out_sym = os.path.join(test_dir, 'consensus_sym.star')
         consensus_alignment(
-            input_stars=[
-                os.path.join(test_dir, 'sym1.star'),
-                os.path.join(test_dir, 'sym2.star')
-            ],
-            output_star=output_sym,
+            input_stars=[os.path.join(test_dir, 'sym1.star'),
+                         os.path.join(test_dir, 'sym2.star')],
+            output_star=out_sym,
             symmetry='C2',
             consensus_mode='drop',
             angular_threshold_degs=5.0
         )
+        df_sym = read_star_particles(out_sym)
+        print(f"✓ symmetry C2: {len(df_sym)} particles (expected 20)")
+        assert len(df_sym) == 20
 
-        df_sym = read_star_particles(output_sym)
-        print(f"\n✓ Symmetry C2: All {len(df_sym)} particles retained (expected all due to symmetry)")
-
-        # With C2 symmetry, the poses should be considered equivalent
-        # So we should keep all particles
-        assert len(df_sym) == 20, "C2 symmetry not properly handled"
-
-        # ======================================================================
-        # TEST 7: Merge columns
-        # ======================================================================
         print("\n" + "-"*80)
-        print("TEST 7: Merging metadata columns")
+        print("TEST: Merge columns")
         print("-"*80)
-
-        # Add extra columns to test files
-        df_meta1 = create_fake_star_file(
-            os.path.join(test_dir, 'meta1.star'),
-            n_particles=15,
-            seed=400
-        )
+        df_meta1 = create_fake_star_file(os.path.join(test_dir, 'meta1.star'), 15,
+                                         Rotation.random(15, random_state=400).as_euler(RELION_EULER_CONVENTION, True),
+                                         0.0, 400)
         df_meta1['rlnClassNumber'] = np.random.randint(1, 4, 15)
         starfile.write(df_meta1, os.path.join(test_dir, 'meta1.star'), overwrite=True)
 
         df_meta2 = df_meta1.copy()
         df_meta2['rlnClassNumber'] = np.random.randint(1, 4, 15)
         df_meta2['rlnLogLikeliContribution'] = np.random.uniform(100, 200, 15)
-        # Add small noise to angles
         for col in RELION_ANGLES_NAMES:
             df_meta2[col] += np.random.randn(15) * 1.0
         starfile.write(df_meta2, os.path.join(test_dir, 'meta2.star'), overwrite=True)
 
-        output_meta = os.path.join(test_dir, 'consensus_meta.star')
-
+        out_meta = os.path.join(test_dir, 'consensus_meta.star')
         consensus_alignment(
-            input_stars=[
-                os.path.join(test_dir, 'meta1.star'),
-                os.path.join(test_dir, 'meta2.star')
-            ],
-            output_star=output_meta,
+            input_stars=[os.path.join(test_dir, 'meta1.star'),
+                         os.path.join(test_dir, 'meta2.star')],
+            output_star=out_meta,
             symmetry='C1',
             consensus_mode='average',
             merge_columns=['rlnClassNumber', 'rlnLogLikeliContribution']
         )
+        df_meta_out = read_star_particles(out_meta)
+        assert 'rlnClassNumber' in df_meta_out.columns
+        assert 'rlnClassNumber_file2' in df_meta_out.columns
+        assert 'rlnLogLikeliContribution_file2' in df_meta_out.columns
+        print("✓ merge columns OK")
 
-        df_meta_out = read_star_particles(output_meta)
-        print(f"\n✓ Merged columns:")
-        print(f"  - Base columns from file 1: {len([c for c in df_meta_out.columns if not c.endswith('_file2')])}")
-        print(f"  - Merged columns from file 2: {len([c for c in df_meta_out.columns if c.endswith('_file2')])}")
-
-        # Check that merged columns exist
-        assert 'rlnClassNumber' in df_meta_out.columns, "Base rlnClassNumber missing"
-        assert 'rlnClassNumber_file2' in df_meta_out.columns, "Merged rlnClassNumber_file2 missing"
-        assert 'rlnLogLikeliContribution_file2' in df_meta_out.columns, "Merged rlnLogLikeliContribution_file2 missing"
-
-        print("  ✓ All merged columns present")
-
-        # ======================================================================
-        # FINAL SUMMARY
-        # ======================================================================
         print("\n" + "="*80)
         print("ALL TESTS PASSED! ✓")
         print("="*80)
-        print("\nTest summary:")
-        print("  1. Synthetic data generation: PASSED")
-        print("  2. Consensus mode 'drop': PASSED")
-        print("  3. Consensus mode 'average': PASSED")
-        print("  4. Consensus mode 'combined': PASSED")
-        print("  5. Partial matching: PASSED")
-        print("  6. Symmetry handling (C2): PASSED")
-        print("  7. Metadata column merging: PASSED")
-        print("\n" + "="*80 + "\n")
-
         return True
 
     except Exception as e:
@@ -437,12 +328,11 @@ def test_consensus_alignment():
         return False
 
     finally:
-        # Cleanup
         if os.path.exists(test_dir):
             print(f"\nCleaning up test directory: {test_dir}")
             shutil.rmtree(test_dir)
 
 
 if __name__ == "__main__":
-    success = test_consensus_alignment()
-    exit(0 if success else 1)
+    ok = test_consensus_alignment()
+    exit(0 if ok else 1)

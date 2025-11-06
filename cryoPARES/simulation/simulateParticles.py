@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
+from tqdm import tqdm
 
 import mrcfile
 import starfile
@@ -85,6 +86,41 @@ def _sample_shift_jitter_px(B: int, max_A: float, frac: float, px_A: float, devi
     mask = (torch.rand((B,), device=device, generator=gen) < frac).float().unsqueeze(1)
     jitter_A = (torch.rand((B, 2), device=device, generator=gen) * 2.0 - 1.0) * max_A
     return (jitter_A / float(px_A)) * mask
+
+
+def _batch_ctf_params(md_rows: List[pd.Series], device) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, List]:
+    """Extract CTF parameters from STAR rows as batched tensors.
+
+    Returns:
+        dfu: (B,) defocus U in Angstroms
+        dfv: (B,) defocus V in Angstroms
+        dfang: (B,) defocus angle in degrees
+        phase_shift: (B,) phase shift in degrees
+        bfactors: List of bfactor values (None or float) per particle
+    """
+    dfu_list = [float(row.get("rlnDefocusU", 15000.0)) for row in md_rows]
+    dfv_list = [float(row.get("rlnDefocusV", 15000.0)) for row in md_rows]
+    dfang_list = [float(row.get("rlnDefocusAngle", 0.0)) for row in md_rows]
+    phase_shift_list = [float(row.get("rlnPhaseShift", 0.0)) if "rlnPhaseShift" in row else 0.0 for row in md_rows]
+    bfactors = [None if _isnan_or_none(row.get("rlnCtfBfactor", None)) else float(row["rlnCtfBfactor"]) for row in md_rows]
+
+    return (
+        torch.tensor(dfu_list, device=device, dtype=torch.float32),
+        torch.tensor(dfv_list, device=device, dtype=torch.float32),
+        torch.tensor(dfang_list, device=device, dtype=torch.float32),
+        torch.tensor(phase_shift_list, device=device, dtype=torch.float32),
+        bfactors
+    )
+
+
+def _batch_shifts_px(md_rows: List[pd.Series], px_A: float, device) -> torch.Tensor:
+    """Extract shifts in pixels from STAR rows as (B, 2) tensor."""
+    shifts = []
+    for row in md_rows:
+        sx_A = float(row.get(RELION_SHIFTS_NAMES[0], 0.0))
+        sy_A = float(row.get(RELION_SHIFTS_NAMES[1], 0.0))
+        shifts.append([sx_A / px_A, sy_A / px_A])
+    return torch.tensor(shifts, device=device, dtype=torch.float32)
 
 
 # ===================== Projection Subtraction ===================== #
@@ -276,6 +312,7 @@ class CryoEMSimulator:
             sub_bp_hi_A: float = 8.0,
             sub_power_q: float = 0.30,
             random_seed: Optional[int] = None,
+            disable_tqdm: bool = False,
     ) -> str:
         """Run simulation and write output stack + STAR file."""
 
@@ -319,6 +356,10 @@ class CryoEMSimulator:
         # Determine particle size from first image
         H_part = W_part = self.vol_size
 
+        # Progress bar
+        total_particles = len(pset)
+        pbar = tqdm(total=total_particles, desc="Simulating particles", unit="particle", disable=disable_tqdm)
+
         for batch_idx, (idxs, md_rows, imgs) in enumerate(loader):
             B = len(md_rows)
 
@@ -330,86 +371,89 @@ class CryoEMSimulator:
             # Sample jitter
             euls_gt = _batch_angles_deg(md_rows, device=self.device)
             angle_jit = _sample_angle_jitter(B, angle_jitter_deg, angle_jitter_frac, device=self.device, gen=gen)
-            shift_jit_px = _sample_shift_jitter_px(B, shift_jitter_A, shift_jitter_frac, px_A, device=self.device,
-                                                   gen=gen)
+            shift_jit_px = _sample_shift_jitter_px(B, shift_jitter_A, shift_jitter_frac, px_A, device=self.device, gen=gen)
+
+            # Extract CTF parameters and shifts for entire batch
+            dfu_batch, dfv_batch, dfang_batch, phase_shift_batch, bfactors = _batch_ctf_params(md_rows, device=self.device)
+            shifts_gt_px = _batch_shifts_px(md_rows, px_A, device=self.device)  # (B, 2)
 
             # Generate projections
             if simulation_mode == "central_slice":
                 R_sim = _deg_eulers_to_R(euls_gt + angle_jit)
-                projs = self._project(R_sim)
-            else:
-                # Ground-truth for subtraction
-                R_gt = _deg_eulers_to_R(euls_gt)
-                projs_gt = self._project(R_gt)
-                # Jittered for addition
-                R_jit = _deg_eulers_to_R(euls_gt + angle_jit)
-                projs_jit = self._project(R_jit)
+                projs = self._project(R_sim)  # (B, H, W)
 
-            # Process each particle
-            for i in range(B):
-                row = md_rows[i]
+                # Apply shifts (ground-truth + jitter) in batch
+                total_shifts_px = shifts_gt_px + shift_jit_px  # (B, 2)
+                # Relion convention: shifts are corrections, so negate
+                shift_vectors = torch.stack([-total_shifts_px[:, 1], -total_shifts_px[:, 0]], dim=1)  # (B, 2): [-y, -x]
 
-                # CTF parameters
-                dfU = float(row.get("rlnDefocusU", 15000.0))
-                dfV = float(row.get("rlnDefocusV", 15000.0))
-                dfAng = float(row.get("rlnDefocusAngle", 0.0))
-                phase_shift = float(row.get("rlnPhaseShift", 0.0)) if "rlnPhaseShift" in row else 0.0
-                bfac_val = row.get("rlnCtfBfactor", None)
-                bfactor = None if _isnan_or_none(bfac_val) else float(bfac_val)
+                # Apply shifts to all projections
+                projs_shifted = []
+                for i in range(B):
+                    if total_shifts_px[i, 0] != 0 or total_shifts_px[i, 1] != 0:
+                        proj_shifted = fourier_shift_image_2d(projs[i], shifts=shift_vectors[i])
+                    else:
+                        proj_shifted = projs[i]
+                    projs_shifted.append(proj_shifted)
+                projs = torch.stack(projs_shifted, dim=0)  # (B, H, W)
 
-                if simulation_mode == "central_slice":
-                    # Simple forward model
-                    out_img = projs[i]
-
-                    # Apply shifts (ground-truth + jitter)
-                    sx_gt, sy_gt = self._get_shifts_px(row, px_A)
-                    sx = sx_gt + float(shift_jit_px[i, 0])
-                    sy = sy_gt + float(shift_jit_px[i, 1])
-
-                    if sx != 0 or sy != 0:
-                        # Relion convention: shifts are corrections, so negate
-                        out_img = fourier_shift_image_2d(
-                            out_img,
-                            shifts=torch.tensor([-sy, -sx], device=self.device)
-                        )
-
-                    # Apply CTF
-                    if apply_ctf:
-                        _, out_img = corrupt_with_ctf(
-                            image=out_img, sampling_rate=px_A,
-                            dfu=dfU, dfv=dfV, dfang=dfAng,
-                            volt=volt_kV, cs=cs_mm, w=amp_contrast,
-                            phase_shift=phase_shift, bfactor=bfactor, fftshift=True
-                        )
-
+                # Apply CTF in batch (if all have same bfactor or all None)
+                if apply_ctf:
+                    out_imgs = []
+                    # Check if we can batch CTF (all bfactors are None or a constant)
+                    unique_bfactors = set(bfactors)
+                    if len(unique_bfactors) == 1:
+                        # All same bfactor - can batch!
+                        bfactor = list(unique_bfactors)[0]
+                        for i in range(B):
+                            _, out_img = corrupt_with_ctf(
+                                image=projs[i], sampling_rate=px_A,
+                                dfu=dfu_batch[i], dfv=dfv_batch[i], dfang=dfang_batch[i],
+                                volt=volt_kV, cs=cs_mm, w=amp_contrast,
+                                phase_shift=phase_shift_batch[i], bfactor=bfactor, fftshift=True
+                            )
+                            out_imgs.append(out_img)
+                    else:
+                        # Different bfactors - process individually
+                        for i in range(B):
+                            _, out_img = corrupt_with_ctf(
+                                image=projs[i], sampling_rate=px_A,
+                                dfu=dfu_batch[i], dfv=dfv_batch[i], dfang=dfang_batch[i],
+                                volt=volt_kV, cs=cs_mm, w=amp_contrast,
+                                phase_shift=phase_shift_batch[i], bfactor=bfactors[i], fftshift=True
+                            )
+                            out_imgs.append(out_img)
+                    out_imgs = torch.stack(out_imgs, dim=0)  # (B, H, W)
                 else:
-                    # noise_additive mode
+                    out_imgs = projs
+
+            else:
+                # noise_additive mode - still needs per-particle processing for subtraction
+                R_gt = _deg_eulers_to_R(euls_gt)
+                projs_gt = self._project(R_gt)  # (B, H, W)
+                R_jit = _deg_eulers_to_R(euls_gt + angle_jit)
+                projs_jit = self._project(R_jit)  # (B, H, W)
+
+                out_imgs = []
+                for i in range(B):
                     particle = torch.as_tensor(imgs[i], device=self.device, dtype=torch.float32)
 
                     # Get CTF (rfft layout, fftshift=False)
                     ctf = compute_ctf_rfft(
                         image_size=H_part, sampling_rate=px_A,
-                        dfu=dfU, dfv=dfV, dfang=dfAng,
+                        dfu=dfu_batch[i], dfv=dfv_batch[i], dfang=dfang_batch[i],
                         volt=volt_kV, cs=cs_mm, w=amp_contrast,
-                        phase_shift=phase_shift, bfactor=bfactor,
+                        phase_shift=phase_shift_batch[i], bfactor=bfactors[i],
                         fftshift=False, device=self.device
                     )
 
                     # SUBTRACTION: ground-truth pose and shifts
-                    sx_gt, sy_gt = self._get_shifts_px(row, px_A)
                     proj_gt = projs_gt[i].clone()
-
-                    if sx_gt != 0 or sy_gt != 0:
-                        # Relion: shifts are corrections, apply negative
+                    if shifts_gt_px[i, 0] != 0 or shifts_gt_px[i, 1] != 0:
                         proj_gt = fourier_shift_image_2d(
                             proj_gt,
-                            shifts=torch.tensor([-sy_gt, -sx_gt], device=self.device)
+                            shifts=torch.tensor([-shifts_gt_px[i, 1], -shifts_gt_px[i, 0]], device=self.device)
                         )
-
-                    # proj_gt_mean = proj_gt.mean()
-                    # proj_gt_std = proj_gt.std() + 1e-6
-                    # proj_gt = (proj_gt - proj_gt_mean) / proj_gt_std
-
 
                     # Subtract with T0 scaling
                     noise_only, a_fit = subtract_projection_T0(
@@ -423,50 +467,50 @@ class CryoEMSimulator:
                     )
 
                     # ADDITION: jittered pose and shifts
-                    sx_jit = sx_gt + float(shift_jit_px[i, 0])
-                    sy_jit = sy_gt + float(shift_jit_px[i, 1])
+                    total_shift_jit_px = shifts_gt_px[i] + shift_jit_px[i]
                     proj_jit = projs_jit[i].clone()
-
-                    if sx_jit != 0 or sy_jit != 0:
+                    if total_shift_jit_px[0] != 0 or total_shift_jit_px[1] != 0:
                         proj_jit = fourier_shift_image_2d(
                             proj_jit,
-                            shifts=torch.tensor([-sy_jit, -sx_jit], device=self.device)
+                            shifts=torch.tensor([-total_shift_jit_px[1], -total_shift_jit_px[0]], device=self.device)
                         )
 
-                    # Add with same scale factor (assumes scale is SNR-related, not pose-dependent)
+                    # Add with same scale factor
                     P_jit = torch.fft.rfft2(proj_jit)
                     X_jit = ctf * P_jit
                     signal_jit = torch.fft.irfft2(a_fit * X_jit, s=(H_part, W_part))
 
                     out_img = noise_only + signal_jit
-                    # import matplotlib.pyplot as plt
-                    # print("a_fit", a_fit)
-                    # f, axes = plt.subplots(1, 4)
-                    # axes[0].imshow(particle.cpu(), cmap="gray")
-                    # axes[1].imshow(noise_only.cpu(), cmap="gray")
-                    # axes[2].imshow(signal_jit.cpu(), cmap="gray")
-                    # axes[3].imshow(out_img.cpu(), cmap="gray")
-                    # plt.show()
-                    # breakpoint()
-                # Add Gaussian noise if SNR specified
-                if snr is not None and snr > 0:
-                    sig_var = float(torch.var(out_img))
+                    out_imgs.append(out_img)
+
+                out_imgs = torch.stack(out_imgs, dim=0)  # (B, H, W)
+
+            # Add Gaussian noise to entire batch
+            if snr is not None and snr > 0:
+                for i in range(B):
+                    sig_var = float(torch.var(out_imgs[i]))
                     noise_std = math.sqrt(sig_var / snr) if sig_var > 0 else 1.0
-                    out_img = out_img + torch.randn_like(out_img) * noise_std
+                    out_imgs[i] += torch.randn_like(out_imgs[i]) * noise_std
 
-                # Buffer output
-                np_img = out_img.detach().cpu().numpy().astype(np.float32)
-                if buffer is None:
-                    buffer = np_img[None, ...]
-                else:
-                    buffer = np.concatenate([buffer, np_img[None, ...]], axis=0)
+            # Convert entire batch to numpy and add to buffer
+            batch_np = out_imgs.detach().cpu().numpy().astype(np.float32)  # (B, H, W)
 
-                # Flush shard if full
-                if buffer.shape[0] >= images_per_file:
-                    _flush_shard(buffer, out_path)
-                    shard_idx += 1
-                    out_path = os.path.join(out_dir, f"{basename}_{shard_idx:04d}.mrcs")
-                    buffer = None
+            # Add batch to buffer
+            if buffer is None:
+                buffer = batch_np
+            else:
+                buffer = np.concatenate([buffer, batch_np], axis=0)
+
+            # Flush shards as needed
+            while buffer.shape[0] >= images_per_file:
+                _flush_shard(buffer[:images_per_file], out_path)
+                buffer = buffer[images_per_file:]
+                shard_idx += 1
+                out_path = os.path.join(out_dir, f"{basename}_{shard_idx:04d}.mrcs")
+
+            pbar.update(B)
+
+        pbar.close()
 
         # Flush remaining buffer
         if buffer is not None and buffer.shape[0] > 0:
@@ -517,6 +561,7 @@ def run_simulation(
         sub_bp_hi_A: float = 8.0,
         sub_power_q: float = 0.30,
         random_seed: Optional[int] = None,
+        disable_tqdm: bool = False,
 ) -> str:
     """Run particle simulation."""
     if device is None:
@@ -543,6 +588,7 @@ def run_simulation(
         sub_bp_hi_A=sub_bp_hi_A,
         sub_power_q=sub_power_q,
         random_seed=random_seed,
+        disable_tqdm=disable_tqdm,
     )
 
 
@@ -571,7 +617,7 @@ def main():
     p.add_argument("--sub_bp_hi_A", type=float, default=8.0)
     p.add_argument("--sub_power_q", type=float, default=0.30)
     p.add_argument("--random_seed", type=int, default=None)
-
+    p.add_argument("--disable_tqdm", action="store_true", help="Disable progress bar")
 
     args = p.parse_args()
 
@@ -596,6 +642,7 @@ def main():
         sub_bp_hi_A=args.sub_bp_hi_A,
         sub_power_q=args.sub_power_q,
         random_seed=args.random_seed,
+        disable_tqdm=args.disable_tqdm,
     )
 
     print(f"Simulation complete. Output STAR: {out_star}")

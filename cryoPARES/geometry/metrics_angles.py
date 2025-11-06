@@ -124,33 +124,69 @@ def rotation_error_with_sym(rotA, rotB, symmetry=None):
             return min_errors.view(batch_shape)
 
 def mean_rot_matrix(rotMatrices: torch.Tensor, dim:int, weights:Optional[torch.Tensor]=None, compute_dispersion:bool=True):
+    """
 
-    assert 0 <= dim < len(rotMatrices.shape)-2
+    :param rotMatrices:  (..., 3,3)
+    :param dim:
+    :param weights:  (...)
+    :param compute_dispersion:
+    :return:
+    """
+
+    assert 0 <= dim and dim < rotMatrices.dim() - 2
+
+    device = rotMatrices.device
+    dtype = rotMatrices.dtype
+
+    # ---- Build weights aligned to `dim` ----
     if weights is None:
-        weights = torch.ones_like(rotMatrices[:,:,:,0,0]).softmax(-1)
+        # Make a tensor of ones with the head shape by reusing an existing slice.
+        # w has shape rotMatrices.shape[:-2]
+        w = rotMatrices[..., 0, 0]
+        # Set all entries to 1 (avoid creating new tensors with dynamic size tuples)
+        w = w - w + 1.0
+        # Normalize along the same axis we will reduce
+        w = w / (w.sum(dim=dim, keepdim=True) + 1e-12)
     else:
-        weights = weights.to(rotMatrices).unsqueeze(-1).unsqueeze(-1)
-    m = (weights * rotMatrices).sum(dim)
-    U, S, Vh = torch.linalg.svd(m)
-    avg = U @ Vh
+        w = weights.to(device=device, dtype=dtype)
+        # Ensure normalized along `dim`
+        w = w / (w.sum(dim=dim, keepdim=True) + 1e-12)
 
-    # Correct for possible reflection (det = -1)
-    # Check determinant along the specified dimension, adjusting the last column of U if needed
-    adjust = torch.linalg.det(avg) < 0  # A boolean tensor marking where the determinant is negative
+    # Expand weights to (..., 3, 3) for elementwise multiplication
+    wM = w.unsqueeze(-1).unsqueeze(-1)  # (..., 1, 1)
 
-    if adjust.any():
-        # Expand adjust to match the dimensionality for broadcasting
-        adjust = adjust.unsqueeze(-1).unsqueeze(-1).expand(-1, 3, 3)
-        # Correcting only the last column of U where needed
-        U_adj = U.clone()
-        U_adj[adjust][:, :, -1] *= -1
-        avg = torch.matmul(U_adj, Vh)
+    # Weighted sum along `dim`
+    M = (rotMatrices * wM).sum(dim=dim)  # shape: head(without dim) + (3,3)
+
+    # ---- SVD projection with robust reflection handling ----
+    U, S, Vh = torch.linalg.svd(M)  # each: (..., 3, 3)
+    Vt = Vh
+    R = U @ Vt
+    detR = torch.linalg.det(R)  # shape: head(without dim)
+
+    # Build D = diag(1, 1, sign) without dynamic expands
+    D = torch.zeros_like(R)  # (..., 3, 3)
+    D[..., 0, 0] = 1.0
+    D[..., 1, 1] = 1.0
+    D[..., 2, 2] = torch.where(detR < 0, torch.tensor(-1.0, dtype=dtype, device=device),
+                               torch.tensor(1.0, dtype=dtype, device=device))
+
+    avg = U @ (D @ Vt)  # final rotation mean, shape: head(without dim)+(3,3)
 
     if compute_dispersion:
-         disp = rotation_error_rads(avg.unsqueeze(dim), rotMatrices).mean(dim)
+        # Put the reduced axis back as size-1 to broadcast against rotMatrices
+        avg_expanded = avg.unsqueeze(dim)  # inserts a length-1 axis at `dim`
+        # Angular distance between avg and each member along `dim`
+        Rt = rotMatrices.transpose(-1, -2)
+        prod = torch.matmul(avg_expanded, Rt)
+        trace = prod.diagonal(dim1=-1, dim2=-2).sum(-1)
+        ang = torch.arccos(torch.clamp((trace - 1.0) * 0.5, -1.0, 1.0))
+        disp = ang.mean(dim=dim)  # radians
     else:
-        disp = None
+        disp = torch.tensor(0.0, dtype=dtype, device=device)  # placeholder to satisfy TorchScript
+
     return avg, disp
+
 
 if __name__ == "__main__":
     from scipy.spatial.transform import Rotation

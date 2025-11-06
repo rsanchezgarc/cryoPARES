@@ -28,7 +28,7 @@ class Image2Sphere_config:
     use_simCLR: bool = False
     simCLR_temperature: float = 0.5  # Temperature parameter for contrastive loss
     simCLR_loss_weight: float = 0.1  # Weight for contrastive loss relative to main loss
-    average_neigs_for_pred: bool = False #Sligthly slower and slightly more accurate
+    average_neigs_for_pred: bool = False #slightly more accurate but slower
     n_neigs_to_compute: int = 10 #Number of neigs used for averaging
 
     imageencoder: ImageEncoder_config = field(default_factory=ImageEncoder_config)

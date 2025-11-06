@@ -171,7 +171,7 @@ class Image2Sphere(nn.Module):
         return wD, rotMat_logits, pred_rotmat_id, pred_rotmat, maxprob
 
     @torch.jit.export
-    def forward_with_neigs(self, img:torch.Tensor, top_k:int): #TODO: FORWARD WITH NEIGS NEEDS TO BE EXPOSED
+    def forward_with_neigs(self, img:torch.Tensor, top_k:int):
 
         wD = self.predict_wignerDs(img)
         rotMat_logits, pred_rotmat_id, pred_rotmat = self.from_wignerD_to_topKMats(wD, top_k)

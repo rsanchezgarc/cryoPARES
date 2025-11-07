@@ -10,13 +10,16 @@ import argparse
 from typing import Optional, List
 
 import numpy as np
+import pandas as pd
 import torch
+import starfile
 
 # Use the APIs exposed by the helper you integrated earlier
 # (both single-run and multi-GPU sharded run)
 from cryoPARES.simulation.simulateParticlesHelper import (
     run_simulation,
     run_simulation_sharded,
+    ParticlesStarSet,
 )
 
 
@@ -58,6 +61,74 @@ def _maybe_seed(seed: Optional[int]) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
+def _write_output_star(
+    stack_paths: List[str],
+    output_dir: str,
+    basename: str,
+    in_star: str,
+    images_per_file: int,
+) -> str:
+    """
+    Create output STAR file referencing the generated MRC stacks.
+
+    Args:
+        stack_paths: List of paths to generated MRC stacks
+        output_dir: Output directory
+        basename: Base name for output
+        in_star: Original input STAR file
+        images_per_file: Number of images per MRC file
+
+    Returns:
+        Path to created STAR file
+    """
+    # Load original STAR to get particle count and optics
+    pset = ParticlesStarSet.load(in_star)
+    total_particles = len(pset.particles_md)
+
+    # Create particle entries
+    particles_data = []
+    particle_idx = 0
+
+    for stack_idx, stack_path in enumerate(sorted(stack_paths)):
+        # Get relative path from output_dir
+        rel_path = os.path.relpath(stack_path, output_dir)
+
+        # Determine how many particles are in this stack
+        if stack_idx < len(stack_paths) - 1:
+            # Full stack
+            n_particles_in_stack = images_per_file
+        else:
+            # Last stack - might be partial
+            n_particles_in_stack = total_particles - (stack_idx * images_per_file)
+
+        # Create entries for particles in this stack
+        for img_idx in range(n_particles_in_stack):
+            # Copy original particle metadata
+            orig_row = pset.particles_md.iloc[particle_idx]
+
+            # Create new row with updated image name
+            new_row = orig_row.copy()
+            # Note: starfile library reads "_rlnImageName" as "rlnImageName" (without underscore)
+            new_row['rlnImageName'] = f"{img_idx + 1:06d}@{rel_path}"
+
+            particles_data.append(new_row)
+            particle_idx += 1
+
+    # Create output dataframe
+    particles_df = pd.DataFrame(particles_data)
+
+    # Prepare output dictionary
+    output_data = {'particles': particles_df}
+    if pset.optics_md is not None:
+        output_data['optics'] = pset.optics_md
+
+    # Write output STAR file
+    out_star_path = os.path.join(output_dir, f"{basename}.star")
+    starfile.write(output_data, out_star_path, overwrite=True)
+
+    return out_star_path
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Cryo-EM particle simulator with single/multi-GPU support",
@@ -74,7 +145,7 @@ def main():
     parser.add_argument(
         "--images_per_file",
         type=int,
-        default=10_000,
+        default=2_000,
         help="Number of images per output MRC file",
     )
 
@@ -203,11 +274,19 @@ def main():
             normalize_volume=False,
             disable_tqdm=args.disable_tqdm,
         )
-        # The sharded helper returns list of MRC stacks; if you also want a merged STAR,
-        # do that in a downstream step (the helper focuses on stack generation).
-        print("Stacks written:")
-        for p in out_paths:
-            print("  ", p)
+        # print(f"\nGenerated {len(out_paths)} MRC stacks:")
+        # for p in out_paths:
+        #     print("  ", p)
+
+        # Write output STAR file
+        out_star = _write_output_star(
+            stack_paths=out_paths,
+            output_dir=args.output_dir,
+            basename=args.basename,
+            in_star=args.in_star,
+            images_per_file=args.images_per_file,
+        )
+        print(f"\nOutput STAR file: {out_star}")
         return
 
     # Single GPU or CPU
@@ -218,7 +297,7 @@ def main():
         device = "cpu"
         print("Running single-run on device: cpu (fallback)")
 
-    _ = run_simulation(
+    out_paths = run_simulation(
         volume=args.volume,
         in_star=args.in_star,
         output_dir=args.output_dir,
@@ -241,9 +320,27 @@ def main():
         normalize_volume=False,
         disable_tqdm=args.disable_tqdm,
     )
-    # Note: run_simulation returns list[str] of stack paths.
-    # Write a STAR in your pipeline step if you need one.
+
+    # print(f"\nGenerated {len(out_paths)} MRC stacks:")
+    # for p in out_paths:
+    #     print("  ", p)
+
+    # Write output STAR file
+    out_star = _write_output_star(
+        stack_paths=out_paths,
+        output_dir=args.output_dir,
+        basename=args.basename,
+        in_star=args.in_star,
+        images_per_file=args.images_per_file,
+    )
+    print(f"\nOutput STAR file: {out_star}")
 
 
 if __name__ == "__main__":
     main()
+
+"""
+
+python -m cryoPARES.simulation.simulateParticles --volume ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles_reconstruct.mrc  --in_star ~/cryo/data/preAlignedParticles/EMPIAR-10166/data/allparticles.star  --output_dir /tmp/simulation/
+
+"""

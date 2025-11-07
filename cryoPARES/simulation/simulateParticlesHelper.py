@@ -7,6 +7,7 @@ particle ≈ a*(CTF*projection) + noise, then subtract a*(CTF*projection).
 
 import math
 import os
+import threading
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
@@ -228,6 +229,312 @@ def subtract_projection_T0(particle: torch.Tensor,
     return sub, a
 
 # ---------------------
+# Double-buffered async I/O with CUDA streams
+# ---------------------
+
+class BufferPool:
+    """
+    Manages double-buffered CPU-pinned memory for async GPU→CPU transfers.
+    Uses CUDA streams and events for non-blocking transfers with explicit synchronization.
+    """
+
+    def __init__(self, images_per_file: int, image_shape: Tuple[int, int], device: torch.device):
+        self.device = device
+        self.images_per_file = images_per_file
+        self.image_shape = image_shape
+
+        # Allocate CPU-side buffers (pinned if CUDA)
+        if device.type == 'cuda':
+            # Pinned memory enables fast DMA transfers
+            self.buffer_a = torch.empty(
+                (images_per_file, *image_shape),
+                dtype=torch.float32,
+                pin_memory=True
+            )
+            self.buffer_b = torch.empty(
+                (images_per_file, *image_shape),
+                dtype=torch.float32,
+                pin_memory=True
+            )
+            # CUDA events for synchronization
+            self.event_a = torch.cuda.Event()
+            self.event_b = torch.cuda.Event()
+            # Stream for async copies
+            self.stream = torch.cuda.Stream(device=device)
+        else:
+            # CPU-only: regular numpy arrays
+            self.buffer_a = np.empty((images_per_file, *image_shape), dtype=np.float32)
+            self.buffer_b = np.empty((images_per_file, *image_shape), dtype=np.float32)
+            self.event_a = None
+            self.event_b = None
+            self.stream = None
+
+        # Counters for valid data in each buffer
+        self.count_a = 0
+        self.count_b = 0
+
+        # Which buffer is currently being filled by GPU ('a' or 'b')
+        self.active = 'a'
+
+        # Which buffer is ready for writer (None, 'a', or 'b')
+        self.ready = None
+
+        # Thread synchronization
+        self.lock = threading.Lock()
+        self.buffer_ready = threading.Condition(self.lock)  # Signal to writer thread
+        self.buffer_available = threading.Condition(self.lock)  # Signal to GPU thread
+
+    def submit_batch(self, batch_gpu: torch.Tensor) -> None:
+        """
+        Submit a batch from GPU to CPU buffer (non-blocking).
+
+        Args:
+            batch_gpu: Tensor on GPU (B, H, W)
+        """
+        batch_size = batch_gpu.shape[0]
+
+        with self.lock:
+            # Wait until we have space in a buffer that we can safely use
+            # This ensures we never try to swap to a non-empty buffer
+            while True:
+                # Check current buffer space
+                if self.active == 'a':
+                    space = self.images_per_file - self.count_a
+                else:
+                    space = self.images_per_file - self.count_b
+
+                # If we have space in the active buffer, we're good to go
+                if space > 0:
+                    break
+
+                # Active buffer is full. We need to swap. But first check if a buffer is being written
+                if self.ready is not None:
+                    # A buffer is currently being written - we must wait for it to be consumed
+                    # (Can't swap if both buffers are full)
+                    self.buffer_available.wait(timeout=0.1)
+                    continue  # Re-check after wait
+
+                # Active buffer is full AND no buffer is being written - we can proceed and swap
+                break
+
+            # Get active buffer and its metadata
+            if self.active == 'a':
+                buf = self.buffer_a
+                count = self.count_a
+                event = self.event_a
+            else:
+                buf = self.buffer_b
+                count = self.count_b
+                event = self.event_b
+
+            # Determine how many images we can fit in this buffer
+            to_copy = min(batch_size, space)
+
+        # Non-blocking GPU→CPU copy (outside lock for performance)
+        if self.device.type == 'cuda':
+            with torch.cuda.stream(self.stream):
+                # Async copy to pinned CPU memory
+                buf[count:count+to_copy].copy_(batch_gpu[:to_copy], non_blocking=True)
+            # Record completion event in the stream
+            event.record(self.stream)
+        else:
+            # CPU-only: direct copy
+            if isinstance(buf, np.ndarray):
+                buf[count:count+to_copy] = batch_gpu[:to_copy].numpy()
+            else:
+                buf[count:count+to_copy] = batch_gpu[:to_copy]
+
+        # Update counter and check for buffer swap
+        with self.lock:
+            if self.active == 'a':
+                self.count_a += to_copy
+                if self.count_a >= self.images_per_file:
+                    # Before swapping, wait if the other buffer isn't empty yet
+                    while self.ready is not None:
+                        self.buffer_available.wait(timeout=0.1)
+                    self._swap_buffers()
+            else:
+                self.count_b += to_copy
+                if self.count_b >= self.images_per_file:
+                    # Before swapping, wait if the other buffer isn't empty yet
+                    while self.ready is not None:
+                        self.buffer_available.wait(timeout=0.1)
+                    self._swap_buffers()
+
+        # If we couldn't fit the entire batch, recursively submit the rest
+        if to_copy < batch_size:
+            self.submit_batch(batch_gpu[to_copy:])
+
+    def _swap_buffers(self) -> None:
+        """Swap active and ready buffers (must be called under lock)."""
+        # Switch to the other buffer
+        next_buffer = 'b' if self.active == 'a' else 'a'
+
+        # Sanity check: the other buffer should be empty
+        next_count = self.count_b if next_buffer == 'b' else self.count_a
+        if next_count > 0:
+            raise RuntimeError(f"Internal error: trying to swap to non-empty buffer {next_buffer} (count={next_count})")
+
+        # Mark current active buffer as ready for writing
+        self.ready = self.active
+        # Switch active pointer
+        self.active = next_buffer
+        # Signal writer thread
+        self.buffer_ready.notify()
+
+    def finish(self) -> None:
+        """Flush any remaining partial buffer."""
+        with self.lock:
+            # First, wait for any existing ready buffer to be consumed
+            while self.ready is not None:
+                self.buffer_available.wait(timeout=0.1)
+
+            # Now mark the active buffer as ready if it has data
+            if self.active == 'a' and self.count_a > 0:
+                self.ready = 'a'
+                self.buffer_ready.notify()
+            elif self.active == 'b' and self.count_b > 0:
+                self.ready = 'b'
+                self.buffer_ready.notify()
+
+    def get_ready_buffer(self) -> Optional[Tuple[torch.Tensor, int, Optional[torch.cuda.Event]]]:
+        """
+        Get the ready buffer for writing (called by writer thread under lock).
+        Returns (buffer, count, event) or None if no buffer is ready.
+        """
+        if self.ready is None:
+            return None
+
+        if self.ready == 'a':
+            return self.buffer_a, self.count_a, self.event_a
+        else:
+            return self.buffer_b, self.count_b, self.event_b
+
+    def mark_buffer_consumed(self) -> None:
+        """Mark the ready buffer as consumed (called by writer thread under lock)."""
+        if self.ready == 'a':
+            self.count_a = 0
+        elif self.ready == 'b':
+            self.count_b = 0
+        self.ready = None
+        # Signal GPU thread that a buffer is now available
+        self.buffer_available.notify()
+
+
+class AsyncMRCWriter:
+    """Background thread for writing MRC files using double-buffered async I/O."""
+
+    def __init__(self, buffer_pool: BufferPool, out_dir: str, basename: str, px_A: float):
+        self.buffer_pool = buffer_pool
+        self.out_dir = out_dir
+        self.basename = basename
+        self.px_A = px_A
+        self.stack_paths = []
+        self.worker_thread = None
+        self.stop_event = threading.Event()
+        self.error = None
+
+    def start(self):
+        """Start the background writer thread."""
+        self.worker_thread = threading.Thread(target=self._writer_loop, daemon=True)
+        self.worker_thread.start()
+
+    def _writer_loop(self):
+        """Worker thread: wait for full buffer, synchronize, then write."""
+        shard_idx = 0
+
+        try:
+            while not self.stop_event.is_set():
+                # Wait for a ready buffer
+                with self.buffer_pool.lock:
+                    while self.buffer_pool.ready is None and not self.stop_event.is_set():
+                        self.buffer_pool.buffer_ready.wait(timeout=0.1)
+
+                    if self.stop_event.is_set():
+                        # Check one more time for any final buffer before exiting
+                        result = self.buffer_pool.get_ready_buffer()
+                        if result is None:
+                            return
+                    else:
+                        # Get buffer metadata
+                        result = self.buffer_pool.get_ready_buffer()
+                        if result is None:
+                            continue
+
+                    buf, count, event = result
+
+                # *** EXPLICIT SYNCHRONIZATION ***
+                # Wait for all GPU→CPU transfers to this buffer to complete
+                if event is not None:
+                    event.synchronize()  # Blocks writer thread until GPU transfer done
+
+                # Convert to numpy for writing
+                if self.buffer_pool.device.type == 'cuda':
+                    buf_np = buf[:count].numpy()  # Pinned tensor → numpy (fast, no copy)
+                else:
+                    if isinstance(buf, np.ndarray):
+                        buf_np = buf[:count]
+                    else:
+                        buf_np = buf[:count].numpy()
+
+                # Write to disk
+                out_path = os.path.join(self.out_dir, f"{self.basename}_{shard_idx:04d}.mrcs")
+                self._write_mrc(buf_np, out_path)
+                shard_idx += 1
+
+                # Mark buffer as consumed
+                with self.buffer_pool.lock:
+                    self.buffer_pool.mark_buffer_consumed()
+
+        except Exception as e:
+            self.error = e
+
+    def _write_mrc(self, data: np.ndarray, path: str):
+        """Write numpy array to MRC file."""
+        with mrcfile.new(path, overwrite=True) as m:
+            m.set_data(data.astype(np.float32))
+            m.voxel_size = (self.px_A, self.px_A, self.px_A)
+        self.stack_paths.append(path)
+
+    def finish(self):
+        """Signal writer to flush remaining data and wait for completion."""
+        # Flush any partial buffer
+        self.buffer_pool.finish()
+
+        # Wait for writer thread to consume the final buffer
+        # (poll until ready flag is cleared, meaning writer consumed it)
+        import time
+        max_wait = 60  # 60 seconds max
+        start = time.time()
+        while time.time() - start < max_wait:
+            with self.buffer_pool.lock:
+                if self.buffer_pool.ready is None:
+                    # Writer has consumed the final buffer
+                    break
+            time.sleep(0.01)  # 10ms poll interval
+        else:
+            # Timeout - writer is stuck
+            print("Warning: Writer thread did not consume final buffer within 60s")
+
+        # Signal writer thread to stop
+        self.stop_event.set()
+
+        # Wake up writer thread if it's waiting
+        with self.buffer_pool.lock:
+            self.buffer_pool.buffer_ready.notify()
+
+        # Wait for writer thread to finish
+        if self.worker_thread:
+            self.worker_thread.join(timeout=300)  # 5 minute timeout
+
+        if self.error:
+            raise self.error
+
+    def get_stack_paths(self) -> List[str]:
+        """Get list of written stack paths."""
+        return self.stack_paths
+
+# ---------------------
 # Main simulator
 # ---------------------
 
@@ -286,20 +593,22 @@ class CryoEMSimulator:
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=False,
                             num_workers=num_workers, drop_last=False)
 
-        shard_idx = 0
-        stack_paths: List[str] = []
-        buffer: List[np.ndarray] = []
-        buffer_size = 0
-        out_path = os.path.join(out_dir, f"{basename}_{shard_idx:04d}.mrcs")
-
-        def _flush_shard(buf_list: List[np.ndarray], path: str):
-            buf_array = buf_list[0] if len(buf_list) == 1 else np.concatenate(buf_list, axis=0)
-            with mrcfile.new(path, overwrite=True) as m:
-                m.set_data(buf_array)
-                m.voxel_size = (px_A, px_A, px_A)
-            stack_paths.append(path)
-
         H_part = W_part = self.vol_size
+
+        # Initialize double-buffered system
+        buffer_pool = BufferPool(
+            images_per_file=images_per_file,
+            image_shape=(H_part, W_part),
+            device=self.device
+        )
+        writer = AsyncMRCWriter(
+            buffer_pool=buffer_pool,
+            out_dir=out_dir,
+            basename=basename,
+            px_A=px_A
+        )
+        writer.start()
+
         total_particles = len(pset)
         pbar = tqdm(total=total_particles, desc="Simulating particles", unit="particle", disable=disable_tqdm)
 
@@ -408,8 +717,10 @@ class CryoEMSimulator:
             win = _hann_2d(H_part, W_part, device=self.device)
             out_imgs = out_imgs * win
 
-            batch_np = out_imgs.detach().cpu().numpy().astype(np.float32)
+            # Submit to buffer pool (non-blocking GPU→CPU transfer)
+            buffer_pool.submit_batch(out_imgs)
 
+            # Clean up GPU memory immediately
             if simulation_mode == "central_slice":
                 del out_imgs, projs
             else:
@@ -417,34 +728,13 @@ class CryoEMSimulator:
             del euls_gt, angle_jit, shift_jit_px, shifts_gt_px
             del dfu_batch, dfv_batch, dfang_batch, volt_kV, cs_mm, amp_contrast, phase_shift, bfactors
 
-            buffer.append(batch_np)
-            buffer_size += batch_np.shape[0]
-
-            while buffer_size >= images_per_file:
-                to_write, remaining = [], images_per_file
-                while remaining > 0 and buffer:
-                    chunk = buffer[0]
-                    n = chunk.shape[0]
-                    if n <= remaining:
-                        to_write.append(chunk)
-                        buffer.pop(0)
-                        remaining -= n
-                        buffer_size -= n
-                    else:
-                        to_write.append(chunk[:remaining])
-                        buffer[0] = chunk[remaining:]
-                        buffer_size -= remaining
-                        remaining = 0
-                _flush_shard(to_write, out_path)
-                shard_idx += 1
-                out_path = os.path.join(out_dir, f"{basename}_{shard_idx:04d}.mrcs")
-
             pbar.update(B)
 
         pbar.close()
 
-        if buffer_size > 0:
-            _flush_shard(buffer, out_path)
+        # Wait for writer to finish and get results
+        writer.finish()
+        stack_paths = writer.get_stack_paths()
 
         return stack_paths
 

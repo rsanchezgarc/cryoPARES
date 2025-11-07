@@ -356,8 +356,6 @@ def execute_trainOnePartition(**kwargs):
 
 
 if __name__ == "__main__":
-    # from argParseFromDoc import AutoArgumentParser
-    # parser = AutoArgumentParser(prog="train partition cryoPARES")
 
 
     parser = ConfigArgumentParser(prog="train_partition_cryoPARES", config_obj=main_config)

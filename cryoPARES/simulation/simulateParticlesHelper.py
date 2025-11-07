@@ -516,9 +516,19 @@ class CryoEMSimulator:
 
         H_part = W_part = self.vol_size
 
-        # DEBUG: Simple in-memory accumulation (no buffer)
-        all_images = []
-        stack_paths = []
+        # Initialize double-buffered system
+        buffer_pool = BufferPool(
+            images_per_file=images_per_file,
+            image_shape=(H_part, W_part),
+            device=self.device
+        )
+        writer = AsyncMRCWriter(
+            buffer_pool=buffer_pool,
+            out_dir=out_dir,
+            basename=basename,
+            px_A=px_A
+        )
+        writer.start()
 
         total_particles = len(pset)
         pbar = tqdm(total=total_particles, desc="Simulating particles", unit="particle", disable=disable_tqdm)
@@ -629,37 +639,28 @@ class CryoEMSimulator:
 
             out_imgs = torch.stack(out_imgs, dim=0)  # (B, H, W)
 
-            if snr is not None and snr > 0:
-                sig_pow = out_imgs.pow(2).mean(dim=(1, 2), keepdim=True)
-                noise_var = (sig_pow / snr).clamp(min=1e-12)
-                noise = torch.randn_like(out_imgs) * torch.sqrt(noise_var)
-                out_imgs = out_imgs + noise
-
+            # Apply Hann window BEFORE adding noise
             win = _hann_2d(H_part, W_part, device=self.device)
             out_imgs = out_imgs * win
 
-            # DEBUG: Accumulate in memory (move to CPU immediately)
-            out_imgs_cpu = out_imgs.cpu().numpy()
-            for i in range(out_imgs_cpu.shape[0]):
-                all_images.append(out_imgs_cpu[i])
+            # Add Gaussian noise to windowed images
+            if snr is not None and snr > 0:
+                # Process each image individually to match old implementation exactly
+                for i in range(out_imgs.shape[0]):
+                    sig_var = float(out_imgs[i].var())
+                    # Match old code: use 1.0 as fallback if variance is too small
+                    noise_std = math.sqrt(sig_var / snr) if sig_var > 0 else 1.0
+                    out_imgs[i] = out_imgs[i] + torch.randn_like(out_imgs[i]) * noise_std
 
-            # Write to disk when we reach images_per_file
-            while len(all_images) >= images_per_file:
-                shard_idx = len(stack_paths)
-                out_path = os.path.join(out_dir, f"{basename}_{shard_idx:04d}.mrcs")
-                stack_data = np.stack(all_images[:images_per_file], axis=0)
-                with mrcfile.new(out_path, overwrite=True) as mrc:
-                    mrc.set_data(stack_data.astype(np.float32))
-                    mrc.voxel_size = (px_A, px_A, px_A)
-                stack_paths.append(out_path)
-                all_images = all_images[images_per_file:]
+            # Submit to buffer pool (non-blocking GPU→CPU transfer)
+            buffer_pool.submit_batch(out_imgs)
 
             # Clean up GPU memory immediately
             if simulation_mode == "central_slice":
                 del out_imgs, projs
             else:
                 del out_imgs, projs_gt, projs_jit
-            del euls_gt, angle_jit, shift_jit_px, shifts_gt_px, out_imgs_cpu
+            del euls_gt, angle_jit, shift_jit_px, shifts_gt_px
             del dfu_batch, dfv_batch, dfang_batch, volt_kV, cs_mm, amp_contrast, phase_shift, bfactors
 
             if torch.cuda.is_available():
@@ -668,17 +669,13 @@ class CryoEMSimulator:
 
         pbar.close()
 
-        # DEBUG: Write remaining images (partial last shard)
-        if len(all_images) > 0:
-            shard_idx = len(stack_paths)
-            out_path = os.path.join(out_dir, f"{basename}_{shard_idx:04d}.mrcs")
-            stack_data = np.stack(all_images, axis=0)
-            with mrcfile.new(out_path, overwrite=True) as mrc:
-                mrc.set_data(stack_data.astype(np.float32))
-                mrc.voxel_size = (px_A, px_A, px_A)
-            stack_paths.append(out_path)
+        # Signal completion to buffer pool
+        buffer_pool.finish()
 
-        return stack_paths
+        # Wait for writer to finish and get results
+        writer.finish()
+
+        return writer.get_stack_paths()
 
 # ---------------------
 # Public API

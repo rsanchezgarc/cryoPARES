@@ -6,59 +6,22 @@ automatically handles single-GPU/CPU or multi-GPU execution based on --num_gpus.
 """
 
 import os
-import argparse
-from typing import Optional, List
+from typing import List, Optional
 
-import numpy as np
-import pandas as pd
-import torch
+import mrcfile
 import starfile
+import torch
+
+from autoCLI_config import CONFIG_PARAM, inject_defaults_from_config, inject_docs_from_config_params
+from cryoPARES.configs.mainConfig import main_config
 
 # Use the APIs exposed by the helper you integrated earlier
 # (both single-run and multi-GPU sharded run)
 from cryoPARES.simulation.simulateParticlesHelper import (
+    ParticlesStarSet,
     run_simulation,
     run_simulation_sharded,
-    ParticlesStarSet,
 )
-
-
-def _validate_args(args: argparse.Namespace) -> None:
-    if args.images_per_file <= 0:
-        raise ValueError("--images_per_file must be > 0")
-    if args.batch_size <= 0:
-        raise ValueError("--batch_size must be > 0")
-    if args.num_workers < 0:
-        raise ValueError("--num_workers must be >= 0")
-    if args.num_gpus < 0:
-        raise ValueError("--num_gpus must be >= 0")
-    if not os.path.exists(args.volume):
-        raise FileNotFoundError(f"Volume not found: {args.volume}")
-    if not os.path.exists(args.in_star):
-        raise FileNotFoundError(f"STAR not found: {args.in_star}")
-    os.makedirs(args.output_dir, exist_ok=True)
-
-
-def _resolve_device(num_gpus: int) -> (str, List[int]):
-    """Return (device_string_for_single, gpu_id_list_for_multi)."""
-    available = torch.cuda.device_count()
-    if num_gpus == 0 or available == 0:
-        # CPU path
-        return "cpu", []
-    if num_gpus == 1:
-        return "cuda:0", []
-    # Multi-GPU
-    use = min(num_gpus, available)
-    return "", list(range(use))  # device not used in sharded path
-
-
-def _maybe_seed(seed: Optional[int]) -> None:
-    if seed is None:
-        return
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
 
 
 def _write_output_star(
@@ -69,271 +32,224 @@ def _write_output_star(
     images_per_file: int,
 ) -> str:
     """
-    Create output STAR file referencing the generated MRC stacks.
+    Write output STAR file with references to simulated particle images.
 
     Args:
-        stack_paths: List of paths to generated MRC stacks
+        stack_paths: List of MRC stack file paths
         output_dir: Output directory
         basename: Base name for output
-        in_star: Original input STAR file
-        images_per_file: Number of images per MRC file
+        in_star: Input STAR file path
+        images_per_file: Number of images per file
 
     Returns:
-        Path to created STAR file
+        Path to written STAR file
     """
-    # Load original STAR to get particle count and optics
+    # Load input star to get metadata
     pset = ParticlesStarSet.load(in_star)
-    total_particles = len(pset.particles_md)
+    parts_df = pset.particles_md.copy()
+    optics_df = pset.optics_md if hasattr(pset, "optics_md") else None
 
-    # Create particle entries
-    particles_data = []
-    particle_idx = 0
+    # Generate image names for all stacks
+    image_names_all: List[str] = []
+    for p in stack_paths:
+        with mrcfile.open(p, permissive=True, mode="r") as m:
+            n_in_file = m.data.shape[0]
+        base = os.path.basename(p)
+        image_names_all.extend([f"{k + 1}@{base}" for k in range(n_in_file)])
 
-    for stack_idx, stack_path in enumerate(sorted(stack_paths)):
-        # Get relative path from output_dir
-        rel_path = os.path.relpath(stack_path, output_dir)
+    # Update particle dataframe with new image names
+    out_star = os.path.join(output_dir, f"{basename}.star")
+    assert len(image_names_all) == len(parts_df), "Mismatch: images vs STAR rows"
+    parts_df["rlnImageName"] = image_names_all
 
-        # Determine how many particles are in this stack
-        if stack_idx < len(stack_paths) - 1:
-            # Full stack
-            n_particles_in_stack = images_per_file
-        else:
-            # Last stack - might be partial
-            n_particles_in_stack = total_particles - (stack_idx * images_per_file)
+    # Write output star file
+    star_dict = {"particles": parts_df}
+    if optics_df is not None:
+        star_dict["optics"] = optics_df
+    starfile.write(star_dict, out_star, overwrite=True)
 
-        # Create entries for particles in this stack
-        for img_idx in range(n_particles_in_stack):
-            # Copy original particle metadata
-            orig_row = pset.particles_md.iloc[particle_idx]
-
-            # Create new row with updated image name
-            new_row = orig_row.copy()
-            # Note: starfile library reads "_rlnImageName" as "rlnImageName" (without underscore)
-            new_row['rlnImageName'] = f"{img_idx + 1:06d}@{rel_path}"
-
-            particles_data.append(new_row)
-            particle_idx += 1
-
-    # Create output dataframe
-    particles_df = pd.DataFrame(particles_data)
-
-    # Prepare output dictionary
-    output_data = {'particles': particles_df}
-    if pset.optics_md is not None:
-        output_data['optics'] = pset.optics_md
-
-    # Write output STAR file
-    out_star_path = os.path.join(output_dir, f"{basename}.star")
-    starfile.write(output_data, out_star_path, overwrite=True)
-
-    return out_star_path
+    return out_star
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Cryo-EM particle simulator with single/multi-GPU support",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
+@inject_docs_from_config_params
+@inject_defaults_from_config(main_config.train, update_config_with_args=True)
+def simulate_particles_cli(
+        volume: str,
+        in_star: str,
+        output_dir: str,
+        basename: str = "stack",
+        images_per_file: int = 2000,
+        batch_size: int = CONFIG_PARAM(),
+        num_dataworkers: int = CONFIG_PARAM(config=main_config.datamanager),
+        n_gpus_for_simulation: int = CONFIG_PARAM(),
+        apply_ctf: bool = True,
+        snr_for_simulation: Optional[float] = CONFIG_PARAM(),
+        simulation_mode: str = "central_slice",
+        angle_jitter_deg: float = 0.0,
+        angle_jitter_frac: float = 0.0,
+        shift_jitter_A: float = 0.0,
+        shift_jitter_frac: float = 0.0,
+        sub_bp_lo_A: float = 8.0,
+        sub_bp_hi_A: float = 20.0,
+        sub_power_q: float = 0.85,
+        px_A: float = 1.0,
+        device: Optional[str] = None,
+        random_seed: Optional[int] = None,
+        disable_tqdm: bool = False,
+):
+    """
+    Simulate cryo-EM particle projections from a 3D volume.
 
-    # Required arguments
-    parser.add_argument("--volume", required=True, help="Input volume MRC file")
-    parser.add_argument("--in_star", required=True, help="Input STAR file with particles")
-    parser.add_argument("--output_dir", required=True, help="Output directory")
+    Args:
+        volume: Path to input volume MRC file
+        in_star: Path to input STAR file with particle metadata
+        output_dir: Output directory for simulated particles
+        basename: Base name for output MRC stacks
+        images_per_file: Number of images per output MRC file
+        batch_size: {batch_size}
+        num_dataworkers: {num_dataworkers}
+        n_gpus_for_simulation: {n_gpus_for_simulation}
+        apply_ctf: Apply CTF to projections
+        snr_for_simulation: {snr_for_simulation}
+        simulation_mode: Simulation mode: 'central_slice' or 'noise_additive'
+        angle_jitter_deg: Maximum angular jitter in degrees
+        angle_jitter_frac: Fractional angular jitter scale
+        shift_jitter_A: Maximum shift jitter in Ångströms
+        shift_jitter_frac: Fractional shift jitter scale
+        sub_bp_lo_A: Subtraction bandpass low-resolution cutoff (Å)
+        sub_bp_hi_A: Subtraction bandpass high-resolution cutoff (Å)
+        sub_power_q: Subtraction power quantile threshold (0-1)
+        px_A: Pixel size in Ångströms
+        device: Override device for single-run (e.g., 'cuda:0' or 'cpu'). Ignored for multi-GPU
+        random_seed: Random seed for reproducibility
+        disable_tqdm: Disable progress bar
+    """
+    # Validation
+    if images_per_file <= 0:
+        raise ValueError("images_per_file must be > 0")
+    if batch_size <= 0:
+        raise ValueError("batch_size must be > 0")
+    if num_dataworkers < 0:
+        raise ValueError("num_dataworkers must be >= 0")
+    if not os.path.exists(volume):
+        raise FileNotFoundError(f"Volume not found: {volume}")
+    if not os.path.exists(in_star):
+        raise FileNotFoundError(f"STAR not found: {in_star}")
+    os.makedirs(output_dir, exist_ok=True)
 
-    # Output options
-    parser.add_argument("--basename", default="stack", help="Output basename")
-    parser.add_argument(
-        "--images_per_file",
-        type=int,
-        default=2_000,
-        help="Number of images per output MRC file",
-    )
+    # Set random seed
+    if random_seed is not None:
+        import numpy as np
+        np.random.seed(random_seed)
+        torch.manual_seed(random_seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(random_seed)
 
-    # Processing options
-    parser.add_argument("--batch_size", type=int, default=128, help="Batch size")
-    parser.add_argument("--num_workers", type=int, default=0, help="DataLoader workers")
-    parser.add_argument(
-        "--num_gpus",
-        type=int,
-        default=1,
-        help="Number of GPUs to use (0=CPU, 1=single GPU, >1=multi-GPU sharded)",
-    )
+    # Resolve GPU configuration
+    num_gpus = n_gpus_for_simulation
+    if num_gpus == -1:
+        num_gpus = torch.cuda.device_count()
 
-    # CTF and noise options
-    parser.add_argument(
-        "--apply_ctf",
-        action="store_true",
-        default=True,
-        help="Apply CTF to projections",
-    )
-    parser.add_argument(
-        "--no_ctf", dest="apply_ctf", action="store_false", help="Do not apply CTF"
-    )
-    parser.add_argument(
-        "--snr",
-        type=float,
-        default=None,
-        help="Signal-to-noise ratio (Gaussian noise added if set)",
-    )
+    available_gpus = torch.cuda.device_count()
+    if num_gpus == 0 or available_gpus == 0:
+        # CPU mode
+        auto_device = "cpu"
+        gpu_ids = []
+    elif num_gpus == 1:
+        # Single GPU
+        auto_device = "cuda:0"
+        gpu_ids = []
+    else:
+        # Multi-GPU
+        use_gpus = min(num_gpus, available_gpus)
+        auto_device = ""
+        gpu_ids = list(range(use_gpus))
 
-    # Simulation mode
-    parser.add_argument(
-        "--simulation_mode",
-        choices=["central_slice", "noise_additive"],
-        default="central_slice",
-        help="Forward model ('central_slice') or subtraction ('noise_additive')",
-    )
-
-    # Jitter options
-    parser.add_argument(
-        "--angle_jitter_deg", type=float, default=0.0, help="Max angular jitter (deg)"
-    )
-    parser.add_argument(
-        "--angle_jitter_frac",
-        type=float,
-        default=0.0,
-        help="Fractional angular jitter scale",
-    )
-    parser.add_argument(
-        "--shift_jitter_A", type=float, default=0.0, help="Max shift jitter (Å)"
-    )
-    parser.add_argument(
-        "--shift_jitter_frac",
-        type=float,
-        default=0.0,
-        help="Fractional shift jitter scale",
-    )
-
-    # Subtraction parameters (for noise_additive mode)
-    parser.add_argument(
-        "--sub_bp_lo_A",
-        type=float,
-        default=8.0,
-        help="Subtraction bandpass low-resolution cutoff (Å)",
-    )
-    parser.add_argument(
-        "--sub_bp_hi_A",
-        type=float,
-        default=20.0,
-        help="Subtraction bandpass high-resolution cutoff (Å)",
-    )
-    parser.add_argument(
-        "--sub_power_q",
-        type=float,
-        default=0.85,
-        help="Subtraction power quantile threshold (0-1)",
-    )
-
-    # Misc
-    parser.add_argument("--px_A", type=float, default=1.0, help="Pixel size (Å)")
-    parser.add_argument(
-        "--device",
-        type=str,
-        default=None,
-        help="Override device for single-run (e.g., 'cuda:0' or 'cpu'). "
-             "Ignored for multi-GPU.",
-    )
-    parser.add_argument("--random_seed", type=int, default=None, help="Random seed")
-    parser.add_argument(
-        "--disable_tqdm", action="store_true", help="Disable progress bar"
-    )
-
-    args = parser.parse_args()
-    _validate_args(args)
-    _maybe_seed(args.random_seed)
-
-    # Decide device(s)
-    auto_device, gpu_ids = _resolve_device(args.num_gpus)
-    device = args.device if args.device is not None else auto_device
+    device = device if device is not None else auto_device
 
     # Dispatch
     if len(gpu_ids) > 1:
         print(f"Running on {len(gpu_ids)} GPUs in parallel: {gpu_ids}")
-        # Use the helper's sharded multi-GPU implementation
         out_paths = run_simulation_sharded(
-            volume=args.volume,
-            in_star=args.in_star,
-            output_dir=args.output_dir,
-            basename=args.basename,
-            images_per_file=args.images_per_file,
-            batch_size=args.batch_size,
-            simulation_mode=args.simulation_mode,
-            apply_ctf=args.apply_ctf,
-            snr=args.snr,
-            angle_jitter_deg=args.angle_jitter_deg,
-            angle_jitter_frac=args.angle_jitter_frac,
-            shift_jitter_A=args.shift_jitter_A,
-            shift_jitter_frac=args.shift_jitter_frac,
-            bandpass_lo_A=6.0,             # kept for API symmetry; unused in helper core currently
-            bandpass_hi_A=25.0,            # kept for API symmetry; unused in helper core currently
-            sub_bp_lo_A=args.sub_bp_lo_A,
-            sub_bp_hi_A=args.sub_bp_hi_A,
-            sub_power_q=args.sub_power_q,
-            px_A=args.px_A,
+            volume=volume,
+            in_star=in_star,
+            output_dir=output_dir,
+            basename=basename,
+            images_per_file=images_per_file,
+            batch_size=batch_size,
+            simulation_mode=simulation_mode,
+            apply_ctf=apply_ctf,
+            snr=snr_for_simulation,
+            angle_jitter_deg=angle_jitter_deg,
+            angle_jitter_frac=angle_jitter_frac,
+            shift_jitter_A=shift_jitter_A,
+            shift_jitter_frac=shift_jitter_frac,
+            bandpass_lo_A=6.0,
+            bandpass_hi_A=25.0,
+            sub_bp_lo_A=sub_bp_lo_A,
+            sub_bp_hi_A=sub_bp_hi_A,
+            sub_power_q=sub_power_q,
+            px_A=px_A,
             gpus=gpu_ids,
             normalize_volume=False,
-            disable_tqdm=args.disable_tqdm,
+            disable_tqdm=disable_tqdm,
         )
-        # print(f"\nGenerated {len(out_paths)} MRC stacks:")
-        # for p in out_paths:
-        #     print("  ", p)
-
-        # Write output STAR file
-        out_star = _write_output_star(
-            stack_paths=out_paths,
-            output_dir=args.output_dir,
-            basename=args.basename,
-            in_star=args.in_star,
-            images_per_file=args.images_per_file,
-        )
-        print(f"\nOutput STAR file: {out_star}")
-        return
-
-    # Single GPU or CPU
-    if device:
-        print(f"Running single-run on device: {device}")
     else:
-        # Should not happen, but keep safe default
-        device = "cpu"
-        print("Running single-run on device: cpu (fallback)")
-
-    out_paths = run_simulation(
-        volume=args.volume,
-        in_star=args.in_star,
-        output_dir=args.output_dir,
-        basename=args.basename,
-        images_per_file=args.images_per_file,
-        batch_size=args.batch_size,
-        simulation_mode=args.simulation_mode,
-        apply_ctf=args.apply_ctf,
-        snr=args.snr,
-        num_workers=args.num_workers,
-        angle_jitter_deg=args.angle_jitter_deg,
-        angle_jitter_frac=args.angle_jitter_frac,
-        shift_jitter_A=args.shift_jitter_A,
-        shift_jitter_frac=args.shift_jitter_frac,
-        sub_bp_lo_A=args.sub_bp_lo_A,
-        sub_bp_hi_A=args.sub_bp_hi_A,
-        sub_power_q=args.sub_power_q,
-        px_A=args.px_A,
-        device=device,
-        normalize_volume=False,
-        disable_tqdm=args.disable_tqdm,
-    )
-
-    # print(f"\nGenerated {len(out_paths)} MRC stacks:")
-    # for p in out_paths:
-    #     print("  ", p)
+        # Single GPU or CPU
+        print(f"Running single-run on device: {device}")
+        out_paths = run_simulation(
+            volume=volume,
+            in_star=in_star,
+            output_dir=output_dir,
+            basename=basename,
+            images_per_file=images_per_file,
+            batch_size=batch_size,
+            simulation_mode=simulation_mode,
+            apply_ctf=apply_ctf,
+            snr=snr_for_simulation,
+            num_workers=num_dataworkers,
+            angle_jitter_deg=angle_jitter_deg,
+            angle_jitter_frac=angle_jitter_frac,
+            shift_jitter_A=shift_jitter_A,
+            shift_jitter_frac=shift_jitter_frac,
+            sub_bp_lo_A=sub_bp_lo_A,
+            sub_bp_hi_A=sub_bp_hi_A,
+            sub_power_q=sub_power_q,
+            px_A=px_A,
+            device=device,
+            normalize_volume=False,
+            disable_tqdm=disable_tqdm,
+        )
 
     # Write output STAR file
     out_star = _write_output_star(
         stack_paths=out_paths,
-        output_dir=args.output_dir,
-        basename=args.basename,
-        in_star=args.in_star,
-        images_per_file=args.images_per_file,
+        output_dir=output_dir,
+        basename=basename,
+        in_star=in_star,
+        images_per_file=images_per_file,
     )
     print(f"\nOutput STAR file: {out_star}")
+
+
+def main():
+    import sys
+    from autoCLI_config import ConfigArgumentParser
+
+    print('---------------------------------------')
+    print(' '.join(sys.argv))
+    print('---------------------------------------')
+
+    parser = ConfigArgumentParser(
+        prog='simulate_particles',
+        description='Cryo-EM particle simulator with single/multi-GPU support',
+        config_obj=main_config
+    )
+    parser.add_args_from_function(simulate_particles_cli)
+    args, config_args = parser.parse_args()
+
+    # Call the CLI function with parsed arguments
+    simulate_particles_cli(**vars(args))
 
 
 if __name__ == "__main__":

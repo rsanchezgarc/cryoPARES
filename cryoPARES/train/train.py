@@ -280,32 +280,48 @@ class Trainer:
                 if check_if_training_partion_done(self.experiment_root, partition):
                     continue
                 if self.map_fname_for_simulated_pretraining:
-                    from cryoPARES.simulation.simulateParticlesHelper import run_simulation
                     sim_star_fnames = []
                     sim_dirs = []
                     for sim_idx, fname in enumerate(self.map_fname_for_simulated_pretraining):
                         simulation_dir = os.path.join(tmpdir, "simulation%d" % sim_idx)
                         os.makedirs(simulation_dir, exist_ok=True)
+
+                        # Determine GPU configuration for simulation
+                        n_gpus = main_config.train.n_gpus_for_simulation
+                        if not main_config.train.use_cuda or not torch.cuda.is_available():
+                            n_gpus = 0
+                        elif n_gpus == -1:
+                            # Use all available GPUs
+                            n_gpus = torch.cuda.device_count()
+
                         simulation_kwargs = dict(
                             volume=self.map_fname_for_simulated_pretraining[sim_idx],
                             in_star=self.particles_star_fname[sim_idx],
                             output_dir=simulation_dir,
                             basename="projections",
-                            images_per_file=10000,
+                            images_per_file=5000,
                             batch_size=self.batch_size,
-                            num_workers=self.num_dataworkers,
+                            num_dataworkers=self.num_dataworkers,
+                            n_gpus_for_simulation=n_gpus,
                             apply_ctf=True,
-                            device="cuda:0" if main_config.train.use_cuda and torch.cuda.is_available() else "cpu",
-                            simulation_mode="central_slice",  #"noise_additive",
-                            snr=main_config.train.snr_for_simulation,  #None
+                            simulation_mode="central_slice",
+                            snr_for_simulation=main_config.train.snr_for_simulation,
                         )
                         cmd = generate_command_for_argparseFromDoc(
-                            "cryoPARES.simulation.simulateParticlesHelper",
-                            fun=run_simulation,
+                            "cryoPARES.simulation.simulateParticles",
+                            fun=None,  # Will use module's main()
                             use_module=True,
                             python_executable=sys.executable,
                             **simulation_kwargs
                         )
+                        # Propagate config args to simulation subprocess, but filter out
+                        # datamanager configs that don't apply to simulation
+                        if config_args:
+                            # Filter out datamanager.particlesdataset configs that are training-specific
+                            filtered_config = [arg for arg in config_args
+                                             if not arg.startswith('datamanager.particlesdataset.')]
+                            if filtered_config:
+                                cmd += " --config " + " ".join(filtered_config)
                         print(cmd)
                         run_subprocess_with_error_summary(
                             cmd.split(),

@@ -20,6 +20,16 @@ import torch.fft as fft
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
+# Import existing library functions
+from cryoPARES.geometry.convert_angles import euler_angles_to_matrix
+from cryoPARES.projmatching.projmatchingUtils.fourierOperations import (
+    compute_dft_3d, _fourier_proj_to_real_2d,
+)
+from torch_fourier_slice.slice_extraction import extract_central_slices_rfft_3d
+from torch_fourier_shift import fourier_shift_image_2d
+from cryoPARES.datamanager.ctf.rfft_ctf import corrupt_with_ctf, compute_ctf_rfft
+from cryoPARES.constants import RELION_EULER_CONVENTION
+
 # ---------------------
 # Utilities
 # ---------------------
@@ -41,104 +51,6 @@ def irfft2c(X: torch.Tensor, s: Optional[Tuple[int, int]] = None) -> torch.Tenso
 
 def complex_abs2(x: torch.Tensor) -> torch.Tensor:
     return (x.real ** 2 + x.imag ** 2)
-
-def fftfreq_2d(h: int, w: int, px_A: float, device: torch.device) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    fy = torch.fft.fftfreq(h, d=px_A, device=device)
-    fx = torch.fft.rfftfreq(w, d=px_A, device=device)
-    FY, FX = torch.meshgrid(fy, fx, indexing="ij")
-    R = torch.sqrt(FY ** 2 + FX ** 2)
-    return FY, FX, R
-
-def fourier_shift_image_2d(img: torch.Tensor, shifts: torch.Tensor) -> torch.Tensor:
-    """Shift image by (dy, dx) pixels via Fourier shift theorem."""
-    H, W = img.shape
-    Y = torch.fft.fftfreq(H, d=1.0, device=img.device)
-    X = torch.fft.fftfreq(W, d=1.0, device=img.device)
-    FY, FX = torch.meshgrid(Y, X, indexing="ij")
-    phase = torch.exp(-2j * math.pi * (shifts[0] * FY + shifts[1] * FX))
-    F = torch.fft.fft2(img) * phase
-    return torch.fft.ifft2(F).real
-
-# ---------------------
-# Projection extraction (central slice)
-# ---------------------
-
-def rotation_matrix_from_euler(angles_deg: torch.Tensor) -> torch.Tensor:
-    """angles_deg: (B, 3) — RELION ZYZ (Rot, Tilt, Psi). Returns (B, 3, 3)."""
-    a, b, g = [torch.deg2rad(angles_deg[:, i]) for i in range(3)]
-    ca, sa = torch.cos(a), torch.sin(a)
-    cb, sb = torch.cos(b), torch.sin(b)
-    cg, sg = torch.cos(g), torch.sin(g)
-    Rz1 = torch.stack([
-        torch.stack([ca, -sa, torch.zeros_like(a)], dim=-1),
-        torch.stack([sa,  ca, torch.zeros_like(a)], dim=-1),
-        torch.stack([torch.zeros_like(a), torch.zeros_like(a), torch.ones_like(a)], dim=-1),
-    ], dim=-2)
-    Ry  = torch.stack([
-        torch.stack([cb, torch.zeros_like(b), sb], dim=-1),
-        torch.stack([torch.zeros_like(b), torch.ones_like(b), torch.zeros_like(b)], dim=-1),
-        torch.stack([-sb, torch.zeros_like(b), cb], dim=-1),
-    ], dim=-2)
-    Rz2 = torch.stack([
-        torch.stack([cg, -sg, torch.zeros_like(g)], dim=-1),
-        torch.stack([sg,  cg, torch.zeros_like(g)], dim=-1),
-        torch.stack([torch.zeros_like(g), torch.zeros_like(g), torch.ones_like(g)], dim=-1),
-    ], dim=-2)
-    return Rz1 @ Ry @ Rz2
-
-def extract_central_slices_rfft_3d(vol_rfft: torch.Tensor,
-                                   image_shape: Tuple[int, int],
-                                   rotation_matrices: torch.Tensor) -> torch.Tensor:
-    """Nearest-neighbor central-slice sampling from 3D Fourier volume.
-    Returns (B, H, W//2+1) complex RFFT planes.
-    """
-    B = rotation_matrices.shape[0]
-    H, W = image_shape
-    device = vol_rfft.device
-
-    kz = torch.fft.fftfreq(vol_rfft.shape[-3], d=1.0, device=device)
-    ky = torch.fft.fftfreq(vol_rfft.shape[-2], d=1.0, device=device)
-    kx = torch.fft.rfftfreq(vol_rfft.shape[-1], d=1.0, device=device)
-
-    fy = torch.fft.fftfreq(H, d=1.0, device=device)
-    fx = torch.fft.rfftfreq(W, d=1.0, device=device)
-    FY2, FX2 = torch.meshgrid(fy, fx, indexing="ij")
-    FZ2 = torch.zeros_like(FY2)
-
-    planes = []
-    for i in range(B):
-        R = rotation_matrices[i]
-        coords = torch.stack([FZ2, FY2, FX2], dim=-1)  # (H, W/2+1, 3) Z,Y,X
-        coords_rot = coords @ R.T
-        z_idx = torch.clamp(((coords_rot[..., 0] - kz[0]) / (kz[1] - kz[0])).round().long(), 0, vol_rfft.shape[-3]-1)
-        y_idx = torch.clamp(((coords_rot[..., 1] - ky[0]) / (ky[1] - ky[0])).round().long(), 0, vol_rfft.shape[-2]-1)
-        x_idx = torch.clamp(((coords_rot[..., 2] - kx[0]) / (kx[1] - kx[0])).round().long(), 0, vol_rfft.shape[-1]-1)
-        planes.append(vol_rfft[z_idx, y_idx, x_idx])
-
-    return torch.stack(planes, dim=0)
-
-def _fourier_proj_to_real_2d(proj_rfft: torch.Tensor) -> torch.Tensor:
-    return irfft2c(proj_rfft, s=None)
-
-# ---------------------
-# CTF Model
-# ---------------------
-
-def ctf_2d_rfft(H: int, W: int, px_A: float, defocus_u_A: float, defocus_v_A: float,
-                defocus_ang_deg: float, volt: float, cs: float, w: float,
-                phase_shift: float, bfactor: float,
-                device: torch.device) -> torch.Tensor:
-    """CTF on RFFT grid (H, W//2+1). volt in kV, cs in mm, defocus in Å, bfactor in Å^2."""
-    FY, FX, R = fftfreq_2d(H, W, px_A, device=device)
-    lam = 12.3986 / math.sqrt((volt * 1e3) * (1 + 0.97845e-6 * (volt * 1e3)))  # Å
-    cs_A = cs * 1e7  # mm -> Å
-    astig = (defocus_u_A + defocus_v_A) / 2 + (defocus_u_A - defocus_v_A) / 2 * torch.cos(
-        2 * (torch.atan2(FY, FX) - math.radians(defocus_ang_deg))
-    )
-    chi = math.pi * lam * astig * (R ** 2) - 0.5 * math.pi * cs_A * (lam ** 3) * (R ** 4) + phase_shift
-    c = -(torch.sin(chi) * (1 - w) + torch.cos(chi) * w)  # mixed phase/amp contrast
-    env = torch.exp(-bfactor * (R ** 2))
-    return c * env
 
 # ---------------------
 # STAR handling and dataset
@@ -177,27 +89,28 @@ class ParticlesDataset(Dataset):
 
     def __getitem__(self, idx: int):
         r = self.pset.particles_md.iloc[idx]
+        # Note: starfile library reads "_rlnXxx" columns as "rlnXxx" (without underscore)
         # angles (deg)
-        rot  = float(r.get("_rlnAngleRot", 0.0))
-        tilt = float(r.get("_rlnAngleTilt", 0.0))
-        psi  = float(r.get("_rlnAnglePsi", 0.0))
+        rot  = float(r.get("rlnAngleRot", 0.0))
+        tilt = float(r.get("rlnAngleTilt", 0.0))
+        psi  = float(r.get("rlnAnglePsi", 0.0))
         # shifts -> pixels (dy, dx)
-        sx_A = float(r.get("_rlnOriginXAngst", 0.0))
-        sy_A = float(r.get("_rlnOriginYAngst", 0.0))
+        sx_A = float(r.get("rlnOriginXAngst", 0.0))
+        sy_A = float(r.get("rlnOriginYAngst", 0.0))
         dy_px = sy_A / self.px_A
         dx_px = sx_A / self.px_A
         # CTF params
         return {
             "angles_deg": np.array([rot, tilt, psi], dtype=np.float32),   # (3,)
             "shift_px":  np.array([dy_px, dx_px], dtype=np.float32),      # (2,)
-            "dfu":  float(r.get("_rlnDefocusU", 15000.0)),
-            "dfv":  float(r.get("_rlnDefocusV", 15000.0)),
-            "dfa":  float(r.get("_rlnDefocusAngle", 0.0)),
-            "volt": float(r.get("_rlnVoltage", 300.0)),
-            "cs":   float(r.get("_rlnSphericalAberration", 2.7)),
-            "w":    float(r.get("_rlnAmplitudeContrast", 0.07)),
-            "phase":float(r.get("_rlnPhaseShift", 0.0)),
-            "bfac": float(r.get("_rlnBfactor", 0.0)),
+            "dfu":  float(r.get("rlnDefocusU", 15000.0)),
+            "dfv":  float(r.get("rlnDefocusV", 15000.0)),
+            "dfa":  float(r.get("rlnDefocusAngle", 0.0)),
+            "volt": float(r.get("rlnVoltage", 300.0)),
+            "cs":   float(r.get("rlnSphericalAberration", 2.7)),
+            "w":    float(r.get("rlnAmplitudeContrast", 0.07)),
+            "phase":float(r.get("rlnPhaseShift", 0.0)),
+            "bfac": float(r.get("rlnBfactor", 0.0)),
             # No 'img' key (avoids None in batches)
         }
 
@@ -468,14 +381,14 @@ class AsyncMRCWriter:
                 if event is not None:
                     event.synchronize()  # Blocks writer thread until GPU transfer done
 
-                # Convert to numpy for writing
+                # Convert to numpy for writing (must copy to avoid race condition)
                 if self.buffer_pool.device.type == 'cuda':
-                    buf_np = buf[:count].numpy()  # Pinned tensor → numpy (fast, no copy)
+                    buf_np = buf[:count].numpy().copy()  # Create copy to avoid overwrite
                 else:
                     if isinstance(buf, np.ndarray):
-                        buf_np = buf[:count]
+                        buf_np = buf[:count].copy()
                     else:
-                        buf_np = buf[:count].numpy()
+                        buf_np = buf[:count].numpy().copy()
 
                 # Write to disk
                 out_path = os.path.join(self.out_dir, f"{self.basename}_{shard_idx:04d}.mrcs")
@@ -552,17 +465,25 @@ class CryoEMSimulator:
             if vol_np.ndim == 4:
                 vol_np = vol_np.squeeze()
             assert vol_np.ndim == 3, "Volume must be 3D"
-        self.vol = torch.from_numpy(vol_np).to(self.device)
-        self.vol_size = self.vol.shape[-1]
+        vol = torch.from_numpy(vol_np).to(self.device)
+        self.vol_size = vol.shape[-1]
         if normalize_volume:
-            v = self.vol
-            self.vol = (v - v.mean()) / (v.std() + 1e-8)
-        self.vol_rfft = fft.rfftn(self.vol, dim=(-3, -2, -1))
-        self.base_image_shape = (self.vol.shape[-2], self.vol.shape[-1])
+            vol = (vol - vol.mean()) / (vol.std() + 1e-8)
+        # Use library function to compute volume FFT
+        vol_rfft, vol_shape, _ = compute_dft_3d(vol, pad_length=0)
+        self.vol_rfft = vol_rfft.to(torch.complex64)
+        self.base_image_shape = (int(vol_shape[-1]), int(vol_shape[-1]))
 
     def _project_central_slice(self, R: torch.Tensor) -> torch.Tensor:
-        projs_rfft = extract_central_slices_rfft_3d(self.vol_rfft, self.base_image_shape, R)
-        return _fourier_proj_to_real_2d(projs_rfft)
+        # Use library functions with correct parameters
+        projs_rfft = extract_central_slices_rfft_3d(
+            self.vol_rfft,
+            image_shape=self.base_image_shape,
+            rotation_matrices=R,
+            fftfreq_max=None,
+            zyx_matrices=False
+        )
+        return _fourier_proj_to_real_2d(projs_rfft, pad_length=None)
 
     def run(self,
             pset: ParticlesStarSet,
@@ -595,19 +516,9 @@ class CryoEMSimulator:
 
         H_part = W_part = self.vol_size
 
-        # Initialize double-buffered system
-        buffer_pool = BufferPool(
-            images_per_file=images_per_file,
-            image_shape=(H_part, W_part),
-            device=self.device
-        )
-        writer = AsyncMRCWriter(
-            buffer_pool=buffer_pool,
-            out_dir=out_dir,
-            basename=basename,
-            px_A=px_A
-        )
-        writer.start()
+        # DEBUG: Simple in-memory accumulation (no buffer)
+        all_images = []
+        stack_paths = []
 
         total_particles = len(pset)
         pbar = tqdm(total=total_particles, desc="Simulating particles", unit="particle", disable=disable_tqdm)
@@ -638,8 +549,9 @@ class CryoEMSimulator:
                 shift_jit_px += shift_jitter_frac * (torch.rand_like(shift_jit_px) - 0.5) * torch.abs(shifts_gt_px)
 
             euls_jit = euls_gt + angle_jit
-            R_gt = rotation_matrix_from_euler(euls_gt)
-            R_jit = rotation_matrix_from_euler(euls_jit)
+            # Use library function for rotation matrices
+            R_gt = euler_angles_to_matrix(torch.deg2rad(euls_gt), convention=RELION_EULER_CONVENTION)
+            R_jit = euler_angles_to_matrix(torch.deg2rad(euls_jit), convention=RELION_EULER_CONVENTION)
 
             if simulation_mode == "central_slice":
                 projs = self._project_central_slice(R_gt)  # (B, H, W)
@@ -662,8 +574,13 @@ class CryoEMSimulator:
                 if simulation_mode == "central_slice":
                     proj = projs[i]
                     if apply_ctf:
-                        ctf = ctf_2d_rfft(H, W, px_A, dfu, dfv, dfa, volt, cs, w, phase, bfac, device=self.device)
-                        img = irfft2c(rfft2c(proj) * ctf, s=(H, W))
+                        # Use library function for CTF application
+                        _, img = corrupt_with_ctf(
+                            image=proj, sampling_rate=px_A,
+                            dfu=dfu, dfv=dfv, dfang=dfa,
+                            volt=volt, cs=cs, w=w,
+                            phase_shift=phase, bfactor=bfac, fftshift=True
+                        )
                     else:
                         img = proj
                     dy, dx = shifts_gt_px[i]
@@ -671,12 +588,14 @@ class CryoEMSimulator:
                         img = fourier_shift_image_2d(img, torch.tensor([-dy, -dx], device=self.device))
                     out_imgs.append(img)
                 else:
-                    particle = projs_gt[i]
-                    if apply_ctf:
-                        ctf = ctf_2d_rfft(H, W, px_A, dfu, dfv, dfa, volt, cs, w, phase, bfac, device=self.device)
-                        particle = irfft2c(rfft2c(particle) * ctf, s=(H, W))
-                    else:
-                        ctf = torch.ones((H, W // 2 + 1), device=self.device)
+                    # Get CTF for subtraction (rfft layout, fftshift=False)
+                    ctf = compute_ctf_rfft(
+                        image_size=H, sampling_rate=px_A,
+                        dfu=dfu, dfv=dfv, dfang=dfa,
+                        volt=volt, cs=cs, w=w,
+                        phase_shift=phase, bfactor=bfac,
+                        fftshift=False, device=self.device
+                    )
 
                     proj_gt = projs_gt[i].clone()
                     if shifts_gt_px[i, 0] != 0 or shifts_gt_px[i, 1] != 0:
@@ -702,7 +621,9 @@ class CryoEMSimulator:
                             shifts=torch.tensor([-total_shift_jit_px[1], -total_shift_jit_px[0]], device=self.device),
                         )
                     if apply_ctf:
-                        proj_jit = irfft2c(rfft2c(proj_jit) * ctf, s=(H, W))
+                        # Apply CTF using irfft2 (matching old code style for consistency with ctf from compute_ctf_rfft)
+                        proj_jit_rfft = torch.fft.rfft2(proj_jit)
+                        proj_jit = torch.fft.irfft2(proj_jit_rfft * ctf, s=(H, W))
 
                     out_imgs.append(noise_only + proj_jit)
 
@@ -717,24 +638,45 @@ class CryoEMSimulator:
             win = _hann_2d(H_part, W_part, device=self.device)
             out_imgs = out_imgs * win
 
-            # Submit to buffer pool (non-blocking GPU→CPU transfer)
-            buffer_pool.submit_batch(out_imgs)
+            # DEBUG: Accumulate in memory (move to CPU immediately)
+            out_imgs_cpu = out_imgs.cpu().numpy()
+            for i in range(out_imgs_cpu.shape[0]):
+                all_images.append(out_imgs_cpu[i])
+
+            # Write to disk when we reach images_per_file
+            while len(all_images) >= images_per_file:
+                shard_idx = len(stack_paths)
+                out_path = os.path.join(out_dir, f"{basename}_{shard_idx:04d}.mrcs")
+                stack_data = np.stack(all_images[:images_per_file], axis=0)
+                with mrcfile.new(out_path, overwrite=True) as mrc:
+                    mrc.set_data(stack_data.astype(np.float32))
+                    mrc.voxel_size = (px_A, px_A, px_A)
+                stack_paths.append(out_path)
+                all_images = all_images[images_per_file:]
 
             # Clean up GPU memory immediately
             if simulation_mode == "central_slice":
                 del out_imgs, projs
             else:
                 del out_imgs, projs_gt, projs_jit
-            del euls_gt, angle_jit, shift_jit_px, shifts_gt_px
+            del euls_gt, angle_jit, shift_jit_px, shifts_gt_px, out_imgs_cpu
             del dfu_batch, dfv_batch, dfang_batch, volt_kV, cs_mm, amp_contrast, phase_shift, bfactors
 
+            if torch.cuda.is_available():
+                torch.cuda.synchronize(device=self.device)
             pbar.update(B)
 
         pbar.close()
 
-        # Wait for writer to finish and get results
-        writer.finish()
-        stack_paths = writer.get_stack_paths()
+        # DEBUG: Write remaining images (partial last shard)
+        if len(all_images) > 0:
+            shard_idx = len(stack_paths)
+            out_path = os.path.join(out_dir, f"{basename}_{shard_idx:04d}.mrcs")
+            stack_data = np.stack(all_images, axis=0)
+            with mrcfile.new(out_path, overwrite=True) as mrc:
+                mrc.set_data(stack_data.astype(np.float32))
+                mrc.voxel_size = (px_A, px_A, px_A)
+            stack_paths.append(out_path)
 
         return stack_paths
 

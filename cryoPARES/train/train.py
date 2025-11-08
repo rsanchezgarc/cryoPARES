@@ -155,6 +155,52 @@ def check_disk_space(target_dir: str, required_bytes: int, safety_factor: float 
         )
 
 
+def create_simulation_config(config_args, tmpdir, n_epochs_simulation):
+    """
+    Create a temporary config file for simulation with patched n_epochs.
+
+    This function takes the original config arguments (which may include YAML files
+    and/or key=val pairs), applies them to a copy of main_config, patches train.n_epochs
+    to use n_epochs_simulation, and writes the result to a temporary YAML file.
+
+    Args:
+        config_args: List of config arguments (YAML files and/or key=val pairs), or None
+        tmpdir: Temporary directory to write config file
+        n_epochs_simulation: Value to use for train.n_epochs in simulation
+
+    Returns:
+        str: Path to temporary config file
+    """
+    from copy import deepcopy
+    from autoCLI_config import export_config_to_yaml, ConfigOverrideSystem
+
+    # Create a deep copy of main_config to avoid modifying the global config
+    config_copy = deepcopy(main_config)
+
+    # Apply all config overrides (both YAML files and key=val pairs) if provided
+    if config_args:
+        # Separate YAML files from key=val pairs
+        yaml_files = [arg for arg in config_args if arg.endswith(('.yaml', '.yml'))]
+        key_val_pairs = [arg for arg in config_args if not arg.endswith(('.yaml', '.yml'))]
+
+        # Apply YAML files first
+        for yaml_file in yaml_files:
+            ConfigOverrideSystem.update_config_from_file(config_copy, yaml_file)
+
+        # Then apply key=val pairs (these can override values from YAML files)
+        if key_val_pairs:
+            ConfigOverrideSystem.update_config_from_configstrings(config_copy, key_val_pairs)
+
+    # Patch train.n_epochs for simulation
+    config_copy.train.n_epochs = n_epochs_simulation
+
+    # Export to temporary YAML file
+    temp_config_path = os.path.join(tmpdir, "simulation_config.yaml")
+    export_config_to_yaml(config_copy, temp_config_path)
+
+    return temp_config_path
+
+
 class Trainer:
     @inject_docs_from_config_params
     @inject_defaults_from_config(main_config.train, update_config_with_args=True)
@@ -434,11 +480,14 @@ class Trainer:
                         sim_star_fnames.append(os.path.join(simulation_dir, "projections.star"))
                         sim_dirs.append(simulation_dir)
                     simulation_train_dir = os.path.join(tmpdir, "simulation_train")
-                    try:
-                        idx_n_epochs = [x.split("=")[0] for x in config_args].index('train.n_epochs')
-                        config_args[idx_n_epochs] = f'train.n_epochs={main_config.train.n_epochs_simulation}'
-                    except ValueError:
-                        pass
+                    # Create a temporary config file for simulation with patched n_epochs
+                    sim_config_path = create_simulation_config(
+                        config_args,
+                        tmpdir,
+                        main_config.train.n_epochs_simulation
+                    )
+                    sim_config_args = [sim_config_path]
+
                     execute_trainOnePartition(
                         symmetry=self.symmetry,
                         particles_star_fname=sim_star_fnames,
@@ -449,10 +498,9 @@ class Trainer:
                         compile_model=self.compile_model,
                         val_check_interval=self.val_check_interval,
                         overfit_batches=self.overfit_batches,
-                        config_args=config_args
+                        config_args=sim_config_args
                     )
                     self.finetune_checkpoint_dir = simulation_train_dir
-                    config_args[idx_n_epochs] = f'train.n_epochs={main_config.train.n_epochs}'
                     config_fname = get_most_recent_file(self.experiment_root, "configs_*.yml")
                     shutil.copy(config_fname, simulation_train_dir)
                 print(f"\nExecuting training for partition {partition}")

@@ -65,6 +65,96 @@ def _check_if_in_config_args(param_path: str) -> bool:
         return False
 
 
+def estimate_particle_stacks_size(star_fnames: List[str], particles_dir: Optional[List[str]]) -> int:
+    """
+    Estimate the total disk space required for particle stacks by summing sizes of all unique .mrcs files.
+
+    Args:
+        star_fnames: List of paths to RELION .star files
+        particles_dir: List of root directories for particle paths (one per star file, or None)
+
+    Returns:
+        Total size in bytes of all unique particle stack files
+    """
+    from starstack.particlesStar import ParticlesStarSet, split_particle_and_fname
+
+    total_size = 0
+    unique_stack_files = set()
+
+    for idx, star_fname in enumerate(star_fnames):
+        # Get the corresponding particles_dir for this star file
+        pdir = particles_dir[idx] if particles_dir and idx < len(particles_dir) else None
+        if pdir:
+            pdir = osp.expanduser(pdir)
+
+        # Load the star file
+        ps = ParticlesStarSet(starFname=star_fname, particlesDir=pdir)
+
+        # Extract unique stack filenames
+        stack_fnames = ps.particles_md["rlnImageName"].map(
+            lambda x: split_particle_and_fname(x)["basename"]
+        )
+
+        # For each unique stack file, get its full path and size
+        for stack_fname in stack_fnames.unique():
+            # Construct full path
+            if pdir:
+                full_path = osp.join(pdir, stack_fname)
+            else:
+                full_path = stack_fname
+
+            # Add to set to avoid counting duplicates across star files
+            if full_path not in unique_stack_files:
+                unique_stack_files.add(full_path)
+                if osp.exists(full_path):
+                    total_size += osp.getsize(full_path)
+
+    return total_size
+
+
+def check_disk_space(target_dir: str, required_bytes: int, safety_factor: float = 2.0) -> None:
+    """
+    Check if target directory has sufficient disk space for simulation.
+
+    Args:
+        target_dir: Directory where temporary files will be created
+        required_bytes: Estimated space needed in bytes
+        safety_factor: Multiply required space by this factor (default: 2.0 for 2x safety margin)
+
+    Raises:
+        RuntimeError: If insufficient disk space is available
+    """
+    # Ensure target directory exists (if None, use system temp dir)
+    if target_dir is None:
+        target_dir = tempfile.gettempdir()
+
+    # Get disk usage stats
+    disk_stats = shutil.disk_usage(target_dir)
+    available_bytes = disk_stats.free
+    required_with_margin = required_bytes * safety_factor
+
+    # Convert to human-readable units
+    def bytes_to_human(n):
+        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+            if n < 1024.0:
+                return f"{n:.2f} {unit}"
+            n /= 1024.0
+        return f"{n:.2f} PB"
+
+    if available_bytes < required_with_margin:
+        raise RuntimeError(
+            f"\nInsufficient disk space for simulated particle generation!\n"
+            f"  Target directory: {target_dir}\n"
+            f"  Available space: {bytes_to_human(available_bytes)}\n"
+            f"  Required space (with {safety_factor}x safety margin): {bytes_to_human(required_with_margin)}\n"
+            f"  Estimated particle data size: {bytes_to_human(required_bytes)}\n\n"
+            f"Solutions:\n"
+            f"  1. Free up space in {target_dir}\n"
+            f"  2. Use a different directory with more space via:\n"
+            f"     --config train.simulation_tmp_dir=/path/to/large/disk\n"
+        )
+
+
 class Trainer:
     @inject_docs_from_config_params
     @inject_defaults_from_config(main_config.train, update_config_with_args=True)
@@ -275,7 +365,16 @@ class Trainer:
 
         partitions = ["allParticles"] if not self.split_halves else ["half1", "half2"]
 
-        with tempfile.TemporaryDirectory() as tmpdir:
+        # Check disk space before simulation if needed
+        if self.map_fname_for_simulated_pretraining:
+            required_space = estimate_particle_stacks_size(
+                self.particles_star_fname,
+                self.particles_dir
+            )
+            target_tmp_dir = main_config.train.simulation_tmp_dir or tempfile.gettempdir()
+            check_disk_space(target_tmp_dir, required_space, safety_factor=2.0)
+
+        with tempfile.TemporaryDirectory(dir=main_config.train.simulation_tmp_dir) as tmpdir:
             for partition in partitions:
                 if check_if_training_partion_done(self.experiment_root, partition):
                     continue
@@ -307,9 +406,12 @@ class Trainer:
                             simulation_mode="central_slice",
                             snr_for_simulation=main_config.train.snr_for_simulation,
                         )
+                        # Import the CLI function to generate command
+                        from cryoPARES.simulation.simulateParticles import simulate_particles_cli
+
                         cmd = generate_command_for_argparseFromDoc(
                             "cryoPARES.simulation.simulateParticles",
-                            fun=None,  # Will use module's main()
+                            fun=simulate_particles_cli,
                             use_module=True,
                             python_executable=sys.executable,
                             **simulation_kwargs

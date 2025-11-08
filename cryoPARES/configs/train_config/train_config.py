@@ -37,6 +37,7 @@ class Train_config:
         'snr_for_simulation': 'Signal-to-noise ratio for simulated projection warmup',
         'n_epochs_simulation': 'Number of epochs to train on simulated projections before switching to real data',
         'n_gpus_for_simulation': 'Number of GPUs to use for simulation: 0 (CPU only), 1 (single GPU), or -1 (all available GPUs). Ignored if use_cuda is False',
+        'simulation_tmp_dir': 'Parent directory for storing temporary simulated particle files. If None, uses system default temp directory (usually /tmp). Use this if /tmp has insufficient space',
 
         # CLI-exposed parameters (not in config, but used in train.py)
         'symmetry': 'Point group symmetry of the molecule (e.g., C1, D7, I, O, T)',
@@ -98,3 +99,4 @@ class Train_config:
     snr_for_simulation: float = 0.01
     n_epochs_simulation: int = 10
     n_gpus_for_simulation: int = 1  # 0=CPU, 1=single GPU, -1=all available GPUs
+    simulation_tmp_dir: Optional[str] = None  # Parent directory for temp simulation files

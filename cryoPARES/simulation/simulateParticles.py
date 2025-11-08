@@ -45,7 +45,7 @@ def _write_output_star(
         Path to written STAR file
     """
     # Load input star to get metadata
-    pset = ParticlesStarSet.load(in_star)
+    pset = ParticlesStarSet(in_star)
     parts_df = pset.particles_md.copy()
     optics_df = pset.optics_md if hasattr(pset, "optics_md") else None
 

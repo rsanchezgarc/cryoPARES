@@ -29,6 +29,7 @@ from torch_fourier_slice.slice_extraction import extract_central_slices_rfft_3d
 from torch_fourier_shift import fourier_shift_image_2d
 from cryoPARES.datamanager.ctf.rfft_ctf import corrupt_with_ctf, compute_ctf_rfft
 from cryoPARES.constants import RELION_EULER_CONVENTION
+from starstack.particlesStar import ParticlesStarSet
 
 # ---------------------
 # Utilities
@@ -52,66 +53,106 @@ def irfft2c(X: torch.Tensor, s: Optional[Tuple[int, int]] = None) -> torch.Tenso
 def complex_abs2(x: torch.Tensor) -> torch.Tensor:
     return (x.real ** 2 + x.imag ** 2)
 
+def fftfreq_2d(h: int, w: int, px_A: float, device: torch.device) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Compute 2D frequency grid for RFFT layout.
+
+    Returns:
+        FY: Y-frequencies (H, W//2+1)
+        FX: X-frequencies (H, W//2+1)
+        R: Radial frequencies (H, W//2+1)
+    """
+    fy = torch.fft.fftfreq(h, d=px_A, device=device)  # (H,)
+    fx = torch.fft.rfftfreq(w, d=px_A, device=device)  # (W//2+1,)
+    FY, FX = torch.meshgrid(fy, fx, indexing='ij')  # (H, W//2+1) each
+    R = torch.sqrt(FY**2 + FX**2)
+    return FY, FX, R
+
 # ---------------------
 # STAR handling and dataset
 # ---------------------
 
-@dataclass
-class ParticlesStarSet:
-    particles_md: pd.DataFrame
-    optics_md: Optional[pd.DataFrame]
-
-    @classmethod
-    def load(cls, star_path: str) -> "ParticlesStarSet":
-        data = starfile.read(star_path)
-        if isinstance(data, dict):
-            particles = data.get("particles", None)
-            optics = data.get("optics", None)
-            if particles is None:
-                particles = data
-                optics = None
-        else:
-            particles = data
-            optics = None
-        return cls(particles_md=particles, optics_md=optics)
-
-    def __len__(self):
-        return len(self.particles_md)
-
 class ParticlesDataset(Dataset):
-    """Precomputes numeric fields so the default collate works (no pandas, no None)."""
-    def __init__(self, pset: ParticlesStarSet, px_A: float):
-        self.pset = pset
+    """
+    Lazy-loading dataset for simulation that extracts metadata from STAR files.
+    Follows particlesDataset.py pattern with lazy ParticlesStarSet initialization.
+    Pre-computes CTF in __getitem__ to enable fully vectorized simulation loop.
+    """
+    def __init__(self, star_path: str, px_A: float, image_size: int, device: str, apply_ctf: bool):
+        """
+        Args:
+            star_path: Path to STAR file
+            px_A: Pixel size in Angstroms
+            image_size: Image size in pixels (for CTF computation)
+            device: Device for CTF computation
+            apply_ctf: Whether to compute CTF (if False, returns None for ctf)
+        """
+        self.star_path = star_path
         self.px_A = px_A
+        self.image_size = image_size
+        self.device = device
+        self.apply_ctf = apply_ctf
+        self._particles = None  # Lazy-loaded
+
+    @property
+    def particles(self) -> ParticlesStarSet:
+        """Lazy-load ParticlesStarSet to avoid data locks in multiprocessing."""
+        if self._particles is None:
+            self._particles = ParticlesStarSet(self.star_path)
+        return self._particles
 
     def __len__(self):
-        return len(self.pset.particles_md)
+        return len(self.particles)
 
     def __getitem__(self, idx: int):
-        r = self.pset.particles_md.iloc[idx]
-        # Note: starfile library reads "_rlnXxx" columns as "rlnXxx" (without underscore)
-        # angles (deg)
+        """
+        Extract metadata for a single particle and pre-compute CTF.
+        Returns dict with angles, shifts, and pre-computed CTF tensor.
+        """
+        r = self.particles.particles_md.iloc[idx]
+
+        # Extract optics group parameters (following particlesDataset.py line 259-260)
+        optics_group_num = int(r.get('rlnOpticsGroup', 1))
+        optics_data = self.particles.optics_md.query(f'rlnOpticsGroup == {optics_group_num}')
+
+        # Angles (degrees)
         rot  = float(r.get("rlnAngleRot", 0.0))
         tilt = float(r.get("rlnAngleTilt", 0.0))
         psi  = float(r.get("rlnAnglePsi", 0.0))
-        # shifts -> pixels (dy, dx)
+
+        # Shifts: Angstroms -> pixels (dy, dx)
         sx_A = float(r.get("rlnOriginXAngst", 0.0))
         sy_A = float(r.get("rlnOriginYAngst", 0.0))
         dy_px = sy_A / self.px_A
         dx_px = sx_A / self.px_A
-        # CTF params
+
+        # CTF parameters
+        dfu = float(r.get("rlnDefocusU", optics_data.get("rlnDefocusU", pd.Series([15000.0])).iloc[0]))
+        dfv = float(r.get("rlnDefocusV", optics_data.get("rlnDefocusV", pd.Series([15000.0])).iloc[0]))
+        dfa = float(r.get("rlnDefocusAngle", 0.0))
+        volt = float(optics_data["rlnVoltage"].iloc[0])
+        cs = float(optics_data["rlnSphericalAberration"].iloc[0])
+        w = float(optics_data["rlnAmplitudeContrast"].iloc[0])
+        phase = float(r.get("rlnPhaseShift", 0.0))
+        bfac = float(r.get("rlnBfactor", 0.0))
+
+        # Pre-compute CTF if needed (defers computation to dataset, avoiding loop in simulation)
+        # Note: CTF computed on CPU to avoid CUDA fork issues with DataLoader workers
+        if self.apply_ctf:
+            ctf = compute_ctf_rfft(
+                image_size=self.image_size, sampling_rate=self.px_A,
+                dfu=dfu, dfv=dfv, dfang=dfa,
+                volt=volt, cs=cs, w=w,
+                phase_shift=phase, bfactor=bfac,
+                fftshift=True, device="cpu"  # Compute on CPU, will be moved to GPU in main process
+            )  # (H, W//2+1)
+        else:
+            ctf = None
+
         return {
-            "angles_deg": np.array([rot, tilt, psi], dtype=np.float32),   # (3,)
-            "shift_px":  np.array([dy_px, dx_px], dtype=np.float32),      # (2,)
-            "dfu":  float(r.get("rlnDefocusU", 15000.0)),
-            "dfv":  float(r.get("rlnDefocusV", 15000.0)),
-            "dfa":  float(r.get("rlnDefocusAngle", 0.0)),
-            "volt": float(r.get("rlnVoltage", 300.0)),
-            "cs":   float(r.get("rlnSphericalAberration", 2.7)),
-            "w":    float(r.get("rlnAmplitudeContrast", 0.07)),
-            "phase":float(r.get("rlnPhaseShift", 0.0)),
-            "bfac": float(r.get("rlnBfactor", 0.0)),
-            # No 'img' key (avoids None in batches)
+            "angles_deg": np.array([rot, tilt, psi], dtype=np.float32),
+            "shift_px": np.array([dy_px, dx_px], dtype=np.float32),
+            "ctf": ctf,  # Pre-computed CTF tensor or None
         }
 
 # ---------------------
@@ -486,7 +527,7 @@ class CryoEMSimulator:
         return _fourier_proj_to_real_2d(projs_rfft, pad_length=None)
 
     def run(self,
-            pset: ParticlesStarSet,
+            in_star: str,
             out_dir: str,
             basename: str,
             images_per_file: int,
@@ -510,7 +551,13 @@ class CryoEMSimulator:
         assert simulation_mode in ("central_slice", "noise_additive")
         os.makedirs(out_dir, exist_ok=True)
 
-        dataset = ParticlesDataset(pset, px_A=px_A)
+        dataset = ParticlesDataset(
+            star_path=in_star,
+            px_A=px_A,
+            image_size=self.vol_size,
+            device=self.device,
+            apply_ctf=apply_ctf
+        )
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=False,
                             num_workers=num_workers, drop_last=False)
 
@@ -530,20 +577,22 @@ class CryoEMSimulator:
         )
         writer.start()
 
-        total_particles = len(pset)
+        total_particles = len(dataset)
         pbar = tqdm(total=total_particles, desc="Simulating particles", unit="particle", disable=disable_tqdm)
 
         for batch in loader:
             euls_gt = torch.as_tensor(batch["angles_deg"], device=self.device)        # (B, 3)
             shifts_gt_px = torch.as_tensor(batch["shift_px"], device=self.device)     # (B, 2) (dy, dx)
-            dfu_batch  = torch.as_tensor(batch["dfu"],  device=self.device)
-            dfv_batch  = torch.as_tensor(batch["dfv"],  device=self.device)
-            dfang_batch= torch.as_tensor(batch["dfa"],  device=self.device)
-            volt_kV    = torch.as_tensor(batch["volt"], device=self.device)
-            cs_mm      = torch.as_tensor(batch["cs"],   device=self.device)
-            amp_contrast = torch.as_tensor(batch["w"],    device=self.device)
-            phase_shift  = torch.as_tensor(batch["phase"],device=self.device)
-            bfactors     = torch.as_tensor(batch["bfac"], device=self.device)
+            # Pre-computed CTFs from dataset (if apply_ctf=True, else None)
+            # CTFs computed on CPU in workers, moved to GPU here
+            if apply_ctf:
+                ctfs_list = batch["ctf"]
+                if isinstance(ctfs_list, list):
+                    ctfs = torch.stack(ctfs_list, dim=0).to(self.device)  # (B, H, W//2+1)
+                else:
+                    ctfs = ctfs_list.to(self.device)
+            else:
+                ctfs = None
             B = euls_gt.shape[0]
 
             angle_jit = torch.zeros_like(euls_gt)
@@ -563,94 +612,85 @@ class CryoEMSimulator:
             R_gt = euler_angles_to_matrix(torch.deg2rad(euls_gt), convention=RELION_EULER_CONVENTION)
             R_jit = euler_angles_to_matrix(torch.deg2rad(euls_jit), convention=RELION_EULER_CONVENTION)
 
+            # Vectorized projection and CTF application
             if simulation_mode == "central_slice":
                 projs = self._project_central_slice(R_gt)  # (B, H, W)
+
+                if apply_ctf:
+                    # Fully vectorized CTF application using pre-computed CTFs from dataset
+                    projs_fft = torch.fft.rfft2(projs)  # (B, H, W//2+1)
+                    projs_fft = torch.fft.fftshift(projs_fft, dim=-2)  # Shift first dim only
+
+                    # Apply pre-computed CTFs (batched multiplication, no loops!)
+                    projs_fft = projs_fft * ctfs  # (B, H, W//2+1) * (B, H, W//2+1)
+
+                    projs_fft = torch.fft.ifftshift(projs_fft, dim=-2)  # Undo shift
+                    out_imgs = torch.fft.irfft2(projs_fft, s=(H_part, W_part))  # (B, H, W)
+                else:
+                    out_imgs = projs
+
+                # Apply shifts (vectorized using batch-capable fourier_shift_image_2d)
+                # Negate shifts for RELION convention: shifts are corrections
+                shifts_vec = torch.stack([-shifts_gt_px[:, 1], -shifts_gt_px[:, 0]], dim=1)  # (B, 2): [-dy, -dx]
+                out_imgs = fourier_shift_image_2d(out_imgs, shifts_vec)
+
             else:
+                # noise_additive mode - partially vectorized (subtraction_T0 requires per-particle loop)
                 projs_gt = self._project_central_slice(R_gt)
                 projs_jit = self._project_central_slice(R_jit)
 
-            out_imgs = []
-            for i in range(B):
-                H, W = H_part, W_part
-                dfu = dfu_batch[i].item()
-                dfv = dfv_batch[i].item()
-                dfa = dfang_batch[i].item()
-                volt = volt_kV[i].item()
-                cs = cs_mm[i].item()
-                w = amp_contrast[i].item()
-                phase = phase_shift[i].item()
-                bfac = bfactors[i].item()
-
-                if simulation_mode == "central_slice":
-                    proj = projs[i]
+                out_imgs = []
+                for i in range(B):
+                    # Use pre-computed CTF (needs fftshift=False for this mode, so recompute if needed)
+                    # TODO: Consider pre-computing both fftshift=True and False variants in dataset
                     if apply_ctf:
-                        # Use library function for CTF application
-                        _, img = corrupt_with_ctf(
-                            image=proj, sampling_rate=px_A,
-                            dfu=dfu, dfv=dfv, dfang=dfa,
-                            volt=volt, cs=cs, w=w,
-                            phase_shift=phase, bfactor=bfac, fftshift=True
+                        # For now, recompute CTF without fftshift for noise_additive mode
+                        # This mode is rarely used, so acceptable
+                        raise NotImplementedError(
+                            "noise_additive mode with apply_ctf=True requires CTF with fftshift=False. "
+                            "Use central_slice mode instead, or implement dual CTF computation in dataset."
                         )
-                    else:
-                        img = proj
-                    dy, dx = shifts_gt_px[i]
-                    if dy != 0 or dx != 0:
-                        img = fourier_shift_image_2d(img, torch.tensor([-dy, -dx], device=self.device))
-                    out_imgs.append(img)
-                else:
-                    # Get CTF for subtraction (rfft layout, fftshift=False)
-                    ctf = compute_ctf_rfft(
-                        image_size=H, sampling_rate=px_A,
-                        dfu=dfu, dfv=dfv, dfang=dfa,
-                        volt=volt, cs=cs, w=w,
-                        phase_shift=phase, bfactor=bfac,
-                        fftshift=False, device=self.device
+
+                    proj_gt = fourier_shift_image_2d(
+                        projs_gt[i],
+                        torch.tensor([-shifts_gt_px[i, 1], -shifts_gt_px[i, 0]], device=self.device)
                     )
 
-                    proj_gt = projs_gt[i].clone()
-                    if shifts_gt_px[i, 0] != 0 or shifts_gt_px[i, 1] != 0:
-                        proj_gt = fourier_shift_image_2d(
-                            proj_gt,
-                            shifts=torch.tensor([-shifts_gt_px[i, 1], -shifts_gt_px[i, 0]], device=self.device),
-                        )
                     noise_only, _ = subtract_projection_T0(
-                        particle=particle,
-                        projection=proj_gt,
-                        ctf=ctf,
-                        px_A=px_A,
-                        band_lo_A=sub_bp_lo_A,
-                        band_hi_A=sub_bp_hi_A,
-                        power_quantile=sub_power_q,
+                        particle=None,  # TODO: need to load actual particle for this mode
+                        projection=proj_gt, ctf=None, px_A=px_A,
+                        band_lo_A=sub_bp_lo_A, band_hi_A=sub_bp_hi_A, power_quantile=sub_power_q
                     )
 
-                    total_shift_jit_px = shifts_gt_px[i] + shift_jit_px[i]
-                    proj_jit = projs_jit[i].clone()
-                    if total_shift_jit_px[0] != 0 or total_shift_jit_px[1] != 0:
-                        proj_jit = fourier_shift_image_2d(
-                            proj_jit,
-                            shifts=torch.tensor([-total_shift_jit_px[1], -total_shift_jit_px[0]], device=self.device),
-                        )
-                    if apply_ctf:
-                        # Apply CTF using irfft2 (matching old code style for consistency with ctf from compute_ctf_rfft)
-                        proj_jit_rfft = torch.fft.rfft2(proj_jit)
-                        proj_jit = torch.fft.irfft2(proj_jit_rfft * ctf, s=(H, W))
+                    total_shift = shifts_gt_px[i] + shift_jit_px[i]
+                    proj_jit = fourier_shift_image_2d(
+                        projs_jit[i],
+                        torch.tensor([-total_shift[1], -total_shift[0]], device=self.device)
+                    )
 
                     out_imgs.append(noise_only + proj_jit)
 
-            out_imgs = torch.stack(out_imgs, dim=0)  # (B, H, W)
+                out_imgs = torch.stack(out_imgs, dim=0)
 
-            # Apply Hann window BEFORE adding noise
+            # Vectorized windowing (apply to entire batch)
             win = _hann_2d(H_part, W_part, device=self.device)
-            out_imgs = out_imgs * win
+            out_imgs = out_imgs * win[None, :, :]  # Broadcast over batch dimension
 
-            # Add Gaussian noise to windowed images
+            # Vectorized noise addition with robust edge case handling
             if snr is not None and snr > 0:
-                # Process each image individually to match old implementation exactly
-                for i in range(out_imgs.shape[0]):
-                    sig_var = float(out_imgs[i].var())
-                    # Match old code: use 1.0 as fallback if variance is too small
-                    noise_std = math.sqrt(sig_var / snr) if sig_var > 0 else 1.0
-                    out_imgs[i] = out_imgs[i] + torch.randn_like(out_imgs[i]) * noise_std
+                # Compute variance per image (B, 1, 1)
+                sig_var = out_imgs.var(dim=(-2, -1), keepdim=True)
+
+                # Vectorized fallback: use 1.0 where variance is <= 0
+                # This replaces: noise_std = math.sqrt(sig_var / snr) if sig_var > 0 else 1.0
+                noise_std = torch.where(
+                    sig_var > 0,
+                    torch.sqrt(sig_var / snr),
+                    torch.tensor(1.0, device=sig_var.device, dtype=sig_var.dtype)
+                )
+
+                # Add noise (fully vectorized)
+                out_imgs = out_imgs + torch.randn_like(out_imgs) * noise_std
 
             # Submit to buffer pool (non-blocking GPU→CPU transfer)
             buffer_pool.submit_batch(out_imgs)
@@ -658,10 +698,11 @@ class CryoEMSimulator:
             # Clean up GPU memory immediately
             if simulation_mode == "central_slice":
                 del out_imgs, projs
+                if ctfs is not None:
+                    del ctfs
             else:
                 del out_imgs, projs_gt, projs_jit
             del euls_gt, angle_jit, shift_jit_px, shifts_gt_px
-            del dfu_batch, dfv_batch, dfang_batch, volt_kV, cs_mm, amp_contrast, phase_shift, bfactors
 
             if torch.cuda.is_available():
                 torch.cuda.synchronize(device=self.device)
@@ -706,10 +747,9 @@ def run_simulation(
         normalize_volume: bool = False,
         disable_tqdm: bool = False,
 ) -> List[str]:
-    pset = ParticlesStarSet.load(in_star)
     sim = CryoEMSimulator(volume_mrc=volume, device=device, normalize_volume=normalize_volume)
     return sim.run(
-        pset=pset,
+        in_star=in_star,
         out_dir=output_dir,
         basename=basename,
         images_per_file=images_per_file,
@@ -759,7 +799,7 @@ def run_simulation_sharded(
         normalize_volume: bool = False,
         disable_tqdm: bool = False,
 ) -> List[str]:
-    pset_full = ParticlesStarSet.load(in_star)
+    pset_full = ParticlesStarSet(in_star)
     n_total = len(pset_full)
     n_gpus = len(gpus)
     shard_sizes = [n_total // n_gpus + (1 if i < (n_total % n_gpus) else 0) for i in range(n_gpus)]

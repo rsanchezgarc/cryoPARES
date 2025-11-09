@@ -96,7 +96,7 @@ class Train_config:
 
     expandable_segments_GPU_mem: bool = False #Set it to true if there are fragmentation problems
 
-    snr_for_simulation: float = 0.01
+    snr_for_simulation: float = 0.05
     n_epochs_simulation: int = 10
     n_gpus_for_simulation: int = 1  # 0=CPU, 1=single GPU, -1=all available GPUs
     simulation_tmp_dir: Optional[str] = None  # Parent directory for temp simulation files

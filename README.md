@@ -49,7 +49,7 @@ For a detailed explanation of the method, please refer to our paper:
 
 ## Installation
 
-It is strongly recommended to use a virtual environment (e.g., conda) to avoid conflicts with other packages.
+It is strongly recommended to use a virtual environment (e.g., conda) to avoid conflicts with other packages. CryoPARES has been tested on Ubuntu 20.04+ and Rocky Linux 8+ systems. NVIDIA Ampere or newer GPUs are recommended for running the code.
 
 1.  **Create and activate a conda environment:**
 

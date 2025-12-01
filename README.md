@@ -85,6 +85,8 @@ This method is recommended if you want to modify the cryoPARES source code.
     pip install -e .
     ```
 
+Installation should take no more than a few minutes.
+
 ## Usage
 
 **IMPORTANT:** CryoPARES keeps a file handler open for each `.mrcs` file referenced in the `.star` file. This can lead 

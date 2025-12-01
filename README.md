@@ -545,33 +545,93 @@ For a complete reference of all configuration parameters, see the **[Configurati
 
 ## Example Workflow
 
-1.  **Train a model on an existing, aligned dataset:**
-    ```bash
-    cryopares_train \
-        --symmetry C1 \
-        --particles_star_fname /path/to/aligned_particles.star \
-        --particles_dir /path/to/particles \
-        --train_save_dir /path/to/training_output \
-        --n_epochs 10 \
-        --batch_size 64 \
-        --image_size_px_for_nnet 160 \ #The box size seen by the neural network will be 160.
-        --sampling_rate_angs_for_nnet 1.5 \ 
-        --config models.image2sphere.lmax=6 #lmax=6 to have a quick, low accuracy model
-    ```
+### Quick Start with Test Dataset
 
-2.  **Run inference on a new dataset with local refinement and reconstruction:**
-    ```bash
-    cryopares_infer \
-        --particles_star_fname /path/to/new_particles.star \
-        --particles_dir /path/to/particles \
-        --checkpoint_dir /path/to/training_output/version_0 \
-        --results_dir /path/to/inference_results \
-        --reference_map /path/to/initial_model.mrc \
-        --batch_size 64 \
-        --grid_distance_degs 15 \
-        --directional_zscore_thr 1.0  #Remove all particles with directional zscore <1.0
-        --n_jobs 2 #To use 2 GPUs
-    ```
+Before running on your own data, we recommend testing cryoPARES with a small dataset. If you don't have a small particles .star file,
+you can download some examples from [CESPED](https://github.com/rsanchezgarc/cesped) (Cryo-EM Supervised Pose Estimation Dataset). 
+CESPED provides benchmark datasets specifically designed for supervised pose estimation.
+
+#### Install CESPED (Optional)
+
+```bash
+pip install cesped
+```
+
+#### Download a Test Dataset
+
+For a quick test, use the small `TEST` dataset (subset of EMPIAR-11120):
+
+```bash
+python -m cesped.particlesDataset download_entry -t TEST --benchmarkDir /path/to/your/data
+``` 
+Please, notice that you won't be able to train an accurate model using this small dataset, but it will be good to check that you 
+can run the full workflow
+
+For a full benchmark dataset, you can download other CEPSPED entries such as the EMPIAR-10166 (Human 26S proteasome, C1 symmetry, 238K particles):
+
+```bash
+# Download both half-sets
+python -m cesped.particlesDataset download_entry -t 10166 --benchmarkDir /path/to/your/data
+
+```
+
+### Training and Inference Example
+
+Once you have downloaded a CESPED dataset, you can train and test cryoPARES:
+
+1. **Train a model on an existing, aligned dataset:**
+
+```
+cryopares_train  \
+   --symmetry C1  \
+   --particles_star_fname /tmp/CESPED/TEST/particles_merged.star  \
+   --particles_dir /path/to/cesped_benchmark/TEST/   \
+   --train_save_dir /path/to/training_output   \
+   --n_epochs 3  \ #Small number of epochs for testing
+   --batch_size 32  \
+   --image_size_px_for_nnet 64   \ # The box size seen by the neural network will be 64, much smaller than advisable in a real test 
+   --sampling_rate_angs_for_nnet 1.5  \
+   --config models.image2sphere.lmax=6  \ # The following config options create a small, quick model, with low accuracy
+            models.image2sphere.so3components.so3outputgrid.hp_order=3 \
+            models.image2sphere.so3components.i2sprojector.sphere_fdim=64  \
+            models.image2sphere.so3components.s2conv.f_out=16 \
+            models.image2sphere.imageencoder.unet.out_channels_first=4
+   ```
+
+   For production use:
+
+   ```bash
+   cryopares_train \
+       --symmetry C1 \
+       --particles_star_fname /path/to/particles.star \
+       --particles_dir /path/to/particles/ \  #There should be .mrcs files in this, matching the paths in particles.star
+       --train_save_dir /path/to/training_output \
+       --n_epochs 100 \
+       --batch_size 32 \
+       --image_size_px_for_nnet 160 \
+       --sampling_rate_angs_for_nnet 1.5  #We are using the default model, hence no --config
+   ```
+You can tweak the neural network setting different values with the `--config` flag. Use `--show-config` to get the list of all available options.
+
+After training, there should be a directory called /path/to/training_output/version_* with our checkpoint. 
+We need to provide such a directory to the inference command.
+
+2. **Run inference on a new dataset with local refinement and reconstruction:**
+
+
+   ```bash
+   cryopares_infer \
+       --particles_star_fname /path/to/new_particles.star \
+       --particles_dir /path/to/particles \
+       --checkpoint_dir /path/to/training_output/version_0 \
+       --results_dir /path/to/inference_results \
+       --reference_map /path/to/initial_model.mrc \ #If not provided, it is automatically generated from the training data
+       --batch_size 32 \
+       --grid_distance_degs 12 \
+       --directional_zscore_thr 1.0   # Remove all particles with directional zscore <1.0
+
+   ```
+
 
 ## Getting Help
 

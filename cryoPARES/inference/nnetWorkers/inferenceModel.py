@@ -68,7 +68,7 @@ class InferenceModel(RotationPredictionMixin, nn.Module):
 
        pred_rotmats, maxprobs, norm_nn_score = self._firstforward(imgs, top_k_poses_nnet)
        if self.normalizedScore_thr is not None:
-           passing_mask = (norm_nn_score > self.normalizedScore_thr).squeeze()
+           passing_mask = (norm_nn_score > self.normalizedScore_thr).flatten()
            if not passing_mask.any():
                return None
            valid_indices = torch.where(passing_mask)[0].to("cpu", non_blocking=False)

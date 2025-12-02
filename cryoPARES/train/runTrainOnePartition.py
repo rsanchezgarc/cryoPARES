@@ -168,7 +168,7 @@ class TrainerPartition:
                 load_fname = self.continue_checkpoint_fname
                 resume_from_checkpoint = self.continue_checkpoint_fname
             print(f"Loading model state from {load_fname}")
-            pl_model = PlModel.load_from_checkpoint(load_fname, **kwargs)
+            pl_model = PlModel.load_from_checkpoint(load_fname, **kwargs, weights_only=False)
 
         else:
             pl_model = PlModel(**kwargs)
@@ -294,7 +294,7 @@ class TrainerPartition:
         os.symlink(best_model_basename, constants.BEST_CHECKPOINT_BASENAME)
 
         from cryoPARES.models.model import PlModel
-        best_module = PlModel.load_from_checkpoint(constants.BEST_CHECKPOINT_BASENAME, map_location="cpu")
+        best_module = PlModel.load_from_checkpoint(constants.BEST_CHECKPOINT_BASENAME, map_location="cpu", weights_only=False)
         best_model_script = torch.jit.script(best_module.so3model)
         torch.jit.save(best_model_script, constants.BEST_MODEL_SCRIPT_BASENAME)
 

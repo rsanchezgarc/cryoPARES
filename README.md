@@ -591,11 +591,7 @@ cryopares_train  \
    --batch_size 32  \
    --image_size_px_for_nnet 64   \ # The box size seen by the neural network will be 64, much smaller than advisable in a real test 
    --sampling_rate_angs_for_nnet 1.5  \
-   --config models.image2sphere.lmax=6  \ # The following config options create a small, quick model, with low accuracy
-            models.image2sphere.so3components.so3outputgrid.hp_order=3 \
-            models.image2sphere.so3components.i2sprojector.sphere_fdim=64  \
-            models.image2sphere.so3components.s2conv.f_out=16 \
-            models.image2sphere.imageencoder.unet.out_channels_first=4
+   --config models.image2sphere.lmax=6  models.image2sphere.so3components.so3outputgrid.hp_order=3  models.image2sphere.so3components.i2sprojector.sphere_fdim=64 models.image2sphere.so3components.s2conv.f_out=16 models.image2sphere.imageencoder.unet.out_channels_first=4
    ```
 
    For production use:

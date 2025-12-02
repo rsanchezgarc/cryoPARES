@@ -196,11 +196,11 @@ class SingleInferencer:
                 model_path = f"{actual_halfset}/checkpoints/{BEST_CHECKPOINT_BASENAME}"
                 # For PlModel.load_from_checkpoint, we need a real file path
                 so3Model_fname = self._checkpoint_reader.get_real_path(model_path)
-                so3Model = PlModel.load_from_checkpoint(so3Model_fname)
+                so3Model = PlModel.load_from_checkpoint(so3Model_fname, weights_only=False)
             except FileNotFoundError:
                 model_path = f"{actual_halfset}/checkpoints/last.ckpt"
                 so3Model_fname = self._checkpoint_reader.get_real_path(model_path)
-                so3Model = PlModel.load_from_checkpoint(so3Model_fname)
+                so3Model = PlModel.load_from_checkpoint(so3Model_fname, weights_only=False)
 
         # Try to load directional normalizer
         try:

@@ -584,15 +584,18 @@ Once you have downloaded a CESPED dataset, you can train and test cryoPARES:
 ```
 cryopares_train  \
    --symmetry C1  \
-   --particles_star_fname /tmp/CESPED/TEST/particles_merged.star  \
+   --particles_star_fname /path/to/your/data/CESPED/TEST/particles_merged.star  \
    --particles_dir /path/to/cesped_benchmark/TEST/   \
    --train_save_dir /path/to/training_output   \
-   --n_epochs 3  \ #Small number of epochs for testing
+   --n_epochs 3  \
    --batch_size 32  \
-   --image_size_px_for_nnet 64   \ # The box size seen by the neural network will be 64, much smaller than advisable in a real test 
-   --sampling_rate_angs_for_nnet 1.5  \
+   --sampling_rate_angs_for_nnet 1.5 \
+   --image_size_px_for_nnet 64 \
    --config models.image2sphere.lmax=6  models.image2sphere.so3components.so3outputgrid.hp_order=3  models.image2sphere.so3components.i2sprojector.sphere_fdim=64 models.image2sphere.so3components.s2conv.f_out=16 models.image2sphere.imageencoder.unet.out_channels_first=4
+   
    ```
+Notice that we have added several `--config` flags to create a small model, that will not perform well, but it will be quick.
+We are also using a `image_size_px_for_nnet` much smaller than advisable (we recomend 128 to 256, depending on the particle)
 
    For production use:
 

@@ -313,6 +313,7 @@ class PlModel(RotationPredictionMixin, pl.LightningModule):
 
 def _update_config_for_test():
     from cryoPARES.configs.mainConfig import main_config
+    main_config.datamanager.particlesdataset.image_size_px_for_nnet = 128
     main_config.models.image2sphere.lmax = 6
     main_config.models.image2sphere.so3components.i2sprojector.sphere_fdim = 128
     main_config.models.image2sphere.so3components.i2sprojector.rand_fraction_points_to_project = 1.
@@ -321,6 +322,7 @@ def _update_config_for_test():
     main_config.models.image2sphere.so3components.so3ouptutgrid.hp_order = 3
 
 def _test0():
+    _update_config_for_test()
     b = 3
     batch = get_example_random_batch(b)
     model_kwargs = dict(lr=1e-5, symmetry="c1", num_augmented_copies_per_batch=1, top_k=1)

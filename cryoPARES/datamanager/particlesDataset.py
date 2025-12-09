@@ -37,7 +37,7 @@ class ParticlesDataset(Dataset, ABC):
                  symmetry: str,
                  halfset: Optional[int],
                  sampling_rate_angs_for_nnet: float = CONFIG_PARAM(),
-                 image_size_px_for_nnet: int = CONFIG_PARAM(),
+                 image_size_px_for_nnet: Optional[int] = CONFIG_PARAM(),
                  store_data_in_memory: bool = CONFIG_PARAM(),
                  mask_radius_angs: Optional[float] = CONFIG_PARAM(),
                  apply_mask_to_img: bool = CONFIG_PARAM(),
@@ -51,6 +51,15 @@ class ParticlesDataset(Dataset, ABC):
                  ):
 
         super().__init__()
+
+        # Validate required parameters
+        if image_size_px_for_nnet is None:
+            raise ValueError(
+                "image_size_px_for_nnet is required. Provide it via:\n"
+                "  --image_size_px_for_nnet VALUE\n"
+                "  --config datamanager.particlesdataset.image_size_px_for_nnet=VALUE\n"
+                "  --config FILE.yaml (containing datamanager.particlesdataset.image_size_px_for_nnet)"
+            )
 
         self.sampling_rate_angs_for_nnet = sampling_rate_angs_for_nnet
         self.image_size_px_for_nnet = image_size_px_for_nnet

@@ -77,7 +77,7 @@ if __name__ == "__main__":
                         default=None)
     parser.add_argument("-r", "--sampling_rate", type=float, help="The desired sampling rate", required=False,
                         default=None)
-    parser.add_argument("-b", "--resize_box", type=int, help="The desired image box size", required=False, default=None)
+    parser.add_argument("-b", "--resize_box", type=int, help="The desired image box size (required)", required=True)
     parser.add_argument("-n", "--normalization_type", help="The normalization type",
                         choices=["none", "noiseStats", "subtractMean"], default="noiseStats", required=False)
     parser.add_argument("-c", "--ctf_correction", type=str, help="The ctf correction type",
@@ -87,9 +87,8 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     kwargs = {}
-    if args.resize_box:
-        kwargs["image_size_px_for_nnet"] = args.resize_box
-    if args.resize_box:
+    kwargs["image_size_px_for_nnet"] = args.resize_box
+    if args.sampling_rate:
         kwargs["sampling_rate_angs_for_nnet"] = args.sampling_rate
     if args.mask_radius_angs:
         kwargs["mask_radius_angs"] = args.mask_radius_angs

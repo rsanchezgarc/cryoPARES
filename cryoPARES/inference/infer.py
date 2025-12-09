@@ -33,7 +33,8 @@ def distributed_inference(
         checkpoint_dir: str,
         results_dir: str,
         data_halfset: Literal["half1", "half2", "allParticles"] = "allParticles",
-        model_halfset: Literal["half1", "half2", "allCombinations", "matchingHalf"] = "matchingHalf",
+        # model_halfset: Use "allParticles" only if checkpoint was trained with --NOT_split_halves
+        model_halfset: Literal["half1", "half2", "allCombinations", "matchingHalf", "allParticles"] = "matchingHalf",
         particles_dir: Optional[str] = None,
         batch_size: int = CONFIG_PARAM(),
         n_jobs: Optional[int] = None,

@@ -446,11 +446,12 @@ class SingleInferencer:
     @staticmethod
     def resolve_halfset_lists(
         data_halfset: Literal["half1", "half2", "allParticles"],
-        model_halfset: Literal["half1", "half2", "allCombinations", "matchingHalf"],
-    ) -> Tuple[List[Literal["half1", "half2"]], List[Optional[Literal["half1", "half2"]]]]:
+        model_halfset: Literal["half1", "half2", "allCombinations", "matchingHalf", "allParticles"],
+    ) -> Tuple[List[Literal["half1", "half2"]], List[Optional[Literal["half1", "half2", "allParticles"]]]]:
         """ Return normalized lists of data and model-half policies for iteration.
         - data list is concrete halves: ["half1"], ["half2"], or ["half1","half2"].
-        - model list is ["half1"], ["half2"], [None] (matchingHalf), or ["half1","half2"] (allCombinations).
+        - model list is ["half1"], ["half2"], [None] (matchingHalf), ["half1","half2"] (allCombinations),
+          or ["allParticles"] (only valid if checkpoint was trained with --NOT_split_halves).
         """
         data_list: List[Literal["half1", "half2"]]
         if data_halfset == "allParticles":
@@ -458,9 +459,11 @@ class SingleInferencer:
         else:
             data_list = [data_halfset]
         if model_halfset == "allCombinations":
-            model_list: List[Optional[Literal["half1", "half2"]]] = ["half1", "half2"]
+            model_list: List[Optional[Literal["half1", "half2", "allParticles"]]] = ["half1", "half2"]
         elif model_halfset == "matchingHalf":
             model_list = [None]
+        elif model_halfset == "allParticles":
+            model_list = ["allParticles"]
         else:
             model_list = [model_halfset]
         return data_list, model_list

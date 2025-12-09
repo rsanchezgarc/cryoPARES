@@ -34,7 +34,7 @@ class ResNet(nn.Module):
 
 if __name__ == "__main__":
     from cryoPARES.datamanager.datamanager import get_example_random_batch
-    batch = get_example_random_batch(1)
+    batch = get_example_random_batch(1, image_size_px_for_nnet=128)
     x = batch["particle"]
     model = ResNet(in_channels=x.shape[1], out_channels=8)
     out = model(x)

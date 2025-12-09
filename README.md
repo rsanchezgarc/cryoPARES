@@ -595,7 +595,7 @@ cryopares_train  \
    
    ```
 Notice that we have added several `--config` flags to create a small model, that will not perform well, but it will be quick.
-We are also using a `image_size_px_for_nnet` much smaller than advisable (we recomend 128 to 256, depending on the particle)
+We are also using a `--image_size_px_for_nnet` much smaller than advisable (we recomend 128 to 256, depending on the particle)
 
    For production use:
 
@@ -603,7 +603,7 @@ We are also using a `image_size_px_for_nnet` much smaller than advisable (we rec
    cryopares_train \
        --symmetry C1 \
        --particles_star_fname /path/to/particles.star \
-       --particles_dir /path/to/particles/ \  #There should be .mrcs files in this, matching the paths in particles.star
+       --particles_dir /path/to/particles/ \ 
        --train_save_dir /path/to/training_output \
        --n_epochs 100 \
        --batch_size 32 \
@@ -626,7 +626,7 @@ We need to provide such a directory to the inference command.
        --results_dir /path/to/inference_results \
        --reference_map /path/to/initial_model.mrc \ #If not provided, it is automatically generated from the training data
        --batch_size 32 \
-       --grid_distance_degs 12 \
+       --grid_distance_degs 12 \  #Local search will be from -6º to +6º
        --directional_zscore_thr 1.0   # Remove all particles with directional zscore <1.0
 
    ```

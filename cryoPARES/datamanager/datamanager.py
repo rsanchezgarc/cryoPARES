@@ -157,6 +157,7 @@ class DataManager(pl.LightningDataModule):
                                         if distributed_world_size > 1 else None
             return DataLoader(dataset, batch_size=self.batch_size, shuffle=False,
                               num_workers=self.num_dataworkers, sampler=sampler,
+                              persistent_workers=True if self.num_dataworkers > 0 else False,
                               pin_memory=True if self.num_dataworkers > 0 else False)
 
         if partitionName == "train":

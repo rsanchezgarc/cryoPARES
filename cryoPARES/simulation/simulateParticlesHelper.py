@@ -78,7 +78,7 @@ class ParticlesDataset(Dataset):
     Follows particlesDataset.py pattern with lazy ParticlesStarSet initialization.
     Pre-computes CTF in __getitem__ to enable fully vectorized simulation loop.
     """
-    def __init__(self, star_path: str, px_A: float, image_size: int, device: str, apply_ctf: bool):
+    def __init__(self, star_path: str, px_A: float, image_size: int, device: str, apply_ctf: bool, n_first_particles: Optional[int] = None):
         """
         Args:
             star_path: Path to STAR file
@@ -86,12 +86,14 @@ class ParticlesDataset(Dataset):
             image_size: Image size in pixels (for CTF computation)
             device: Device for CTF computation
             apply_ctf: Whether to compute CTF (if False, returns None for ctf)
+            n_first_particles: Optional: Limit to the first N particles
         """
         self.star_path = star_path
         self.px_A = px_A
         self.image_size = image_size
         self.device = device
         self.apply_ctf = apply_ctf
+        self.n_first_particles = n_first_particles
         self._particles = None  # Lazy-loaded
 
     @property
@@ -99,6 +101,8 @@ class ParticlesDataset(Dataset):
         """Lazy-load ParticlesStarSet to avoid data locks in multiprocessing."""
         if self._particles is None:
             self._particles = ParticlesStarSet(self.star_path)
+            if self.n_first_particles is not None:
+                self._particles.particles_md = self._particles.particles_md.head(self.n_first_particles)
         return self._particles
 
     def __len__(self):
@@ -442,6 +446,13 @@ class AsyncMRCWriter:
 
         except Exception as e:
             self.error = e
+            # CRITICAL: Clean up buffer state to unblock GPU thread
+            # If we don't do this, the GPU thread will wait forever
+            with self.buffer_pool.lock:
+                self.buffer_pool.ready = None
+                self.buffer_pool.buffer_available.notify_all()
+            # Stop the writer loop
+            self.stop_event.set()
 
     def _write_mrc(self, data: np.ndarray, path: str):
         """Write numpy array to MRC file."""
@@ -487,6 +498,11 @@ class AsyncMRCWriter:
     def get_stack_paths(self) -> List[str]:
         """Get list of written stack paths."""
         return self.stack_paths
+
+    def check_error(self) -> None:
+        """Check if writer thread has encountered an error and raise it if so."""
+        if self.error:
+            raise RuntimeError(f"Writer thread failed: {self.error}") from self.error
 
 # ---------------------
 # Main simulator
@@ -546,7 +562,8 @@ class CryoEMSimulator:
             sub_bp_hi_A: float = 20.0,
             sub_power_q: float = 0.85,
             px_A: float = 1.0,
-            disable_tqdm: bool = False) -> List[str]:
+            disable_tqdm: bool = False,
+            n_first_particles: Optional[int] = None) -> List[str]:
 
         assert simulation_mode in ("central_slice", "noise_additive")
         os.makedirs(out_dir, exist_ok=True)
@@ -556,10 +573,12 @@ class CryoEMSimulator:
             px_A=px_A,
             image_size=self.vol_size,
             device=self.device,
-            apply_ctf=apply_ctf
+            apply_ctf=apply_ctf,
+            n_first_particles=n_first_particles
         )
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=False,
-                            num_workers=num_workers, drop_last=False)
+                            num_workers=num_workers, drop_last=False,
+                            persistent_workers=True if num_workers > 0 else False)
 
         H_part = W_part = self.vol_size
 
@@ -695,6 +714,9 @@ class CryoEMSimulator:
             # Submit to buffer pool (non-blocking GPU→CPU transfer)
             buffer_pool.submit_batch(out_imgs)
 
+            # Check for writer errors (fail fast instead of hanging)
+            writer.check_error()
+
             # Clean up GPU memory immediately
             if simulation_mode == "central_slice":
                 del out_imgs, projs
@@ -746,6 +768,7 @@ def run_simulation(
         device: str = "cpu",
         normalize_volume: bool = False,
         disable_tqdm: bool = False,
+        n_first_particles: Optional[int] = None,
 ) -> List[str]:
     sim = CryoEMSimulator(volume_mrc=volume, device=device, normalize_volume=normalize_volume)
     return sim.run(
@@ -769,6 +792,7 @@ def run_simulation(
         sub_power_q=sub_power_q,
         px_A=px_A,
         disable_tqdm=disable_tqdm,
+        n_first_particles=n_first_particles,
     )
 
 # ---------------------
@@ -798,9 +822,14 @@ def run_simulation_sharded(
         gpus: List[int],
         normalize_volume: bool = False,
         disable_tqdm: bool = False,
+        n_first_particles: Optional[int] = None,
 ) -> List[str]:
     pset_full = ParticlesStarSet(in_star)
-    n_total = len(pset_full)
+    particles_to_shard = pset_full.particles_md
+    if n_first_particles is not None:
+        particles_to_shard = particles_to_shard.head(n_first_particles)
+
+    n_total = len(particles_to_shard)
     n_gpus = len(gpus)
     shard_sizes = [n_total // n_gpus + (1 if i < (n_total % n_gpus) else 0) for i in range(n_gpus)]
 
@@ -814,7 +843,7 @@ def run_simulation_sharded(
             continue
 
         shard_star = os.path.join(output_dir, f".shard_{gpu_id}.star")
-        particles_df = pset_full.particles_md.iloc[start_idx:end_idx].copy()
+        particles_df = particles_to_shard.iloc[start_idx:end_idx].copy()
 
         star_dict = {"particles": particles_df}
         if hasattr(pset_full, "optics_md") and pset_full.optics_md is not None:

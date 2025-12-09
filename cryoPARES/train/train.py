@@ -451,6 +451,8 @@ class Trainer:
                             apply_ctf=True,
                             simulation_mode="central_slice",
                             snr_for_simulation=main_config.train.snr_for_simulation,
+                            n_first_particles=None if self.overfit_batches in [1, None] else
+                                                    self.overfit_batches*self.batch_size
                         )
                         # Import the CLI function to generate command
                         from cryoPARES.simulation.simulateParticles import simulate_particles_cli

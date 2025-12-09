@@ -30,6 +30,7 @@ def _write_output_star(
     basename: str,
     in_star: str,
     images_per_file: int,
+    n_first_particles: Optional[int] = None,
 ) -> str:
     """
     Write output STAR file with references to simulated particle images.
@@ -40,6 +41,7 @@ def _write_output_star(
         basename: Base name for output
         in_star: Input STAR file path
         images_per_file: Number of images per file
+        n_first_particles: Optional: Limit to the first N particles
 
     Returns:
         Path to written STAR file
@@ -47,19 +49,26 @@ def _write_output_star(
     # Load input star to get metadata
     pset = ParticlesStarSet(in_star)
     parts_df = pset.particles_md.copy()
+    if n_first_particles is not None:
+        parts_df = parts_df.head(n_first_particles)
     optics_df = pset.optics_md if hasattr(pset, "optics_md") else None
 
     # Generate image names for all stacks
+    # Optimization: avoid opening files - we know the count from images_per_file
+    total_particles = len(parts_df)
     image_names_all: List[str] = []
+    particles_remaining = total_particles
+
     for p in stack_paths:
-        with mrcfile.open(p, permissive=True, mode="r") as m:
-            n_in_file = m.data.shape[0]
+        # All files except potentially the last have images_per_file images
+        n_in_file = min(images_per_file, particles_remaining)
         base = os.path.basename(p)
         image_names_all.extend([f"{k + 1}@{base}" for k in range(n_in_file)])
+        particles_remaining -= n_in_file
 
     # Update particle dataframe with new image names
     out_star = os.path.join(output_dir, f"{basename}.star")
-    assert len(image_names_all) == len(parts_df), "Mismatch: images vs STAR rows"
+    assert len(image_names_all) == len(parts_df), f"Mismatch: images ({len(image_names_all)}) vs STAR rows ({len(parts_df)})"
     parts_df["rlnImageName"] = image_names_all
 
     # Write output star file
@@ -96,6 +105,7 @@ def simulate_particles_cli(
         device: Optional[str] = None,
         random_seed: Optional[int] = None,
         disable_tqdm: bool = False,
+        n_first_particles: Optional[int] = None,
 ):
     """
     Simulate cryo-EM particle projections from a 3D volume.
@@ -123,6 +133,7 @@ def simulate_particles_cli(
         device: Override device for single-run (e.g., 'cuda:0' or 'cpu'). Ignored for multi-GPU
         random_seed: Random seed for reproducibility
         disable_tqdm: Disable progress bar
+        n_first_particles: If set, only process the first N particles from the input STAR file.
     """
     # Validation
     if images_per_file <= 0:
@@ -131,6 +142,8 @@ def simulate_particles_cli(
         raise ValueError("batch_size must be > 0")
     if num_dataworkers < 0:
         raise ValueError("num_dataworkers must be >= 0")
+    if n_first_particles is not None and n_first_particles <= 0:
+        raise ValueError("n_first_particles must be > 0")
     if not os.path.exists(volume):
         raise FileNotFoundError(f"Volume not found: {volume}")
     if not os.path.exists(in_star):
@@ -193,6 +206,7 @@ def simulate_particles_cli(
             gpus=gpu_ids,
             normalize_volume=False,
             disable_tqdm=disable_tqdm,
+            n_first_particles=n_first_particles,
         )
     else:
         # Single GPU or CPU
@@ -219,6 +233,7 @@ def simulate_particles_cli(
             device=device,
             normalize_volume=False,
             disable_tqdm=disable_tqdm,
+            n_first_particles=n_first_particles,
         )
 
     # Write output STAR file
@@ -228,6 +243,7 @@ def simulate_particles_cli(
         basename=basename,
         in_star=in_star,
         images_per_file=images_per_file,
+        n_first_particles=n_first_particles,
     )
     print(f"\nOutput STAR file: {out_star}")
 

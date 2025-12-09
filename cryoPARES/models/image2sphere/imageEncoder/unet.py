@@ -522,7 +522,7 @@ class Unet(nn.Module):
 
 if __name__ == "__main__":
     from cryoPARES.datamanager.datamanager import get_example_random_batch
-    batch = get_example_random_batch(64)
+    batch = get_example_random_batch(64, image_size_px_for_nnet=128)
     x = batch["particle"]
     device = "cuda"
     model = Unet(x.shape[1],)# n_blocks=3, out_channels=8, out_channels_first=32, n_decoder_blocks_removed=1)

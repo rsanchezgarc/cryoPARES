@@ -22,8 +22,21 @@ def get_number_image_channels():
     else:
         return 1
 
-def get_example_random_batch(batch_size, n_channels=None, seed=None):
-    imgsize = main_config.datamanager.particlesdataset.image_size_px_for_nnet
+def get_example_random_batch(batch_size, n_channels=None, seed=None, image_size_px_for_nnet=None):
+    # Get image size from parameter or config
+    if image_size_px_for_nnet is None:
+        image_size_px_for_nnet = main_config.datamanager.particlesdataset.image_size_px_for_nnet
+
+    # Validate that we have a valid image size
+    if image_size_px_for_nnet is None:
+        raise ValueError(
+            "image_size_px_for_nnet must be provided either as an argument or via config.\n"
+            "Provide it via:\n"
+            "  get_example_random_batch(..., image_size_px_for_nnet=VALUE)\n"
+            "  --config datamanager.particlesdataset.image_size_px_for_nnet=VALUE"
+        )
+
+    imgsize = image_size_px_for_nnet
     n_channels = n_channels if n_channels is not None else get_number_image_channels()
     seed = torch.Generator().manual_seed(seed) if seed is not None else None
     batch = {

@@ -246,7 +246,7 @@ class Trainer:
             junk_particles_dir: {junk_particles_dir}
         """
         self.symmetry = symmetry
-        self.particles_star_fname = [osp.expanduser(fname) for fname in particles_star_fname]
+        self.particles_star_fname = [osp.abspath(osp.expanduser(fname)) for fname in particles_star_fname]
         self.particles_dir = particles_dir
         self.n_epochs = n_epochs
         self.batch_size = batch_size
@@ -330,7 +330,7 @@ class Trainer:
             path_pattern=r'(command_)(\d+)(\.txt)$',
             extension="txt"
         )
-        fname = osp.join(self.experiment_root, basename)
+        fname = osp.abspath(osp.join(self.experiment_root, basename))
         current_process = psutil.Process()
         _command = " ".join(["'" + x + "'" if x.startswith('{"') else x
                              for x in current_process.cmdline()])
@@ -345,7 +345,7 @@ class Trainer:
             path_pattern=r'(envs_)(\d+)(\.json)$',
             extension="json"
         )
-        fname = osp.join(self.experiment_root, basename)
+        fname = osp.abspath(osp.join(self.experiment_root, basename))
         with open(fname, 'w') as f:
             json.dump(dict(os.environ), f)
 
@@ -362,7 +362,7 @@ class Trainer:
             path_pattern=fr'({prefix}_)(\d+)(\.yml)$',
             extension="yml"
         )
-        fname = osp.join(self.experiment_root, basename)
+        fname = osp.abspath(osp.join(self.experiment_root, basename))
         from autoCLI_config import export_config_to_yaml
         export_config_to_yaml(main_config, fname)
 
@@ -374,7 +374,7 @@ class Trainer:
             basename='code_',
             path_pattern=r'(code_)(\d+)$'
         )
-        copycodedir = osp.join(self.experiment_root, copycodedir_base)
+        copycodedir = osp.abspath(osp.join(self.experiment_root, copycodedir_base))
         os.makedirs(copycodedir, exist_ok=True)
 
         module_path = osp.abspath(sys.modules[__name__].__file__)

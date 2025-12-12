@@ -314,7 +314,7 @@ class Trainer:
             self.train_save_dir = os.path.expanduser(train_save_dir)
             version_dir = get_version_to_use(self.train_save_dir, "version_", dir_only=True)
 
-        self.experiment_root = osp.join(self.train_save_dir, version_dir)
+        self.experiment_root = osp.abspath(osp.join(self.train_save_dir, version_dir))
         os.makedirs(self.experiment_root, exist_ok=True)
 
         self._save_command_info()

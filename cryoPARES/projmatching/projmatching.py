@@ -408,6 +408,10 @@ def projmatching_starfile(
 
 def main():
     """Main entry point: parse CLI args from docstrings and run projmatching_starfile()."""
+    # Increase file descriptor limit to avoid "too many open files" errors
+    from cryoPARES.utils.systemUtils import increase_file_descriptor_limit
+    increase_file_descriptor_limit()
+
     from argParseFromDoc import parse_function_and_call
     parse_function_and_call(projmatching_starfile)
 

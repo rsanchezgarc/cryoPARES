@@ -193,6 +193,11 @@ if __name__ == "__main__":
 
     seed_everything(111)
     os.environ[constants.SCRIPT_ENTRY_POINT] = "daemonInference.py"
+
+    # Increase file descriptor limit to avoid "too many open files" errors
+    from cryoPARES.utils.systemUtils import increase_file_descriptor_limit
+    increase_file_descriptor_limit()
+
     print("---------------------------------------")
     print(" ".join(sys.argv))
     print("---------------------------------------")

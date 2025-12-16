@@ -48,10 +48,11 @@ class ParticlesRelionStarDataset(ParticlesDataset):
         n_stacks = len(stackFnames.unique())
         assert n_stacks < 5 * ulimit, f"Error, the number of particle stacks is too" \
                                       f" large ({n_stacks}) given current number of allowed file " \
-                                      f"handlers {ulimit}. Please, increase the number using " \
-                                      f"'ulimit -n NUMBER', where NUMBER should be much larger than " \
-                                      f"the number of stacks (at least 10x). Otherwise, group the " \
-                                      f"particle stacks (.mrcs) into less but larger stack files."
+                                      f"handlers {ulimit}. The system attempted to increase this limit automatically, " \
+                                      f"but it may be insufficient. You can manually increase the limit using " \
+                                      f"'ulimit -n NUMBER' (where NUMBER should be much larger than the number of " \
+                                      f"stacks, at least 10x) or by editing system limits (e.g., /etc/security/limits.conf). " \
+                                      f"Alternatively, group the particle stacks (.mrcs) into fewer but larger stack files."
         return ps
 
 

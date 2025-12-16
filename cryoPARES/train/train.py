@@ -596,6 +596,11 @@ class Trainer:
         return star_fnames
 def main():
     os.environ[constants.PROJECT_NAME + "__ENTRY_POINT"] = "train.py"
+
+    # Increase file descriptor limit to avoid "too many open files" errors
+    from cryoPARES.utils.systemUtils import increase_file_descriptor_limit
+    increase_file_descriptor_limit()
+
     print("---------------------------------------")
     print(" ".join(sys.argv))
     print("---------------------------------------")

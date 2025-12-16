@@ -560,6 +560,11 @@ def _worker(worker_id,
 def main():
     os.environ['MKL_THREADING_LAYER'] = 'GNU'
     os.environ[constants.SCRIPT_ENTRY_POINT] = 'infer.py'
+
+    # Increase file descriptor limit to avoid "too many open files" errors
+    from cryoPARES.utils.systemUtils import increase_file_descriptor_limit
+    increase_file_descriptor_limit()
+
     print('---------------------------------------')
     print(' '.join(sys.argv))
     print('---------------------------------------')

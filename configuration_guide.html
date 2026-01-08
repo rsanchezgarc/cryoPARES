@@ -1,0 +1,698 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Configuration Guide &mdash; CryoPARES 0.1.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=01f34227"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Command-Line Interface" href="cli.html" />
+    <link rel="prev" title="Training Guide" href="training_guide.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            CryoPARES
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="training_guide.html">Training Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="training_guide.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="training_guide.html#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="training_guide.html#quick-start">Quick Start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="training_guide.html#training-parameters">Training Parameters</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#essential-parameters">Essential Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#data-configuration-parameters">Data Configuration Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#optimizer-configuration">Optimizer Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#model-architecture-parameters">Model Architecture Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#data-augmentation-parameters">Data Augmentation Parameters</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="training_guide.html#monitoring-training-with-tensorboard">Monitoring Training with TensorBoard</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#launching-tensorboard">Launching TensorBoard</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#key-metrics-to-monitor">Key Metrics to Monitor</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="training_guide.html#training-loss-loss">1. Training Loss (<code class="docutils literal notranslate"><span class="pre">loss</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="training_guide.html#validation-loss-val-loss">2. Validation Loss (<code class="docutils literal notranslate"><span class="pre">val_loss</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="training_guide.html#angular-error-geo-degs-val-geo-degs">3. Angular Error (<code class="docutils literal notranslate"><span class="pre">geo_degs</span></code>, <code class="docutils literal notranslate"><span class="pre">val_geo_degs</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="training_guide.html#median-angular-error-val-median-geo-degs">4. Median Angular Error (<code class="docutils literal notranslate"><span class="pre">val_median_geo_degs</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="training_guide.html#learning-rate-lr">5. Learning Rate (<code class="docutils literal notranslate"><span class="pre">lr</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="training_guide.html#visualization-rotation-matrices">6. Visualization: Rotation Matrices</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#example-tensorboard-monitoring-session">Example TensorBoard Monitoring Session</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="training_guide.html#overfitting-and-underfitting">Overfitting and Underfitting</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#what-is-overfitting">What is Overfitting?</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#what-is-underfitting">What is Underfitting?</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#the-sweet-spot">The Sweet Spot</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="training_guide.html#data-preprocessing">Data Preprocessing</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#image-size-and-sampling-rate">Image Size and Sampling Rate</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#masking">Masking</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#ctf-correction">CTF Correction</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="training_guide.html#advanced-training-options">Advanced Training Options</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#continue-training">Continue Training</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#fine-tuning">Fine-tuning</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#half-set-training">Half-Set Training</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#simulated-pre-training">Simulated Pre-training</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#model-compilation">Model Compilation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#debugging-overfitting-on-small-batches">Debugging: Overfitting on Small Batches</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="training_guide.html#troubleshooting-training-issues">Troubleshooting Training Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#training-is-very-slow">Training is very slow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#out-of-memory-errors">Out of memory errors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#too-many-open-files-error">“Too many open files” error</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#loss-is-nan">Loss is NaN</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#model-not-improving">Model not improving</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#validation-loss-jumps-around">Validation loss jumps around</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="training_guide.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Configuration Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#configuration-system-overview">Configuration System Overview</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#configuration-sources-in-order-of-precedence">Configuration Sources (in order of precedence)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#using-config-overrides">Using Config Overrides</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#using-yaml-config-files">Using YAML Config Files</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#viewing-available-options">Viewing Available Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#configuration-hierarchy">Configuration Hierarchy</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#reading-configuration-files">Reading Configuration Files</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#configuration-file-locations">Configuration File Locations</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#how-to-read-configuration-files">How to Read Configuration Files</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#example-finding-training-parameters">Example: Finding Training Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#example-finding-nested-parameters">Example: Finding Nested Parameters</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#quick-parameter-reference">Quick Parameter Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#saving-and-loading-configurations">Saving and Loading Configurations</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#exporting-current-configuration">Exporting Current Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#reusing-a-configuration">Reusing a Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#overriding-loaded-config">Overriding Loaded Config</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="cli.html">Command-Line Interface</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#cryopares-train"><code class="docutils literal notranslate"><span class="pre">cryopares_train</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#usage">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#parameters">Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#configuration-overrides">Configuration Overrides</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#view-all-config-options">View All Config Options</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#examples">Examples</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#important-notes">Important Notes</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#cryopares-infer"><code class="docutils literal notranslate"><span class="pre">cryopares_infer</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id1">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id2">Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id3">Configuration Overrides</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id4">Examples</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#output-files">Output Files</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id5">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#cryopares-projmatching"><code class="docutils literal notranslate"><span class="pre">cryopares_projmatching</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id6">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id7">Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#example">Example</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#cryopares-reconstruct"><code class="docutils literal notranslate"><span class="pre">cryopares_reconstruct</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id8">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id9">Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id10">Example</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#compactify-checkpoint"><code class="docutils literal notranslate"><span class="pre">compactify_checkpoint</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id11">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#required-arguments">Required Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#optional-arguments">Optional Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id12">Examples</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#what-s-included">What’s Included</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#size-reduction">Size Reduction</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#using-compactified-checkpoints">Using Compactified Checkpoints</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#utility-scripts">Utility Scripts</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#gmm-histogram-analysis">GMM Histogram Analysis</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#fsc-computation">FSC Computation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#pose-comparison">Pose Comparison</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#learning-curve-visualization">Learning Curve Visualization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#star-file-histograms">STAR File Histograms</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#id13">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="troubleshooting.html">Troubleshooting Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="troubleshooting.html#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="troubleshooting.html#installation-issues">Installation Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#pip-install-fails-with-dependency-conflicts">pip install fails with dependency conflicts</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#importerror-no-module-named-cryopares">ImportError: No module named ‘cryoPARES’</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#cuda-version-mismatch">CUDA version mismatch</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="troubleshooting.html#configuration-issues">Configuration Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#type-mismatch-errors-when-using-config">Type mismatch errors when using –config</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="troubleshooting.html#file-system-issues">File System Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#too-many-open-files-error">“Too many open files” error</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#permission-denied-when-writing-outputs">Permission denied when writing outputs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#particle-files-not-found">Particle files not found</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="troubleshooting.html#memory-issues">Memory Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#out-of-memory-oom-during-training">Out of memory (OOM) during training</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#out-of-memory-during-inference">Out of memory during inference</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#ram-exhausted-when-loading-data">RAM exhausted when loading data</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="troubleshooting.html#training-issues">Training Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#loss-becomes-nan">Loss becomes NaN</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#training-doesn-t-improve">Training doesn’t improve</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#validation-loss-higher-than-training-loss">Validation loss higher than training loss</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#training-crashes-with-killed">Training crashes with “Killed”</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#checkpoints-not-saving">Checkpoints not saving</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="troubleshooting.html#inference-issues">Inference Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#predicted-poses-are-random">Predicted poses are random</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#reconstruction-is-blurry">Reconstruction is blurry</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#no-particles-passed-confidence-threshold">“No particles passed confidence threshold”</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#inference-slower-than-expected">Inference slower than expected</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="troubleshooting.html#data-issues">Data Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#ctf-parameters-missing">CTF parameters missing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#orientation-columns-missing">Orientation columns missing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#particles-are-poorly-centered">Particles are poorly centered</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#different-sampling-rate-in-data-vs-reference">Different sampling rate in data vs. reference</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="troubleshooting.html#performance-issues">Performance Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#training-is-very-slow">Training is very slow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#inference-is-very-slow">Inference is very slow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#data-loading-is-bottleneck">Data loading is bottleneck</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="troubleshooting.html#cuda-gpu-issues">CUDA/GPU Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#cuda-out-of-memory-but-gpu-seems-empty">“CUDA out of memory” but GPU seems empty</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#multiple-gpus-not-being-used">Multiple GPUs not being used</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#gpu-slower-than-expected">GPU slower than expected</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="troubleshooting.html#output-quality-issues">Output Quality Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#reconstruction-has-artifacts">Reconstruction has artifacts</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#fsc-is-lower-than-expected">FSC is lower than expected</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#reconstructed-map-has-wrong-hand">Reconstructed map has wrong hand</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="troubleshooting.html#getting-more-help">Getting More Help</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#enable-debug-mode">Enable Debug Mode</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#check-logs">Check Logs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#report-issues">Report Issues</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="troubleshooting.html#see-also">See Also</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="api/index.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api/index.html#core-modules">Core Modules</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/training.html">Training API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api/training.html#module-cryoPARES.train.train">Main Training Module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/training.html#module-cryoPARES.train.runTrainOnePartition">Training Execution</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="api/inference.html">Inference API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api/inference.html#module-cryoPARES.inference.inferencer">Single Inferencer</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/inference.html#module-cryoPARES.inference.infer">Distributed Inference</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/inference.html#daemon-mode">Daemon Mode</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="api/projection_matching.html">Projection Matching API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api/projection_matching.html#module-cryoPARES.projmatching.projMatcher">Projection Matcher</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/projection_matching.html#module-cryoPARES.projmatching.projmatching">Command-Line Interface</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="api/reconstruction.html">Reconstruction API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api/reconstruction.html#module-cryoPARES.reconstruction.reconstructor">Reconstructor</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/reconstruction.html#module-cryoPARES.reconstruction.reconstruct">Command-Line Interface</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="api/data_management.html">Data Management API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api/data_management.html#module-cryoPARES.datamanager.datamanager">Data Manager</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/data_management.html#module-cryoPARES.datamanager.particlesDataset">Particles Dataset</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/data_management.html#module-cryoPARES.datamanager.augmentations">Augmentations</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/data_management.html#module-cryoPARES.datamanager.ctf.rfft_ctf">CTF Correction</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="api/models.html">Models API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api/models.html#module-cryoPARES.models.model">PyTorch Lightning Model</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/models.html#module-cryoPARES.models.image2sphere.image2sphere">Image2Sphere Network</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/models.html#image-encoders">Image Encoders</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/models.html#module-cryoPARES.models.directionalNormalizer.directionalNormalizer">Directional Normalizer</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="api/utils.html">Utilities API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api/utils.html#checkpoint-management">Checkpoint Management</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/utils.html#module-cryoPARES.utils.paths">Path Utilities</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/utils.html#module-cryoPARES.utils.torchUtils">PyTorch Utilities</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/utils.html#module-cryoPARES.utils.reconstructionUtils">Reconstruction Utilities</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/utils.html#geometry-utilities">Geometry Utilities</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Additional Resources</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference external" href="https://github.com/rsanchezgarc/cryoPARES">GitHub Repository</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://www.biorxiv.org/content/10.1101/2025.03.04.641536v2">Paper</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">CryoPARES</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Configuration Guide</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/configuration_guide.md.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="configuration-guide">
+<h1>Configuration Guide<a class="headerlink" href="#configuration-guide" title="Link to this heading"></a></h1>
+<p>This guide provides a comprehensive reference for all configuration parameters in CryoPARES.</p>
+<section id="table-of-contents">
+<h2>Table of Contents<a class="headerlink" href="#table-of-contents" title="Link to this heading"></a></h2>
+<ul class="simple">
+<li><p><a class="reference internal" href="#configuration-system-overview"><span class="xref myst">Configuration System Overview</span></a></p></li>
+<li><p><a class="reference internal" href="#viewing-available-options"><span class="xref myst">Viewing Available Options</span></a></p></li>
+<li><p><a class="reference internal" href="#configuration-hierarchy"><span class="xref myst">Configuration Hierarchy</span></a></p></li>
+<li><p><a class="reference internal" href="#training-configuration"><span class="xref myst">Training Configuration</span></a></p></li>
+<li><p><a class="reference internal" href="#inference-configuration"><span class="xref myst">Inference Configuration</span></a></p></li>
+<li><p><a class="reference internal" href="#data-manager-configuration"><span class="xref myst">Data Manager Configuration</span></a></p></li>
+<li><p><a class="reference internal" href="#model-configuration"><span class="xref myst">Model Configuration</span></a></p></li>
+<li><p><a class="reference internal" href="#projection-matching-configuration"><span class="xref myst">Projection Matching Configuration</span></a></p></li>
+<li><p><a class="reference internal" href="#reconstruction-configuration"><span class="xref myst">Reconstruction Configuration</span></a></p></li>
+</ul>
+</section>
+<hr class="docutils" />
+<section id="configuration-system-overview">
+<h2>Configuration System Overview<a class="headerlink" href="#configuration-system-overview" title="Link to this heading"></a></h2>
+<p>CryoPARES uses a hierarchical, dataclass-based configuration system that allows you to control all aspects of training and inference.</p>
+<section id="configuration-sources-in-order-of-precedence">
+<h3>Configuration Sources (in order of precedence)<a class="headerlink" href="#configuration-sources-in-order-of-precedence" title="Link to this heading"></a></h3>
+<ol class="arabic simple">
+<li><p><strong>Direct command-line arguments</strong>: <code class="docutils literal notranslate"><span class="pre">--batch_size</span> <span class="pre">32</span></code></p></li>
+<li><p><strong>Config overrides</strong>: <code class="docutils literal notranslate"><span class="pre">--config</span> <span class="pre">train.learning_rate=1e-3</span></code></p></li>
+<li><p><strong>YAML config files</strong>: <code class="docutils literal notranslate"><span class="pre">--config_file</span> <span class="pre">my_config.yaml</span></code></p></li>
+<li><p><strong>Default values</strong>: Built into the <code class="docutils literal notranslate"><span class="pre">_config.py</span></code> code</p></li>
+</ol>
+</section>
+<section id="using-config-overrides">
+<h3>Using Config Overrides<a class="headerlink" href="#using-config-overrides" title="Link to this heading"></a></h3>
+<p>Config overrides use dot notation to specify nested parameters:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python<span class="w"> </span>-m<span class="w"> </span>cryopares_train<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--symmetry<span class="w"> </span>C1<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--particles_star_fname<span class="w"> </span>data.star<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--train_save_dir<span class="w"> </span>output/<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--config<span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>train.learning_rate<span class="o">=</span>1e-3<span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>train.weight_decay<span class="o">=</span>1e-5<span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>models.image2sphere.lmax<span class="o">=</span><span class="m">8</span><span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>datamanager.particlesDataset.sampling_rate_angs_for_nnet<span class="o">=</span><span class="m">2</span>.0
+</pre></div>
+</div>
+<p><strong>Important:</strong></p>
+<ul class="simple">
+<li><p>The <code class="docutils literal notranslate"><span class="pre">--config</span></code> flag should be the <strong>last</strong> argument on the command line</p></li>
+<li><p><strong>Type matching is critical:</strong></p>
+<ul>
+<li><p><strong>Float parameters</strong> must include a decimal point: <code class="docutils literal notranslate"><span class="pre">1.0</span></code> not <code class="docutils literal notranslate"><span class="pre">1</span></code> (e.g., <code class="docutils literal notranslate"><span class="pre">train.learning_rate=1e-3</span></code> or <code class="docutils literal notranslate"><span class="pre">sampling_rate_angs_for_nnet=2.0</span></code>)</p></li>
+<li><p><strong>Int parameters</strong> must NOT have a decimal point: <code class="docutils literal notranslate"><span class="pre">8</span></code> not <code class="docutils literal notranslate"><span class="pre">8.0</span></code> (e.g., <code class="docutils literal notranslate"><span class="pre">models.image2sphere.lmax=8</span></code>)</p></li>
+<li><p>Check parameter types with <code class="docutils literal notranslate"><span class="pre">--show-config</span></code> to see <code class="docutils literal notranslate"><span class="pre">(int)</span></code> or <code class="docutils literal notranslate"><span class="pre">(float)</span></code> annotations</p></li>
+</ul>
+</li>
+</ul>
+</section>
+<section id="using-yaml-config-files">
+<h3>Using YAML Config Files<a class="headerlink" href="#using-yaml-config-files" title="Link to this heading"></a></h3>
+<p>Create a YAML file with your settings:</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="c1"># my_config.yaml</span>
+<span class="nt">train</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">learning_rate</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.001</span>
+<span class="w">  </span><span class="nt">weight_decay</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.00001</span>
+<span class="w">  </span><span class="nt">n_epochs</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">20</span>
+<span class="w">  </span><span class="nt">batch_size</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">32</span>
+
+<span class="nt">models</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">image2sphere</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">lmax</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">8</span>
+<span class="w">    </span><span class="nt">imageencoder</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">encoderArtchitecture</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;resnet&quot;</span>
+<span class="w">      </span><span class="nt">resnet</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">resnetName</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;resnet18&quot;</span>
+
+<span class="nt">datamanager</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">particlesDataset</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">sampling_rate_angs_for_nnet</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2.0</span>
+<span class="w">    </span><span class="nt">image_size_px_for_nnet</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">128</span>
+</pre></div>
+</div>
+<p>Use it:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python<span class="w"> </span>-m<span class="w"> </span>cryopares_train<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--symmetry<span class="w"> </span>C1<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--particles_star_fname<span class="w"> </span>data.star<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--train_save_dir<span class="w"> </span>output/<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--config_file<span class="w"> </span>my_config.yaml
+</pre></div>
+</div>
+</section>
+</section>
+<hr class="docutils" />
+<section id="viewing-available-options">
+<h2>Viewing Available Options<a class="headerlink" href="#viewing-available-options" title="Link to this heading"></a></h2>
+<p>To see all available configuration options and their current values:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python<span class="w"> </span>-m<span class="w"> </span>cryopares_train<span class="w"> </span>--show-config
+</pre></div>
+</div>
+<p>This command displays configuration in two sections:</p>
+<p><strong>1. Hierarchical view with descriptions:</strong>
+Shows the nested structure with parameter descriptions and types:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">config</span><span class="p">:</span>
+  <span class="n">models</span><span class="p">:</span>
+    <span class="n">image2sphere</span><span class="p">:</span>
+      <span class="n">lmax</span><span class="p">:</span> <span class="mi">12</span> <span class="p">(</span><span class="nb">int</span><span class="p">)</span>  <span class="c1"># Maximum spherical harmonic degree for SO(3) representation</span>
+      <span class="n">label_smoothing</span><span class="p">:</span> <span class="mf">0.05</span> <span class="p">(</span><span class="nb">float</span><span class="p">)</span>  <span class="c1"># Label smoothing factor for loss function</span>
+      <span class="o">...</span>
+  <span class="n">train</span><span class="p">:</span>
+    <span class="n">n_epochs</span><span class="p">:</span> <span class="mi">100</span> <span class="p">(</span><span class="nb">int</span><span class="p">)</span>  <span class="c1"># Number of training epochs</span>
+    <span class="n">learning_rate</span><span class="p">:</span> <span class="mf">0.001</span> <span class="p">(</span><span class="nb">float</span><span class="p">)</span>  <span class="c1"># Initial learning rate for optimizer</span>
+    <span class="o">...</span>
+</pre></div>
+</div>
+<p><strong>2. Dot notation for easy copy-paste:</strong>
+Shows all parameters in flat format that can be directly used with <code class="docutils literal notranslate"><span class="pre">--config</span></code>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>  <span class="n">train</span><span class="o">.</span><span class="n">n_epochs</span><span class="o">=</span><span class="mi">100</span> <span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+  <span class="n">train</span><span class="o">.</span><span class="n">learning_rate</span><span class="o">=</span><span class="mf">0.001</span> <span class="p">(</span><span class="nb">float</span><span class="p">)</span>
+  <span class="n">train</span><span class="o">.</span><span class="n">batch_size</span><span class="o">=</span><span class="mi">64</span> <span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+  <span class="n">models</span><span class="o">.</span><span class="n">image2sphere</span><span class="o">.</span><span class="n">lmax</span><span class="o">=</span><span class="mi">12</span> <span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+  <span class="o">...</span>
+
+<span class="n">Example</span><span class="p">:</span> <span class="o">--</span><span class="n">config</span> <span class="n">train</span><span class="o">.</span><span class="n">n_epochs</span><span class="o">=</span><span class="mi">100</span> <span class="n">train</span><span class="o">.</span><span class="n">batch_size</span><span class="o">=</span><span class="mi">64</span>
+</pre></div>
+</div>
+<p><strong>Tip:</strong> You can copy any line from the dot notation section and paste it directly after <code class="docutils literal notranslate"><span class="pre">--config</span></code> to override that parameter</p>
+</section>
+<hr class="docutils" />
+<section id="configuration-hierarchy">
+<h2>Configuration Hierarchy<a class="headerlink" href="#configuration-hierarchy" title="Link to this heading"></a></h2>
+<p>CryoPARES configuration is organized hierarchically:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>MainConfig
+├── train (Training parameters)
+├── inference (Inference parameters)
+├── datamanager (Data loading and preprocessing)
+│   ├── particlesDataset (Dataset parameters)
+│   └── augmenter (Data augmentation)
+├── models (Model architecture)
+│   ├── image2sphere (Main neural network)
+│   └── directionalNormalizer (Confidence scoring)
+├── projmatching (Projection matching/local refinement)
+└── reconstruct (3D reconstruction)
+</pre></div>
+</div>
+</section>
+<hr class="docutils" />
+<section id="reading-configuration-files">
+<h2>Reading Configuration Files<a class="headerlink" href="#reading-configuration-files" title="Link to this heading"></a></h2>
+<p>All configuration parameters are defined in Python dataclass files located in <code class="docutils literal notranslate"><span class="pre">cryoPARES/configs/</span></code>. These files contain:</p>
+<ul class="simple">
+<li><p><strong>Parameter names</strong> and their <strong>default values</strong></p></li>
+<li><p><strong>Type annotations</strong> (int, float, str, bool, etc.)</p></li>
+<li><p><strong>Inline documentation</strong> explaining what each parameter does</p></li>
+</ul>
+<section id="configuration-file-locations">
+<h3>Configuration File Locations<a class="headerlink" href="#configuration-file-locations" title="Link to this heading"></a></h3>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Config Section</p></th>
+<th class="head"><p>File Path</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><strong>Training</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">cryoPARES/configs/train_config/train_config.py</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Inference</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">cryoPARES/configs/inference_config/inference_config.py</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Data Manager</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">cryoPARES/configs/datamanager_config/datamanager_config.py</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Particle Dataset</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">cryoPARES/configs/datamanager_config/particles_dataset_config.py</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Augmentation</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">cryoPARES/configs/datamanager_config/augmenter_config.py</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Image2Sphere Model</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">cryoPARES/configs/models_config/image2sphere_config.py</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Image Encoder</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">cryoPARES/configs/models_config/imageencoder_config.py</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Projection Matching</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">cryoPARES/configs/projmatching_config/projmatching_config.py</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Reconstruction</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">cryoPARES/configs/reconstruction_config/reconstruct_config.py</span></code></p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="how-to-read-configuration-files">
+<h3>How to Read Configuration Files<a class="headerlink" href="#how-to-read-configuration-files" title="Link to this heading"></a></h3>
+<p>Each config file is a Python dataclass with this structure:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@dataclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">Train_config</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Training configuration parameters.&quot;&quot;&quot;</span>
+
+    <span class="c1"># Centralized parameter documentation</span>
+    <span class="n">PARAM_DOCS</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;n_epochs&#39;</span><span class="p">:</span> <span class="s1">&#39;Number of training epochs. More epochs allow better convergence...&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;learning_rate&#39;</span><span class="p">:</span> <span class="s1">&#39;Initial learning rate for optimizer. Tune this for optimal convergence...&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;batch_size&#39;</span><span class="p">:</span> <span class="s1">&#39;Number of particles per batch. Try to make it as large as possible...&#39;</span><span class="p">,</span>
+        <span class="o">...</span>
+    <span class="p">}</span>
+
+    <span class="c1"># Parameter definitions with defaults</span>
+    <span class="n">n_epochs</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">100</span>
+    <span class="n">learning_rate</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1e-3</span>
+    <span class="n">batch_size</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">32</span>
+    <span class="n">weight_decay</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1e-5</span>
+    <span class="o">...</span>
+</pre></div>
+</div>
+<p><strong>Key components:</strong></p>
+<ul class="simple">
+<li><p><strong><code class="docutils literal notranslate"><span class="pre">PARAM_DOCS</span></code></strong>: Dictionary with detailed descriptions of each parameter</p></li>
+<li><p><strong>Parameter definitions</strong>: <code class="docutils literal notranslate"><span class="pre">name:</span> <span class="pre">type</span> <span class="pre">=</span> <span class="pre">default_value</span></code></p></li>
+<li><p><strong>Nested configs</strong>: Some configs contain sub-configurations (e.g., <code class="docutils literal notranslate"><span class="pre">imageencoder_config</span></code> contains <code class="docutils literal notranslate"><span class="pre">resnet_config</span></code>, <code class="docutils literal notranslate"><span class="pre">unet_config</span></code>)</p></li>
+</ul>
+</section>
+<section id="example-finding-training-parameters">
+<h3>Example: Finding Training Parameters<a class="headerlink" href="#example-finding-training-parameters" title="Link to this heading"></a></h3>
+<ol class="arabic">
+<li><p><strong>Open the file</strong>: <code class="docutils literal notranslate"><span class="pre">cryoPARES/configs/train_config/train_config.py</span></code></p></li>
+<li><p><strong>Check PARAM_DOCS</strong> for detailed descriptions:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="s1">&#39;learning_rate&#39;</span><span class="p">:</span> <span class="s1">&#39;Initial learning rate for optimizer. Tune this for optimal convergence (typical range: 1e-4 to 1e-2)&#39;</span>
+</pre></div>
+</div>
+</li>
+<li><p><strong>See the default value</strong>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">learning_rate</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1e-3</span>
+</pre></div>
+</div>
+</li>
+<li><p><strong>Use with –config</strong>:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>--config<span class="w"> </span>train.learning_rate<span class="o">=</span>5e-3
+</pre></div>
+</div>
+</li>
+</ol>
+</section>
+<section id="example-finding-nested-parameters">
+<h3>Example: Finding Nested Parameters<a class="headerlink" href="#example-finding-nested-parameters" title="Link to this heading"></a></h3>
+<p>For deeply nested parameters like <code class="docutils literal notranslate"><span class="pre">models.image2sphere.imageencoder.resnet.resnetName</span></code>:</p>
+<ol class="arabic">
+<li><p><strong>Start at</strong>: <code class="docutils literal notranslate"><span class="pre">cryoPARES/configs/models_config/image2sphere_config.py</span></code></p></li>
+<li><p><strong>Find nested config</strong>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">imageencoder</span><span class="p">:</span> <span class="n">Imageencoder_config</span> <span class="o">=</span> <span class="n">Imageencoder_config</span><span class="p">()</span>
+</pre></div>
+</div>
+</li>
+<li><p><strong>Open</strong>: <code class="docutils literal notranslate"><span class="pre">cryoPARES/configs/models_config/imageencoder_config.py</span></code></p></li>
+<li><p><strong>Find ResNet config</strong>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">resnet</span><span class="p">:</span> <span class="n">Resnet_config</span> <span class="o">=</span> <span class="n">Resnet_config</span><span class="p">()</span>
+</pre></div>
+</div>
+</li>
+<li><p><strong>Check</strong>: <code class="docutils literal notranslate"><span class="pre">cryoPARES/configs/models_config/imageencoder_config.py</span></code> for <code class="docutils literal notranslate"><span class="pre">resnetName</span></code> parameter</p></li>
+</ol>
+</section>
+</section>
+<hr class="docutils" />
+<section id="quick-parameter-reference">
+<h2>Quick Parameter Reference<a class="headerlink" href="#quick-parameter-reference" title="Link to this heading"></a></h2>
+<p>For the most commonly used parameters, see:</p>
+<ul class="simple">
+<li><p><strong>Training basics</strong>: <code class="docutils literal notranslate"><span class="pre">cryoPARES/configs/train_config/train_config.py</span></code> → <code class="docutils literal notranslate"><span class="pre">PARAM_DOCS</span></code></p></li>
+<li><p><strong>Data preprocessing</strong>: <code class="docutils literal notranslate"><span class="pre">cryoPARES/configs/datamanager_config/particles_dataset_config.py</span></code> → <code class="docutils literal notranslate"><span class="pre">PARAM_DOCS</span></code></p></li>
+<li><p><strong>Model architecture</strong>: <code class="docutils literal notranslate"><span class="pre">cryoPARES/configs/models_config/image2sphere_config.py</span></code> → <code class="docutils literal notranslate"><span class="pre">PARAM_DOCS</span></code></p></li>
+<li><p><strong>Local refinement</strong>: <code class="docutils literal notranslate"><span class="pre">cryoPARES/configs/projmatching_config/projmatching_config.py</span></code> → <code class="docutils literal notranslate"><span class="pre">PARAM_DOCS</span></code></p></li>
+</ul>
+<p><strong>Remember:</strong> The easiest way to discover parameters is:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python<span class="w"> </span>-m<span class="w"> </span>cryopares_train<span class="w"> </span>--show-config
+</pre></div>
+</div>
+<p>This shows all parameters with their current values and descriptions, ready to copy-paste</p>
+</section>
+<hr class="docutils" />
+<section id="saving-and-loading-configurations">
+<h2>Saving and Loading Configurations<a class="headerlink" href="#saving-and-loading-configurations" title="Link to this heading"></a></h2>
+<section id="exporting-current-configuration">
+<h3>Exporting Current Configuration<a class="headerlink" href="#exporting-current-configuration" title="Link to this heading"></a></h3>
+<p>After training, your configuration is automatically saved to:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">train_save_dir</span><span class="o">/</span><span class="n">version_0</span><span class="o">/</span><span class="n">configs_0</span><span class="o">.</span><span class="n">yml</span>
+</pre></div>
+</div>
+</section>
+<section id="reusing-a-configuration">
+<h3>Reusing a Configuration<a class="headerlink" href="#reusing-a-configuration" title="Link to this heading"></a></h3>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python<span class="w"> </span>-m<span class="w"> </span>cryopares_train<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--symmetry<span class="w"> </span>C1<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--particles_star_fname<span class="w"> </span>new_data.star<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--train_save_dir<span class="w"> </span>new_output/<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--config_file<span class="w"> </span>train_save_dir/version_0/configs_0.yml
+</pre></div>
+</div>
+</section>
+<section id="overriding-loaded-config">
+<h3>Overriding Loaded Config<a class="headerlink" href="#overriding-loaded-config" title="Link to this heading"></a></h3>
+<p>You can load a config file and override specific values:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python<span class="w"> </span>-m<span class="w"> </span>cryopares_train<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--symmetry<span class="w"> </span>C1<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--particles_star_fname<span class="w"> </span>new_data.star<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--train_save_dir<span class="w"> </span>new_output/<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--config_file<span class="w"> </span>old_config.yml<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--config<span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>train.learning_rate<span class="o">=</span>5e-4<span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>train.n_epochs<span class="o">=</span><span class="m">15</span>
+</pre></div>
+</div>
+</section>
+</section>
+<hr class="docutils" />
+<section id="see-also">
+<h2>See Also<a class="headerlink" href="#see-also" title="Link to this heading"></a></h2>
+<ul class="simple">
+<li><p><a class="reference internal" href="training_guide.html"><span class="std std-doc">Training Guide</span></a> - Training best practices</p></li>
+<li><p><a class="reference external" href="https://rsanchezgarc.github.io/cryoPARES/api/">API Reference</a> - Type hints and function signatures</p></li>
+<li><p><a class="reference internal" href="troubleshooting.html"><span class="std std-doc">Troubleshooting</span></a> - Common issues</p></li>
+</ul>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="training_guide.html" class="btn btn-neutral float-left" title="Training Guide" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="cli.html" class="btn btn-neutral float-right" title="Command-Line Interface" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Ruben Sanchez-Garcia.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

@@ -1,0 +1,873 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Inference API &mdash; CryoPARES 0.1.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=01f34227"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Projection Matching API" href="projection_matching.html" />
+    <link rel="prev" title="Training API" href="training.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            CryoPARES
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../training_guide.html">Training Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../training_guide.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../training_guide.html#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../training_guide.html#quick-start">Quick Start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../training_guide.html#training-parameters">Training Parameters</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../training_guide.html#essential-parameters">Essential Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../training_guide.html#data-configuration-parameters">Data Configuration Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../training_guide.html#optimizer-configuration">Optimizer Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../training_guide.html#model-architecture-parameters">Model Architecture Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../training_guide.html#data-augmentation-parameters">Data Augmentation Parameters</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../training_guide.html#monitoring-training-with-tensorboard">Monitoring Training with TensorBoard</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../training_guide.html#launching-tensorboard">Launching TensorBoard</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../training_guide.html#key-metrics-to-monitor">Key Metrics to Monitor</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../training_guide.html#training-loss-loss">1. Training Loss (<code class="docutils literal notranslate"><span class="pre">loss</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../training_guide.html#validation-loss-val-loss">2. Validation Loss (<code class="docutils literal notranslate"><span class="pre">val_loss</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../training_guide.html#angular-error-geo-degs-val-geo-degs">3. Angular Error (<code class="docutils literal notranslate"><span class="pre">geo_degs</span></code>, <code class="docutils literal notranslate"><span class="pre">val_geo_degs</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../training_guide.html#median-angular-error-val-median-geo-degs">4. Median Angular Error (<code class="docutils literal notranslate"><span class="pre">val_median_geo_degs</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../training_guide.html#learning-rate-lr">5. Learning Rate (<code class="docutils literal notranslate"><span class="pre">lr</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../training_guide.html#visualization-rotation-matrices">6. Visualization: Rotation Matrices</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../training_guide.html#example-tensorboard-monitoring-session">Example TensorBoard Monitoring Session</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../training_guide.html#overfitting-and-underfitting">Overfitting and Underfitting</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../training_guide.html#what-is-overfitting">What is Overfitting?</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../training_guide.html#what-is-underfitting">What is Underfitting?</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../training_guide.html#the-sweet-spot">The Sweet Spot</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../training_guide.html#data-preprocessing">Data Preprocessing</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../training_guide.html#image-size-and-sampling-rate">Image Size and Sampling Rate</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../training_guide.html#masking">Masking</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../training_guide.html#ctf-correction">CTF Correction</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../training_guide.html#advanced-training-options">Advanced Training Options</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../training_guide.html#continue-training">Continue Training</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../training_guide.html#fine-tuning">Fine-tuning</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../training_guide.html#half-set-training">Half-Set Training</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../training_guide.html#simulated-pre-training">Simulated Pre-training</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../training_guide.html#model-compilation">Model Compilation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../training_guide.html#debugging-overfitting-on-small-batches">Debugging: Overfitting on Small Batches</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../training_guide.html#troubleshooting-training-issues">Troubleshooting Training Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../training_guide.html#training-is-very-slow">Training is very slow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../training_guide.html#out-of-memory-errors">Out of memory errors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../training_guide.html#too-many-open-files-error">“Too many open files” error</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../training_guide.html#loss-is-nan">Loss is NaN</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../training_guide.html#model-not-improving">Model not improving</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../training_guide.html#validation-loss-jumps-around">Validation loss jumps around</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../training_guide.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../configuration_guide.html">Configuration Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../configuration_guide.html#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../configuration_guide.html#configuration-system-overview">Configuration System Overview</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../configuration_guide.html#configuration-sources-in-order-of-precedence">Configuration Sources (in order of precedence)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../configuration_guide.html#using-config-overrides">Using Config Overrides</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../configuration_guide.html#using-yaml-config-files">Using YAML Config Files</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../configuration_guide.html#viewing-available-options">Viewing Available Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../configuration_guide.html#configuration-hierarchy">Configuration Hierarchy</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../configuration_guide.html#reading-configuration-files">Reading Configuration Files</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../configuration_guide.html#configuration-file-locations">Configuration File Locations</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../configuration_guide.html#how-to-read-configuration-files">How to Read Configuration Files</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../configuration_guide.html#example-finding-training-parameters">Example: Finding Training Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../configuration_guide.html#example-finding-nested-parameters">Example: Finding Nested Parameters</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../configuration_guide.html#quick-parameter-reference">Quick Parameter Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../configuration_guide.html#saving-and-loading-configurations">Saving and Loading Configurations</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../configuration_guide.html#exporting-current-configuration">Exporting Current Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../configuration_guide.html#reusing-a-configuration">Reusing a Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../configuration_guide.html#overriding-loaded-config">Overriding Loaded Config</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../configuration_guide.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../cli.html">Command-Line Interface</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../cli.html#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../cli.html#cryopares-train"><code class="docutils literal notranslate"><span class="pre">cryopares_train</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#usage">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#parameters">Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#configuration-overrides">Configuration Overrides</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#view-all-config-options">View All Config Options</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#examples">Examples</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#important-notes">Important Notes</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../cli.html#cryopares-infer"><code class="docutils literal notranslate"><span class="pre">cryopares_infer</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#id1">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#id2">Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#id3">Configuration Overrides</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#id4">Examples</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#output-files">Output Files</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#id5">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../cli.html#cryopares-projmatching"><code class="docutils literal notranslate"><span class="pre">cryopares_projmatching</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#id6">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#id7">Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#example">Example</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../cli.html#cryopares-reconstruct"><code class="docutils literal notranslate"><span class="pre">cryopares_reconstruct</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#id8">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#id9">Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#id10">Example</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../cli.html#compactify-checkpoint"><code class="docutils literal notranslate"><span class="pre">compactify_checkpoint</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#id11">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#required-arguments">Required Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#optional-arguments">Optional Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#id12">Examples</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#what-s-included">What’s Included</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#size-reduction">Size Reduction</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#using-compactified-checkpoints">Using Compactified Checkpoints</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../cli.html#utility-scripts">Utility Scripts</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#gmm-histogram-analysis">GMM Histogram Analysis</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#fsc-computation">FSC Computation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#pose-comparison">Pose Comparison</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#learning-curve-visualization">Learning Curve Visualization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../cli.html#star-file-histograms">STAR File Histograms</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../cli.html#id13">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../troubleshooting.html">Troubleshooting Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../troubleshooting.html#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../troubleshooting.html#installation-issues">Installation Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#pip-install-fails-with-dependency-conflicts">pip install fails with dependency conflicts</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#importerror-no-module-named-cryopares">ImportError: No module named ‘cryoPARES’</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#cuda-version-mismatch">CUDA version mismatch</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../troubleshooting.html#configuration-issues">Configuration Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#type-mismatch-errors-when-using-config">Type mismatch errors when using –config</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../troubleshooting.html#file-system-issues">File System Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#too-many-open-files-error">“Too many open files” error</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#permission-denied-when-writing-outputs">Permission denied when writing outputs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#particle-files-not-found">Particle files not found</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../troubleshooting.html#memory-issues">Memory Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#out-of-memory-oom-during-training">Out of memory (OOM) during training</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#out-of-memory-during-inference">Out of memory during inference</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#ram-exhausted-when-loading-data">RAM exhausted when loading data</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../troubleshooting.html#training-issues">Training Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#loss-becomes-nan">Loss becomes NaN</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#training-doesn-t-improve">Training doesn’t improve</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#validation-loss-higher-than-training-loss">Validation loss higher than training loss</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#training-crashes-with-killed">Training crashes with “Killed”</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#checkpoints-not-saving">Checkpoints not saving</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../troubleshooting.html#inference-issues">Inference Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#predicted-poses-are-random">Predicted poses are random</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#reconstruction-is-blurry">Reconstruction is blurry</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#no-particles-passed-confidence-threshold">“No particles passed confidence threshold”</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#inference-slower-than-expected">Inference slower than expected</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../troubleshooting.html#data-issues">Data Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#ctf-parameters-missing">CTF parameters missing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#orientation-columns-missing">Orientation columns missing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#particles-are-poorly-centered">Particles are poorly centered</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#different-sampling-rate-in-data-vs-reference">Different sampling rate in data vs. reference</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../troubleshooting.html#performance-issues">Performance Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#training-is-very-slow">Training is very slow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#inference-is-very-slow">Inference is very slow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#data-loading-is-bottleneck">Data loading is bottleneck</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../troubleshooting.html#cuda-gpu-issues">CUDA/GPU Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#cuda-out-of-memory-but-gpu-seems-empty">“CUDA out of memory” but GPU seems empty</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#multiple-gpus-not-being-used">Multiple GPUs not being used</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#gpu-slower-than-expected">GPU slower than expected</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../troubleshooting.html#output-quality-issues">Output Quality Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#reconstruction-has-artifacts">Reconstruction has artifacts</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#fsc-is-lower-than-expected">FSC is lower than expected</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#reconstructed-map-has-wrong-hand">Reconstructed map has wrong hand</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../troubleshooting.html#getting-more-help">Getting More Help</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#enable-debug-mode">Enable Debug Mode</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#check-logs">Check Logs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../troubleshooting.html#report-issues">Report Issues</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../troubleshooting.html#see-also">See Also</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="index.html#core-modules">Core Modules</a><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="training.html">Training API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="training.html#module-cryoPARES.train.train">Main Training Module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="training.html#module-cryoPARES.train.runTrainOnePartition">Training Execution</a></li>
+</ul>
+</li>
+<li class="toctree-l3 current"><a class="current reference internal" href="#">Inference API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#module-cryoPARES.inference.inferencer">Single Inferencer</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#module-cryoPARES.inference.infer">Distributed Inference</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#daemon-mode">Daemon Mode</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="projection_matching.html">Projection Matching API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="projection_matching.html#module-cryoPARES.projmatching.projMatcher">Projection Matcher</a></li>
+<li class="toctree-l4"><a class="reference internal" href="projection_matching.html#module-cryoPARES.projmatching.projmatching">Command-Line Interface</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="reconstruction.html">Reconstruction API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="reconstruction.html#module-cryoPARES.reconstruction.reconstructor">Reconstructor</a></li>
+<li class="toctree-l4"><a class="reference internal" href="reconstruction.html#module-cryoPARES.reconstruction.reconstruct">Command-Line Interface</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="data_management.html">Data Management API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="data_management.html#module-cryoPARES.datamanager.datamanager">Data Manager</a></li>
+<li class="toctree-l4"><a class="reference internal" href="data_management.html#module-cryoPARES.datamanager.particlesDataset">Particles Dataset</a></li>
+<li class="toctree-l4"><a class="reference internal" href="data_management.html#module-cryoPARES.datamanager.augmentations">Augmentations</a></li>
+<li class="toctree-l4"><a class="reference internal" href="data_management.html#module-cryoPARES.datamanager.ctf.rfft_ctf">CTF Correction</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="models.html">Models API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="models.html#module-cryoPARES.models.model">PyTorch Lightning Model</a></li>
+<li class="toctree-l4"><a class="reference internal" href="models.html#module-cryoPARES.models.image2sphere.image2sphere">Image2Sphere Network</a></li>
+<li class="toctree-l4"><a class="reference internal" href="models.html#image-encoders">Image Encoders</a></li>
+<li class="toctree-l4"><a class="reference internal" href="models.html#module-cryoPARES.models.directionalNormalizer.directionalNormalizer">Directional Normalizer</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="utils.html">Utilities API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="utils.html#checkpoint-management">Checkpoint Management</a></li>
+<li class="toctree-l4"><a class="reference internal" href="utils.html#module-cryoPARES.utils.paths">Path Utilities</a></li>
+<li class="toctree-l4"><a class="reference internal" href="utils.html#module-cryoPARES.utils.torchUtils">PyTorch Utilities</a></li>
+<li class="toctree-l4"><a class="reference internal" href="utils.html#module-cryoPARES.utils.reconstructionUtils">Reconstruction Utilities</a></li>
+<li class="toctree-l4"><a class="reference internal" href="utils.html#geometry-utilities">Geometry Utilities</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Additional Resources</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference external" href="https://github.com/rsanchezgarc/cryoPARES">GitHub Repository</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://www.biorxiv.org/content/10.1101/2025.03.04.641536v2">Paper</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">CryoPARES</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="index.html">API Reference</a></li>
+      <li class="breadcrumb-item active">Inference API</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/api/inference.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="inference-api">
+<h1>Inference API<a class="headerlink" href="#inference-api" title="Link to this heading"></a></h1>
+<section id="module-cryoPARES.inference.inferencer">
+<span id="single-inferencer"></span><h2>Single Inferencer<a class="headerlink" href="#module-cryoPARES.inference.inferencer" title="Link to this heading"></a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="cryoPARES.inference.inferencer.SingleInferencer">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">cryoPARES.inference.inferencer.</span></span><span class="sig-name descname"><span class="pre">SingleInferencer</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">particles_star_fname</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">checkpoint_dir</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">results_dir</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data_halfset='allParticles'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model_halfset='matchingHalf'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">particles_dir=None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">batch_size=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">num_dataworkers=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_cuda=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_cpus_if_no_cuda=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">compile_model=False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">top_k_poses_nnet=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">top_k_poses_localref=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">grid_distance_degs=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">reference_map=None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">reference_mask=None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">directional_zscore_thr=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">skip_localrefinement=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">skip_reconstruction=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subset_idxs=None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_first_particles=None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">show_debug_stats=False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/cryoPARES/inference/inferencer.html#SingleInferencer"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#cryoPARES.inference.inferencer.SingleInferencer" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>particles_star_fname</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>)</p></li>
+<li><p><strong>checkpoint_dir</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>)</p></li>
+<li><p><strong>results_dir</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>)</p></li>
+<li><p><strong>data_halfset</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Literal" title="(in Python v3.14)"><em>Literal</em></a><em>[</em><em>'half1'</em><em>, </em><em>'half2'</em><em>, </em><em>'allParticles'</em><em>]</em>)</p></li>
+<li><p><strong>model_halfset</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Literal" title="(in Python v3.14)"><em>Literal</em></a><em>[</em><em>'half1'</em><em>, </em><em>'half2'</em><em>, </em><em>'allCombinations'</em><em>, </em><em>'matchingHalf'</em><em>]</em>)</p></li>
+<li><p><strong>particles_dir</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a><em> | </em><em>None</em>)</p></li>
+<li><p><strong>batch_size</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>)</p></li>
+<li><p><strong>num_dataworkers</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>)</p></li>
+<li><p><strong>use_cuda</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>)</p></li>
+<li><p><strong>n_cpus_if_no_cuda</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>)</p></li>
+<li><p><strong>compile_model</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>)</p></li>
+<li><p><strong>top_k_poses_nnet</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>)</p></li>
+<li><p><strong>top_k_poses_localref</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>)</p></li>
+<li><p><strong>grid_distance_degs</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a>)</p></li>
+<li><p><strong>reference_map</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a><em> | </em><em>None</em>)</p></li>
+<li><p><strong>reference_mask</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a><em> | </em><em>None</em>)</p></li>
+<li><p><strong>directional_zscore_thr</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em> | </em><em>None</em>)</p></li>
+<li><p><strong>skip_localrefinement</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>)</p></li>
+<li><p><strong>skip_reconstruction</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>)</p></li>
+<li><p><strong>subset_idxs</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.14)"><em>List</em></a><em>[</em><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a><em>] </em><em>| </em><em>None</em>)</p></li>
+<li><p><strong>n_first_particles</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a><em> | </em><em>None</em>)</p></li>
+<li><p><strong>show_debug_stats</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>)</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="cryoPARES.inference.inferencer.SingleInferencer.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">particles_star_fname</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">checkpoint_dir</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">results_dir</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data_halfset='allParticles'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model_halfset='matchingHalf'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">particles_dir=None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">batch_size=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">num_dataworkers=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_cuda=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_cpus_if_no_cuda=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">compile_model=False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">top_k_poses_nnet=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">top_k_poses_localref=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">grid_distance_degs=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">reference_map=None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">reference_mask=None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">directional_zscore_thr=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">skip_localrefinement=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">skip_reconstruction=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subset_idxs=None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_first_particles=None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">show_debug_stats=False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/cryoPARES/inference/inferencer.html#SingleInferencer.__init__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#cryoPARES.inference.inferencer.SingleInferencer.__init__" title="Link to this definition"></a></dt>
+<dd><p>Initializes the SingleInferencer for running inference on a set of particles.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>particles_star_fname</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a></span>) – Path to the STAR file containing particle information.</p></li>
+<li><p><strong>checkpoint_dir</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a></span>) – Directory where the trained model checkpoints are stored.</p></li>
+<li><p><strong>results_dir</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a></span>) – Directory where the inference results will be saved.</p></li>
+<li><p><strong>data_halfset</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Literal" title="(in Python v3.14)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Literal</span></code></a>[<code class="docutils literal notranslate"><span class="pre">'half1'</span></code>, <code class="docutils literal notranslate"><span class="pre">'half2'</span></code>, <code class="docutils literal notranslate"><span class="pre">'allParticles'</span></code>]</span>) – Specifies which half-set of the data to use (“half1”, “half2”, or “allParticles”).</p></li>
+<li><p><strong>model_halfset</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Literal" title="(in Python v3.14)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Literal</span></code></a>[<code class="docutils literal notranslate"><span class="pre">'half1'</span></code>, <code class="docutils literal notranslate"><span class="pre">'half2'</span></code>, <code class="docutils literal notranslate"><span class="pre">'allCombinations'</span></code>, <code class="docutils literal notranslate"><span class="pre">'matchingHalf'</span></code>]</span>) – Specifies which half-set of the model to use (“half1”, “half2”, “allCombinations”, or “matchingHalf”).</p></li>
+<li><p><strong>particles_dir</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.14)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]</span>) – Directory where the particle images are located. If None, paths in the STAR file are assumed to be absolute.</p></li>
+<li><p><strong>batch_size</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a></span>) – The number of particles to process in each batch.</p></li>
+<li><p><strong>num_dataworkers</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a></span>) – The number of worker processes to use for data loading.</p></li>
+<li><p><strong>use_cuda</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a></span>) – Whether to use a CUDA-enabled GPU for inference.</p></li>
+<li><p><strong>n_cpus_if_no_cuda</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a></span>) – The number of CPU cores to use if CUDA is not available.</p></li>
+<li><p><strong>compile_model</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a></span>) – Whether to compile the model using <cite>torch.compile</cite> for potential speed-up.</p></li>
+<li><p><strong>top_k_poses_nnet</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a></span>) – The number of top predictions to predict with the nn for each particle.</p></li>
+<li><p><strong>top_k_poses_localref</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a></span>) – The number of top predictions to return after local refinement.</p></li>
+<li><p><strong>grid_distance_degs</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code></a></span>) – The size of the local refinement grid in degrees. Grid will go from -grid_distance_degs to +grid_distance_degs</p></li>
+<li><p><strong>reference_map</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.14)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]</span>) – Path to the reference map for local refinement. If not provided, it will be loaded from the checkpoint.</p></li>
+<li><p><strong>reference_mask</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.14)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]</span>) – Path to the mask of the reference map. Used only for FSC calculation.</p></li>
+<li><p><strong>directional_zscore_thr</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.14)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code></a>]</span>) – The threshold for the directional Z-score to filter particles.</p></li>
+<li><p><strong>skip_localrefinement</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a></span>) – Whether to skip local refinement of the particle poses.</p></li>
+<li><p><strong>skip_reconstruction</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a></span>) – Whether to skip 3D reconstruction from the inferred poses.</p></li>
+<li><p><strong>subset_idxs</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.14)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a>]]</span>) – A list of indices to process a subset of particles.</p></li>
+<li><p><strong>n_first_particles</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.14)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a>]</span>) – The number of first particles to process. Cannot be used with <cite>subset_idxs</cite>.</p></li>
+<li><p><strong>show_debug_stats</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a></span>) – Whether to print debug statistics, such as rotation errors if ground truth in the starfile.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="cryoPARES.inference.inferencer.SingleInferencer.symmetry">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">symmetry</span></span><a class="headerlink" href="#cryoPARES.inference.inferencer.SingleInferencer.symmetry" title="Link to this definition"></a></dt>
+<dd><p>The symmetry of the model, loaded from the hyperparameters file.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="cryoPARES.inference.inferencer.SingleInferencer.run">
+<span class="sig-name descname"><span class="pre">run</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/cryoPARES/inference/inferencer.html#SingleInferencer.run"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#cryoPARES.inference.inferencer.SingleInferencer.run" title="Link to this definition"></a></dt>
+<dd><p>Runs the inference process. It iterates through the specified data and model half-sets,
+performing inference for each combination.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>A list of tuples, where each tuple contains the particle metadata and the reconstructed volume for each inference run.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="cryoPARES.inference.inferencer.SingleInferencer.clean_reconstructer_buffers">
+<span class="sig-name descname"><span class="pre">clean_reconstructer_buffers</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/cryoPARES/inference/inferencer.html#SingleInferencer.clean_reconstructer_buffers"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#cryoPARES.inference.inferencer.SingleInferencer.clean_reconstructer_buffers" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="cryoPARES.inference.inferencer.SingleInferencer.resolve_halfset_lists">
+<em class="property"><span class="k"><span class="pre">static</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">resolve_halfset_lists</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data_halfset</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model_halfset</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/cryoPARES/inference/inferencer.html#SingleInferencer.resolve_halfset_lists"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#cryoPARES.inference.inferencer.SingleInferencer.resolve_halfset_lists" title="Link to this definition"></a></dt>
+<dd><p>Return normalized lists of data and model-half policies for iteration.
+- data list is concrete halves: [“half1”], [“half2”], or [“half1”,”half2”].
+- model list is [“half1”], [“half2”], [None] (matchingHalf), [“half1”,”half2”] (allCombinations),</p>
+<blockquote>
+<div><p>or [“allParticles”] (only valid if checkpoint was trained with –NOT_split_halves).</p>
+</div></blockquote>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Tuple" title="(in Python v3.14)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Tuple</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Literal" title="(in Python v3.14)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Literal</span></code></a>[<code class="docutils literal notranslate"><span class="pre">'half1'</span></code>, <code class="docutils literal notranslate"><span class="pre">'half2'</span></code>]], <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.14)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Literal" title="(in Python v3.14)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Literal</span></code></a>[<code class="docutils literal notranslate"><span class="pre">'half1'</span></code>, <code class="docutils literal notranslate"><span class="pre">'half2'</span></code>, <code class="docutils literal notranslate"><span class="pre">'allParticles'</span></code>]]]]</span></p>
+</dd>
+<dt class="field-even">Parameters<span class="colon">:</span></dt>
+<dd class="field-even"><ul class="simple">
+<li><p><strong>data_halfset</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Literal" title="(in Python v3.14)"><em>Literal</em></a><em>[</em><em>'half1'</em><em>, </em><em>'half2'</em><em>, </em><em>'allParticles'</em><em>]</em>)</p></li>
+<li><p><strong>model_halfset</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Literal" title="(in Python v3.14)"><em>Literal</em></a><em>[</em><em>'half1'</em><em>, </em><em>'half2'</em><em>, </em><em>'allCombinations'</em><em>, </em><em>'matchingHalf'</em><em>, </em><em>'allParticles'</em><em>]</em>)</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<section id="singleinferencer-class">
+<h3>SingleInferencer Class<a class="headerlink" href="#singleinferencer-class" title="Link to this heading"></a></h3>
+<dl class="py class">
+<dt class="sig sig-object py" id="id0">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">cryoPARES.inference.inferencer.</span></span><span class="sig-name descname"><span class="pre">SingleInferencer</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">particles_star_fname</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">checkpoint_dir</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">results_dir</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data_halfset='allParticles'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model_halfset='matchingHalf'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">particles_dir=None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">batch_size=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">num_dataworkers=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_cuda=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_cpus_if_no_cuda=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">compile_model=False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">top_k_poses_nnet=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">top_k_poses_localref=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">grid_distance_degs=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">reference_map=None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">reference_mask=None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">directional_zscore_thr=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">skip_localrefinement=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">skip_reconstruction=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subset_idxs=None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_first_particles=None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">show_debug_stats=False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/cryoPARES/inference/inferencer.html#SingleInferencer"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#id0" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>particles_star_fname</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>)</p></li>
+<li><p><strong>checkpoint_dir</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>)</p></li>
+<li><p><strong>results_dir</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>)</p></li>
+<li><p><strong>data_halfset</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Literal" title="(in Python v3.14)"><em>Literal</em></a><em>[</em><em>'half1'</em><em>, </em><em>'half2'</em><em>, </em><em>'allParticles'</em><em>]</em>)</p></li>
+<li><p><strong>model_halfset</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Literal" title="(in Python v3.14)"><em>Literal</em></a><em>[</em><em>'half1'</em><em>, </em><em>'half2'</em><em>, </em><em>'allCombinations'</em><em>, </em><em>'matchingHalf'</em><em>]</em>)</p></li>
+<li><p><strong>particles_dir</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a><em> | </em><em>None</em>)</p></li>
+<li><p><strong>batch_size</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>)</p></li>
+<li><p><strong>num_dataworkers</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>)</p></li>
+<li><p><strong>use_cuda</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>)</p></li>
+<li><p><strong>n_cpus_if_no_cuda</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>)</p></li>
+<li><p><strong>compile_model</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>)</p></li>
+<li><p><strong>top_k_poses_nnet</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>)</p></li>
+<li><p><strong>top_k_poses_localref</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>)</p></li>
+<li><p><strong>grid_distance_degs</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a>)</p></li>
+<li><p><strong>reference_map</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a><em> | </em><em>None</em>)</p></li>
+<li><p><strong>reference_mask</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a><em> | </em><em>None</em>)</p></li>
+<li><p><strong>directional_zscore_thr</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em> | </em><em>None</em>)</p></li>
+<li><p><strong>skip_localrefinement</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>)</p></li>
+<li><p><strong>skip_reconstruction</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>)</p></li>
+<li><p><strong>subset_idxs</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.14)"><em>List</em></a><em>[</em><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a><em>] </em><em>| </em><em>None</em>)</p></li>
+<li><p><strong>n_first_particles</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a><em> | </em><em>None</em>)</p></li>
+<li><p><strong>show_debug_stats</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>)</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="id1">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">particles_star_fname</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">checkpoint_dir</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">results_dir</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data_halfset='allParticles'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model_halfset='matchingHalf'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">particles_dir=None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">batch_size=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">num_dataworkers=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_cuda=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_cpus_if_no_cuda=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">compile_model=False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">top_k_poses_nnet=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">top_k_poses_localref=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">grid_distance_degs=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">reference_map=None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">reference_mask=None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">directional_zscore_thr=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">skip_localrefinement=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">skip_reconstruction=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subset_idxs=None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_first_particles=None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">show_debug_stats=False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/cryoPARES/inference/inferencer.html#SingleInferencer.__init__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#id1" title="Link to this definition"></a></dt>
+<dd><p>Initializes the SingleInferencer for running inference on a set of particles.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>particles_star_fname</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a></span>) – Path to the STAR file containing particle information.</p></li>
+<li><p><strong>checkpoint_dir</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a></span>) – Directory where the trained model checkpoints are stored.</p></li>
+<li><p><strong>results_dir</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a></span>) – Directory where the inference results will be saved.</p></li>
+<li><p><strong>data_halfset</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Literal" title="(in Python v3.14)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Literal</span></code></a>[<code class="docutils literal notranslate"><span class="pre">'half1'</span></code>, <code class="docutils literal notranslate"><span class="pre">'half2'</span></code>, <code class="docutils literal notranslate"><span class="pre">'allParticles'</span></code>]</span>) – Specifies which half-set of the data to use (“half1”, “half2”, or “allParticles”).</p></li>
+<li><p><strong>model_halfset</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Literal" title="(in Python v3.14)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Literal</span></code></a>[<code class="docutils literal notranslate"><span class="pre">'half1'</span></code>, <code class="docutils literal notranslate"><span class="pre">'half2'</span></code>, <code class="docutils literal notranslate"><span class="pre">'allCombinations'</span></code>, <code class="docutils literal notranslate"><span class="pre">'matchingHalf'</span></code>]</span>) – Specifies which half-set of the model to use (“half1”, “half2”, “allCombinations”, or “matchingHalf”).</p></li>
+<li><p><strong>particles_dir</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.14)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]</span>) – Directory where the particle images are located. If None, paths in the STAR file are assumed to be absolute.</p></li>
+<li><p><strong>batch_size</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a></span>) – The number of particles to process in each batch.</p></li>
+<li><p><strong>num_dataworkers</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a></span>) – The number of worker processes to use for data loading.</p></li>
+<li><p><strong>use_cuda</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a></span>) – Whether to use a CUDA-enabled GPU for inference.</p></li>
+<li><p><strong>n_cpus_if_no_cuda</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a></span>) – The number of CPU cores to use if CUDA is not available.</p></li>
+<li><p><strong>compile_model</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a></span>) – Whether to compile the model using <cite>torch.compile</cite> for potential speed-up.</p></li>
+<li><p><strong>top_k_poses_nnet</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a></span>) – The number of top predictions to predict with the nn for each particle.</p></li>
+<li><p><strong>top_k_poses_localref</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a></span>) – The number of top predictions to return after local refinement.</p></li>
+<li><p><strong>grid_distance_degs</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code></a></span>) – The size of the local refinement grid in degrees. Grid will go from -grid_distance_degs to +grid_distance_degs</p></li>
+<li><p><strong>reference_map</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.14)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]</span>) – Path to the reference map for local refinement. If not provided, it will be loaded from the checkpoint.</p></li>
+<li><p><strong>reference_mask</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.14)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]</span>) – Path to the mask of the reference map. Used only for FSC calculation.</p></li>
+<li><p><strong>directional_zscore_thr</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.14)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code></a>]</span>) – The threshold for the directional Z-score to filter particles.</p></li>
+<li><p><strong>skip_localrefinement</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a></span>) – Whether to skip local refinement of the particle poses.</p></li>
+<li><p><strong>skip_reconstruction</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a></span>) – Whether to skip 3D reconstruction from the inferred poses.</p></li>
+<li><p><strong>subset_idxs</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.14)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a>]]</span>) – A list of indices to process a subset of particles.</p></li>
+<li><p><strong>n_first_particles</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.14)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a>]</span>) – The number of first particles to process. Cannot be used with <cite>subset_idxs</cite>.</p></li>
+<li><p><strong>show_debug_stats</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a></span>) – Whether to print debug statistics, such as rotation errors if ground truth in the starfile.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="id2">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">symmetry</span></span><a class="headerlink" href="#id2" title="Link to this definition"></a></dt>
+<dd><p>The symmetry of the model, loaded from the hyperparameters file.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="id3">
+<span class="sig-name descname"><span class="pre">run</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/cryoPARES/inference/inferencer.html#SingleInferencer.run"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#id3" title="Link to this definition"></a></dt>
+<dd><p>Runs the inference process. It iterates through the specified data and model half-sets,
+performing inference for each combination.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>A list of tuples, where each tuple contains the particle metadata and the reconstructed volume for each inference run.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="id4">
+<span class="sig-name descname"><span class="pre">clean_reconstructer_buffers</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/cryoPARES/inference/inferencer.html#SingleInferencer.clean_reconstructer_buffers"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#id4" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="id5">
+<em class="property"><span class="k"><span class="pre">static</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">resolve_halfset_lists</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data_halfset</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model_halfset</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/cryoPARES/inference/inferencer.html#SingleInferencer.resolve_halfset_lists"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#id5" title="Link to this definition"></a></dt>
+<dd><p>Return normalized lists of data and model-half policies for iteration.
+- data list is concrete halves: [“half1”], [“half2”], or [“half1”,”half2”].
+- model list is [“half1”], [“half2”], [None] (matchingHalf), [“half1”,”half2”] (allCombinations),</p>
+<blockquote>
+<div><p>or [“allParticles”] (only valid if checkpoint was trained with –NOT_split_halves).</p>
+</div></blockquote>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Tuple" title="(in Python v3.14)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Tuple</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Literal" title="(in Python v3.14)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Literal</span></code></a>[<code class="docutils literal notranslate"><span class="pre">'half1'</span></code>, <code class="docutils literal notranslate"><span class="pre">'half2'</span></code>]], <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.14)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Literal" title="(in Python v3.14)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Literal</span></code></a>[<code class="docutils literal notranslate"><span class="pre">'half1'</span></code>, <code class="docutils literal notranslate"><span class="pre">'half2'</span></code>, <code class="docutils literal notranslate"><span class="pre">'allParticles'</span></code>]]]]</span></p>
+</dd>
+<dt class="field-even">Parameters<span class="colon">:</span></dt>
+<dd class="field-even"><ul class="simple">
+<li><p><strong>data_halfset</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Literal" title="(in Python v3.14)"><em>Literal</em></a><em>[</em><em>'half1'</em><em>, </em><em>'half2'</em><em>, </em><em>'allParticles'</em><em>]</em>)</p></li>
+<li><p><strong>model_halfset</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Literal" title="(in Python v3.14)"><em>Literal</em></a><em>[</em><em>'half1'</em><em>, </em><em>'half2'</em><em>, </em><em>'allCombinations'</em><em>, </em><em>'matchingHalf'</em><em>, </em><em>'allParticles'</em><em>]</em>)</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+</section>
+<section id="module-cryoPARES.inference.infer">
+<span id="distributed-inference"></span><h2>Distributed Inference<a class="headerlink" href="#module-cryoPARES.inference.infer" title="Link to this heading"></a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="cryoPARES.inference.infer.distributed_inference">
+<span class="sig-prename descclassname"><span class="pre">cryoPARES.inference.infer.</span></span><span class="sig-name descname"><span class="pre">distributed_inference</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">particles_star_fname</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">checkpoint_dir</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">results_dir</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data_halfset='allParticles'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model_halfset='matchingHalf'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">particles_dir=None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">batch_size=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_jobs=None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">num_dataworkers=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_cuda=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_cpus_if_no_cuda=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">compile_model=False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">top_k_poses_nnet=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">top_k_poses_localref=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">grid_distance_degs=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">reference_map=None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">reference_mask=None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">directional_zscore_thr=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">skip_localrefinement=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">skip_reconstruction=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subset_idxs=None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_first_particles=None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">check_interval_secs=2.0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/cryoPARES/inference/infer.html#distributed_inference"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#cryoPARES.inference.infer.distributed_inference" title="Link to this definition"></a></dt>
+<dd><p>Distributed inference across particles and devices, mirroring the <strong>halfset selection logic</strong>
+used by <code class="xref py py-class docutils literal notranslate"><span class="pre">cryoPARES.inference.inference.SingleInferencer</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>particles_star_fname</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>) – Path to input RELION particles .star file</p></li>
+<li><p><strong>checkpoint_dir</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>) – Path to training directory (or .zip file) containing half-set models with checkpoints and hyperparameters. By default they are called version_0, version_1, etc.</p></li>
+<li><p><strong>results_dir</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>) – Output directory for inference results including predicted poses and optional reconstructions</p></li>
+<li><p><strong>data_halfset</strong> (<em>{&quot;half1&quot;</em><em>, </em><em>&quot;half2&quot;</em><em>, </em><em>&quot;allParticles&quot;}</em><em>, </em><em>default &quot;allParticles&quot;</em>) – Which particle half-set(s) to process: “half1”, “half2”, or “allParticles”</p></li>
+<li><p><strong>model_halfset</strong> (<em>{&quot;half1&quot;</em><em>, </em><em>&quot;half2&quot;</em><em>, </em><em>&quot;allCombinations&quot;</em><em>, </em><em>&quot;matchingHalf&quot;}</em><em>, </em><em>default &quot;matchingHalf&quot;</em>) – Model half-set selection policy: “half1”, “half2”, “allCombinations”, or “matchingHalf” (uses matching data/model pairs)</p></li>
+<li><p><strong>particles_dir</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a><em>, </em><em>optional</em>) – Root directory for particle image paths. If provided, overrides paths in the .star file</p></li>
+<li><p><strong>batch_size</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>) – Number of particles per batch for inference</p></li>
+<li><p><strong>n_jobs</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a><em>, </em><em>optional</em>) – Number of worker processes. Defaults to number of GPUs if CUDA enabled, otherwise 1</p></li>
+<li><p><strong>num_dataworkers</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>) – Number of parallel data loading workers per GPU. Each worker is a separate CPU process. Set to 0 to load data in the main thread (useful only for debugging). Try not to oversubscribe by asking more workers than CPUs</p></li>
+<li><p><strong>use_cuda</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>) – Enable GPU acceleration for inference. If False, runs on CPU only</p></li>
+<li><p><strong>n_cpus_if_no_cuda</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>) – Maximum CPU threads per worker when CUDA is disabled</p></li>
+<li><p><strong>compile_model</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>) – Compile model with torch.compile for faster inference (experimental, requires PyTorch 2.0+)</p></li>
+<li><p><strong>top_k_poses_nnet</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>) – Number of top pose predictions to retrieve from neural network before local refinement</p></li>
+<li><p><strong>top_k_poses_localref</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>) – Number of best matching poses to keep after local refinement</p></li>
+<li><p><strong>grid_distance_degs</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a>) – Maximum angular distance in degrees for local refinement search. Grid ranges from -grid_distance_degs to +grid_distance_degs around predicted pose</p></li>
+<li><p><strong>reference_map</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a><em>, </em><em>optional</em>) – Path to reference map (.mrc) for FSC computation during validation</p></li>
+<li><p><strong>reference_mask</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a><em>, </em><em>optional</em>) – Path to reference mask (.mrc) for masked FSC calculation</p></li>
+<li><p><strong>directional_zscore_thr</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>, </em><em>optional</em>) – Confidence z-score threshold for filtering particles. Particles with scores below this are discarded as low-confidence</p></li>
+<li><p><strong>skip_localrefinement</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>) – Skip local pose refinement step and use only neural network predictions</p></li>
+<li><p><strong>skip_reconstruction</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>) – Skip 3D reconstruction step and output only predicted poses</p></li>
+<li><p><strong>subset_idxs</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><em>list</em></a><em>[</em><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a><em>]</em><em>, </em><em>optional</em>) – List of particle indices to process (for debugging or partial processing)</p></li>
+<li><p><strong>n_first_particles</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a><em>, </em><em>optional</em>) – Process only the first N particles from dataset (debug feature)</p></li>
+<li><p><strong>check_interval_secs</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a>) – Polling interval in seconds for parent loop in distributed processing</p></li>
+</ul>
+</dd>
+</dl>
+<p class="rubric">Notes</p>
+<ul class="simple">
+<li><p>For <strong>n_jobs == 1</strong>, this function delegates completely to <cite>SingleInferencer</cite>, which internally
+handles <cite>data_halfset</cite> and <cite>model_halfset</cite> (including “matchingHalf” and “allCombinations”).</p></li>
+<li><p>For <strong>n_jobs &gt; 1</strong>, particles are split by half-set and distributed across workers; model half
+selection follows the resolved policy per half to avoid cross-half coupling.</p></li>
+</ul>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="cryoPARES.inference.infer.worker">
+<span class="sig-prename descclassname"><span class="pre">cryoPARES.inference.infer.</span></span><span class="sig-name descname"><span class="pre">worker</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">worker_id</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_q</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/cryoPARES/inference/infer.html#worker"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#cryoPARES.inference.infer.worker" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="cryoPARES.inference.infer.main">
+<span class="sig-prename descclassname"><span class="pre">cryoPARES.inference.infer.</span></span><span class="sig-name descname"><span class="pre">main</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/cryoPARES/inference/infer.html#main"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#cryoPARES.inference.infer.main" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</section>
+<section id="daemon-mode">
+<h2>Daemon Mode<a class="headerlink" href="#daemon-mode" title="Link to this heading"></a></h2>
+<section id="module-cryoPARES.inference.daemon.queueManager">
+<span id="queue-manager"></span><h3>Queue Manager<a class="headerlink" href="#module-cryoPARES.inference.daemon.queueManager" title="Link to this heading"></a></h3>
+<p>manager_server.py - Creates and manages the shared queue server.
+This script must be run first to establish the Manager server.</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="cryoPARES.inference.daemon.queueManager.QueueManager">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">cryoPARES.inference.daemon.queueManager.</span></span><span class="sig-name descname"><span class="pre">QueueManager</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">address</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">authkey</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">serializer</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'pickle'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ctx</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">shutdown_timeout</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1.0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/cryoPARES/inference/daemon/queueManager.html#QueueManager"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#cryoPARES.inference.daemon.queueManager.QueueManager" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/multiprocessing.html#multiprocessing.managers.BaseManager" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">BaseManager</span></code></a></p>
+<p>Custom Manager class to handle our shared queue.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="cryoPARES.inference.daemon.queueManager.create_shared_queue">
+<span class="sig-prename descclassname"><span class="pre">cryoPARES.inference.daemon.queueManager.</span></span><span class="sig-name descname"><span class="pre">create_shared_queue</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">maxsize</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/cryoPARES/inference/daemon/queueManager.html#create_shared_queue"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#cryoPARES.inference.daemon.queueManager.create_shared_queue" title="Link to this definition"></a></dt>
+<dd><p>Factory function to create the shared queue.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="cryoPARES.inference.daemon.queueManager.connect_to_queue">
+<span class="sig-prename descclassname"><span class="pre">cryoPARES.inference.daemon.queueManager.</span></span><span class="sig-name descname"><span class="pre">connect_to_queue</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ip</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'localhost'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">port</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">50000</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">authkey</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'shared_queue_key'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/cryoPARES/inference/daemon/queueManager.html#connect_to_queue"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#cryoPARES.inference.daemon.queueManager.connect_to_queue" title="Link to this definition"></a></dt>
+<dd><p>Connect to the shared queue managed by the server.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="cryoPARES.inference.daemon.queueManager.queue_manager_server">
+<span class="sig-prename descclassname"><span class="pre">cryoPARES.inference.daemon.queueManager.</span></span><span class="sig-name descname"><span class="pre">queue_manager_server</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ip</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">port</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">authkey</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">queue_maxsize</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/cryoPARES/inference/daemon/queueManager.html#queue_manager_server"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#cryoPARES.inference.daemon.queueManager.queue_manager_server" title="Link to this definition"></a></dt>
+<dd><p>Context manager for the QueueManager server.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="cryoPARES.inference.daemon.queueManager.signal_handler">
+<span class="sig-prename descclassname"><span class="pre">cryoPARES.inference.daemon.queueManager.</span></span><span class="sig-name descname"><span class="pre">signal_handler</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">signum</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">frame</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/cryoPARES/inference/daemon/queueManager.html#signal_handler"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#cryoPARES.inference.daemon.queueManager.signal_handler" title="Link to this definition"></a></dt>
+<dd><p>Handle Ctrl+C or SIGTERM gracefully.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="cryoPARES.inference.daemon.queueManager.queue_connection">
+<span class="sig-prename descclassname"><span class="pre">cryoPARES.inference.daemon.queueManager.</span></span><span class="sig-name descname"><span class="pre">queue_connection</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ip</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'localhost'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">port</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">50000</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">authkey</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'shared_queue_key'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/cryoPARES/inference/daemon/queueManager.html#queue_connection"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#cryoPARES.inference.daemon.queueManager.queue_connection" title="Link to this definition"></a></dt>
+<dd><p>Context manager for connecting to the shared queue.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="cryoPARES.inference.daemon.queueManager.get_all_available_items">
+<span class="sig-prename descclassname"><span class="pre">cryoPARES.inference.daemon.queueManager.</span></span><span class="sig-name descname"><span class="pre">get_all_available_items</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">q</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/cryoPARES/inference/daemon/queueManager.html#get_all_available_items"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#cryoPARES.inference.daemon.queueManager.get_all_available_items" title="Link to this definition"></a></dt>
+<dd><p>Gets all items from a queue.
+If the queue is empty, it waits for the first item.
+Then, it retrieves all other items without blocking.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>q</strong> (<em>Queue</em>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="cryoPARES.inference.daemon.queueManager.main">
+<span class="sig-prename descclassname"><span class="pre">cryoPARES.inference.daemon.queueManager.</span></span><span class="sig-name descname"><span class="pre">main</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ip</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'localhost'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">port</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">50000</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">authkey</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'shared_queue_key'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">queue_maxsize</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/cryoPARES/inference/daemon/queueManager.html#main"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#cryoPARES.inference.daemon.queueManager.main" title="Link to this definition"></a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>ip</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a></span>)</p></li>
+<li><p><strong>port</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a></span>)</p></li>
+<li><p><strong>authkey</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a></span>) – a password to use the queue</p></li>
+<li><p><strong>queue_maxsize</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.14)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a>]</span>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p></p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+<section id="module-cryoPARES.inference.daemon.spoolingFiller">
+<span id="spooling-filler"></span><h3>Spooling Filler<a class="headerlink" href="#module-cryoPARES.inference.daemon.spoolingFiller" title="Link to this heading"></a></h3>
+<p>spooler.py - Monitors a directory for new .star files and adds them to the shared queue for DaemonInferencer.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="cryoPARES.inference.daemon.spoolingFiller.monitor_directory">
+<span class="sig-prename descclassname"><span class="pre">cryoPARES.inference.daemon.spoolingFiller.</span></span><span class="sig-name descname"><span class="pre">monitor_directory</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">directory</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pattern</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'*.star'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">interval</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">10</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/cryoPARES/inference/daemon/spoolingFiller.html#monitor_directory"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#cryoPARES.inference.daemon.spoolingFiller.monitor_directory" title="Link to this definition"></a></dt>
+<dd><p>Monitor a directory for new files matching the pattern and yield their paths.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>directory</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a></span>) – Directory to monitor</p></li>
+<li><p><strong>pattern</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a></span>) – File pattern to match (default: *.star)</p></li>
+<li><p><strong>interval</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a></span>) – Time interval (seconds) between directory checks</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="cryoPARES.inference.daemon.spoolingFiller.main">
+<span class="sig-prename descclassname"><span class="pre">cryoPARES.inference.daemon.spoolingFiller.</span></span><span class="sig-name descname"><span class="pre">main</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">directory</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ip</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'localhost'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">port</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">50000</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">authkey</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'shared_queue_key'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pattern</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'*.star'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">check_interval</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">10</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/cryoPARES/inference/daemon/spoolingFiller.html#main"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#cryoPARES.inference.daemon.spoolingFiller.main" title="Link to this definition"></a></dt>
+<dd><p>Main function to monitor a directory and feed new .star files to the queue.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>directory</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a></span>) – Directory to monitor for .star files</p></li>
+<li><p><strong>ip</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a></span>) – Queue manager IP address</p></li>
+<li><p><strong>port</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a></span>) – Queue manager port</p></li>
+<li><p><strong>authkey</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a></span>) – Queue manager authentication key</p></li>
+<li><p><strong>pattern</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a></span>) – File pattern to match</p></li>
+<li><p><strong>check_interval</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a></span>) – Seconds between directory checks</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+<section id="module-cryoPARES.inference.daemon.daemonInference">
+<span id="daemon-inference"></span><h3>Daemon Inference<a class="headerlink" href="#module-cryoPARES.inference.daemon.daemonInference" title="Link to this heading"></a></h3>
+<dl class="py class">
+<dt class="sig sig-object py" id="cryoPARES.inference.daemon.daemonInference.DaemonInferencer">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">cryoPARES.inference.daemon.daemonInference.</span></span><span class="sig-name descname"><span class="pre">DaemonInferencer</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">checkpoint_dir</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">results_dir</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">net_address='localhost'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">net_port=50000</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">net_authkey='shared_queue_key'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model_halfset='half1'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">particles_dir=None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">batch_size=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">num_dataworkers=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_cuda=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_cpus_if_no_cuda=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">compile_model=False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">top_k_poses_nnet=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">top_k_poses_localref=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">reference_map=None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">reference_mask=None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">directional_zscore_thr=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">skip_localrefinement=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">skip_reconstruction=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">show_debug_stats=False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">secs_between_partial_results_written=5</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">resubmit_poison_pill=True</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/cryoPARES/inference/daemon/daemonInference.html#DaemonInferencer"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#cryoPARES.inference.daemon.daemonInference.DaemonInferencer" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#id0" title="cryoPARES.inference.inferencer.SingleInferencer"><code class="xref py py-class docutils literal notranslate"><span class="pre">SingleInferencer</span></code></a></p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>checkpoint_dir</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>)</p></li>
+<li><p><strong>results_dir</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>)</p></li>
+<li><p><strong>net_address</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>)</p></li>
+<li><p><strong>net_port</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>)</p></li>
+<li><p><strong>net_authkey</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a><em> | </em><em>None</em>)</p></li>
+<li><p><strong>model_halfset</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Literal" title="(in Python v3.14)"><em>Literal</em></a><em>[</em><em>'half1'</em><em>, </em><em>'half2'</em><em>]</em>)</p></li>
+<li><p><strong>particles_dir</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a><em> | </em><em>None</em>)</p></li>
+<li><p><strong>batch_size</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>)</p></li>
+<li><p><strong>num_dataworkers</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>)</p></li>
+<li><p><strong>use_cuda</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>)</p></li>
+<li><p><strong>n_cpus_if_no_cuda</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>)</p></li>
+<li><p><strong>compile_model</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>)</p></li>
+<li><p><strong>top_k_poses_nnet</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>)</p></li>
+<li><p><strong>top_k_poses_localref</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>)</p></li>
+<li><p><strong>reference_map</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a><em> | </em><em>None</em>)</p></li>
+<li><p><strong>reference_mask</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a><em> | </em><em>None</em>)</p></li>
+<li><p><strong>directional_zscore_thr</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em> | </em><em>None</em>)</p></li>
+<li><p><strong>skip_localrefinement</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>)</p></li>
+<li><p><strong>skip_reconstruction</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>)</p></li>
+<li><p><strong>show_debug_stats</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>)</p></li>
+<li><p><strong>secs_between_partial_results_written</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>)</p></li>
+<li><p><strong>resubmit_poison_pill</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>)</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="cryoPARES.inference.daemon.daemonInference.DaemonInferencer.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">checkpoint_dir</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">results_dir</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">net_address='localhost'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">net_port=50000</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">net_authkey='shared_queue_key'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model_halfset='half1'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">particles_dir=None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">batch_size=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">num_dataworkers=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_cuda=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_cpus_if_no_cuda=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">compile_model=False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">top_k_poses_nnet=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">top_k_poses_localref=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">reference_map=None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">reference_mask=None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">directional_zscore_thr=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">skip_localrefinement=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">skip_reconstruction=&lt;autoCLI_config.config_param.CONFIG_PARAM</span> <span class="pre">object&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">show_debug_stats=False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">secs_between_partial_results_written=5</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">resubmit_poison_pill=True</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/cryoPARES/inference/daemon/daemonInference.html#DaemonInferencer.__init__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#cryoPARES.inference.daemon.daemonInference.DaemonInferencer.__init__" title="Link to this definition"></a></dt>
+<dd><p>Initializes the DaemonInferencer for running inference on a set of particles from a queue.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>checkpoint_dir</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a></span>) – Directory where the trained model checkpoints are stored.</p></li>
+<li><p><strong>results_dir</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a></span>) – Directory where the inference results will be saved.</p></li>
+<li><p><strong>net_address</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a></span>) – Network address of the queue manager.</p></li>
+<li><p><strong>net_port</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a></span>) – Network port of the queue manager.</p></li>
+<li><p><strong>net_authkey</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.14)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]</span>) – Network authentication key for the queue manager.</p></li>
+<li><p><strong>model_halfset</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Literal" title="(in Python v3.14)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Literal</span></code></a>[<code class="docutils literal notranslate"><span class="pre">'half1'</span></code>, <code class="docutils literal notranslate"><span class="pre">'half2'</span></code>]</span>) – Specifies which half-set of the model to use (“half1”, “half2”).</p></li>
+<li><p><strong>particles_dir</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.14)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]</span>) – Directory where the particle images are located. If None, paths in the STAR file are assumed to be absolute.</p></li>
+<li><p><strong>batch_size</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a></span>) – The number of particles to process in each batch.</p></li>
+<li><p><strong>num_dataworkers</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a></span>) – The number of worker processes to use for data loading.</p></li>
+<li><p><strong>use_cuda</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a></span>) – Whether to use a CUDA-enabled GPU for inference.</p></li>
+<li><p><strong>n_cpus_if_no_cuda</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a></span>) – The number of CPU cores to use if CUDA is not available.</p></li>
+<li><p><strong>compile_model</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a></span>) – Whether to compile the model using <cite>torch.compile</cite> for potential speed-up.</p></li>
+<li><p><strong>top_k_poses_nnet</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a></span>) – The number of top predictions to predict with the nn for each particle.</p></li>
+<li><p><strong>top_k_poses_localref</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a></span>) – The number of top predictions to return after local refinement.</p></li>
+<li><p><strong>reference_map</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.14)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]</span>) – Path to the reference map for local refinement. If not provided, it will be loaded from the checkpoint.</p></li>
+<li><p><strong>reference_mask</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.14)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]</span>) – Path to the mask of the reference map. Used only for FSC calculation.</p></li>
+<li><p><strong>directional_zscore_thr</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.14)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code></a>]</span>) – The threshold for the directional Z-score to filter particles.</p></li>
+<li><p><strong>skip_localrefinement</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a></span>) – Whether to skip local refinement of the particle poses.</p></li>
+<li><p><strong>skip_reconstruction</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a></span>) – Whether to skip 3D reconstruction from the inferred poses.</p></li>
+<li><p><strong>show_debug_stats</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a></span>) – Whether to print debug statistics, such as rotation errors if ground truth in the starfile.</p></li>
+<li><p><strong>secs_between_partial_results_written</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a></span>) – Partial results are saved from RAM to disk every few seconds</p></li>
+<li><p><strong>resubmit_poison_pill</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a></span>) – If True, posion pills are re-submitted, to ensure that all workers will die</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="cryoPARES.inference.daemon.daemonInference.DaemonInferencer.run">
+<span class="sig-name descname"><span class="pre">run</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/cryoPARES/inference/daemon/daemonInference.html#DaemonInferencer.run"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#cryoPARES.inference.daemon.daemonInference.DaemonInferencer.run" title="Link to this definition"></a></dt>
+<dd><p>Runs the inference process. It iterates through the specified data and model half-sets,
+performing inference for each combination.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>A list of tuples, where each tuple contains the particle metadata and the reconstructed volume for each inference run.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="cryoPARES.inference.daemon.daemonInference.DaemonInferencer.resolve_data">
+<span class="sig-name descname"><span class="pre">resolve_data</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">starfname</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/cryoPARES/inference/daemon/daemonInference.html#DaemonInferencer.resolve_data"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#cryoPARES.inference.daemon.daemonInference.DaemonInferencer.resolve_data" title="Link to this definition"></a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>starfname</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a><em> | </em><em>None</em>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="training.html" class="btn btn-neutral float-left" title="Training API" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="projection_matching.html" class="btn btn-neutral float-right" title="Projection Matching API" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Ruben Sanchez-Garcia.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

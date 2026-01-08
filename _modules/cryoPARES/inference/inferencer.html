@@ -1,0 +1,1121 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>cryoPARES.inference.inferencer &mdash; CryoPARES 0.1.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=01f34227"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            CryoPARES
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../training_guide.html">Training Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../training_guide.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../training_guide.html#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../training_guide.html#quick-start">Quick Start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../training_guide.html#training-parameters">Training Parameters</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#essential-parameters">Essential Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#data-configuration-parameters">Data Configuration Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#optimizer-configuration">Optimizer Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#model-architecture-parameters">Model Architecture Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#data-augmentation-parameters">Data Augmentation Parameters</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../training_guide.html#monitoring-training-with-tensorboard">Monitoring Training with TensorBoard</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#launching-tensorboard">Launching TensorBoard</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#key-metrics-to-monitor">Key Metrics to Monitor</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../training_guide.html#training-loss-loss">1. Training Loss (<code class="docutils literal notranslate"><span class="pre">loss</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../training_guide.html#validation-loss-val-loss">2. Validation Loss (<code class="docutils literal notranslate"><span class="pre">val_loss</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../training_guide.html#angular-error-geo-degs-val-geo-degs">3. Angular Error (<code class="docutils literal notranslate"><span class="pre">geo_degs</span></code>, <code class="docutils literal notranslate"><span class="pre">val_geo_degs</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../training_guide.html#median-angular-error-val-median-geo-degs">4. Median Angular Error (<code class="docutils literal notranslate"><span class="pre">val_median_geo_degs</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../training_guide.html#learning-rate-lr">5. Learning Rate (<code class="docutils literal notranslate"><span class="pre">lr</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../training_guide.html#visualization-rotation-matrices">6. Visualization: Rotation Matrices</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#example-tensorboard-monitoring-session">Example TensorBoard Monitoring Session</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../training_guide.html#overfitting-and-underfitting">Overfitting and Underfitting</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#what-is-overfitting">What is Overfitting?</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#what-is-underfitting">What is Underfitting?</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#the-sweet-spot">The Sweet Spot</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../training_guide.html#data-preprocessing">Data Preprocessing</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#image-size-and-sampling-rate">Image Size and Sampling Rate</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#masking">Masking</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#ctf-correction">CTF Correction</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../training_guide.html#advanced-training-options">Advanced Training Options</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#continue-training">Continue Training</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#fine-tuning">Fine-tuning</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#half-set-training">Half-Set Training</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#simulated-pre-training">Simulated Pre-training</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#model-compilation">Model Compilation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#debugging-overfitting-on-small-batches">Debugging: Overfitting on Small Batches</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../training_guide.html#troubleshooting-training-issues">Troubleshooting Training Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#training-is-very-slow">Training is very slow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#out-of-memory-errors">Out of memory errors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#too-many-open-files-error">“Too many open files” error</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#loss-is-nan">Loss is NaN</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#model-not-improving">Model not improving</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#validation-loss-jumps-around">Validation loss jumps around</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../training_guide.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../configuration_guide.html">Configuration Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../configuration_guide.html#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../configuration_guide.html#configuration-system-overview">Configuration System Overview</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../configuration_guide.html#configuration-sources-in-order-of-precedence">Configuration Sources (in order of precedence)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../configuration_guide.html#using-config-overrides">Using Config Overrides</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../configuration_guide.html#using-yaml-config-files">Using YAML Config Files</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../configuration_guide.html#viewing-available-options">Viewing Available Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../configuration_guide.html#configuration-hierarchy">Configuration Hierarchy</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../configuration_guide.html#reading-configuration-files">Reading Configuration Files</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../configuration_guide.html#configuration-file-locations">Configuration File Locations</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../configuration_guide.html#how-to-read-configuration-files">How to Read Configuration Files</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../configuration_guide.html#example-finding-training-parameters">Example: Finding Training Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../configuration_guide.html#example-finding-nested-parameters">Example: Finding Nested Parameters</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../configuration_guide.html#quick-parameter-reference">Quick Parameter Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../configuration_guide.html#saving-and-loading-configurations">Saving and Loading Configurations</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../configuration_guide.html#exporting-current-configuration">Exporting Current Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../configuration_guide.html#reusing-a-configuration">Reusing a Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../configuration_guide.html#overriding-loaded-config">Overriding Loaded Config</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../configuration_guide.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../cli.html">Command-Line Interface</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../cli.html#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../cli.html#cryopares-train"><code class="docutils literal notranslate"><span class="pre">cryopares_train</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#usage">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#parameters">Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#configuration-overrides">Configuration Overrides</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#view-all-config-options">View All Config Options</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#examples">Examples</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#important-notes">Important Notes</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../cli.html#cryopares-infer"><code class="docutils literal notranslate"><span class="pre">cryopares_infer</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#id1">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#id2">Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#id3">Configuration Overrides</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#id4">Examples</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#output-files">Output Files</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#id5">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../cli.html#cryopares-projmatching"><code class="docutils literal notranslate"><span class="pre">cryopares_projmatching</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#id6">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#id7">Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#example">Example</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../cli.html#cryopares-reconstruct"><code class="docutils literal notranslate"><span class="pre">cryopares_reconstruct</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#id8">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#id9">Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#id10">Example</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../cli.html#compactify-checkpoint"><code class="docutils literal notranslate"><span class="pre">compactify_checkpoint</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#id11">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#required-arguments">Required Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#optional-arguments">Optional Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#id12">Examples</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#what-s-included">What’s Included</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#size-reduction">Size Reduction</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#using-compactified-checkpoints">Using Compactified Checkpoints</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../cli.html#utility-scripts">Utility Scripts</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#gmm-histogram-analysis">GMM Histogram Analysis</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#fsc-computation">FSC Computation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#pose-comparison">Pose Comparison</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#learning-curve-visualization">Learning Curve Visualization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#star-file-histograms">STAR File Histograms</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../cli.html#id13">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../troubleshooting.html">Troubleshooting Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../troubleshooting.html#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../troubleshooting.html#installation-issues">Installation Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#pip-install-fails-with-dependency-conflicts">pip install fails with dependency conflicts</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#importerror-no-module-named-cryopares">ImportError: No module named ‘cryoPARES’</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#cuda-version-mismatch">CUDA version mismatch</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../troubleshooting.html#configuration-issues">Configuration Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#type-mismatch-errors-when-using-config">Type mismatch errors when using –config</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../troubleshooting.html#file-system-issues">File System Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#too-many-open-files-error">“Too many open files” error</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#permission-denied-when-writing-outputs">Permission denied when writing outputs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#particle-files-not-found">Particle files not found</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../troubleshooting.html#memory-issues">Memory Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#out-of-memory-oom-during-training">Out of memory (OOM) during training</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#out-of-memory-during-inference">Out of memory during inference</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#ram-exhausted-when-loading-data">RAM exhausted when loading data</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../troubleshooting.html#training-issues">Training Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#loss-becomes-nan">Loss becomes NaN</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#training-doesn-t-improve">Training doesn’t improve</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#validation-loss-higher-than-training-loss">Validation loss higher than training loss</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#training-crashes-with-killed">Training crashes with “Killed”</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#checkpoints-not-saving">Checkpoints not saving</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../troubleshooting.html#inference-issues">Inference Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#predicted-poses-are-random">Predicted poses are random</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#reconstruction-is-blurry">Reconstruction is blurry</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#no-particles-passed-confidence-threshold">“No particles passed confidence threshold”</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#inference-slower-than-expected">Inference slower than expected</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../troubleshooting.html#data-issues">Data Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#ctf-parameters-missing">CTF parameters missing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#orientation-columns-missing">Orientation columns missing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#particles-are-poorly-centered">Particles are poorly centered</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#different-sampling-rate-in-data-vs-reference">Different sampling rate in data vs. reference</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../troubleshooting.html#performance-issues">Performance Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#training-is-very-slow">Training is very slow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#inference-is-very-slow">Inference is very slow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#data-loading-is-bottleneck">Data loading is bottleneck</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../troubleshooting.html#cuda-gpu-issues">CUDA/GPU Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#cuda-out-of-memory-but-gpu-seems-empty">“CUDA out of memory” but GPU seems empty</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#multiple-gpus-not-being-used">Multiple GPUs not being used</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#gpu-slower-than-expected">GPU slower than expected</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../troubleshooting.html#output-quality-issues">Output Quality Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#reconstruction-has-artifacts">Reconstruction has artifacts</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#fsc-is-lower-than-expected">FSC is lower than expected</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#reconstructed-map-has-wrong-hand">Reconstructed map has wrong hand</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../troubleshooting.html#getting-more-help">Getting More Help</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#enable-debug-mode">Enable Debug Mode</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#check-logs">Check Logs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#report-issues">Report Issues</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../troubleshooting.html#see-also">See Also</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../api/index.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/index.html#core-modules">Core Modules</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/training.html">Training API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/training.html#module-cryoPARES.train.train">Main Training Module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/training.html#module-cryoPARES.train.runTrainOnePartition">Training Execution</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/inference.html">Inference API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/inference.html#module-cryoPARES.inference.inferencer">Single Inferencer</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/inference.html#module-cryoPARES.inference.infer">Distributed Inference</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/inference.html#daemon-mode">Daemon Mode</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/projection_matching.html">Projection Matching API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/projection_matching.html#module-cryoPARES.projmatching.projMatcher">Projection Matcher</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/projection_matching.html#module-cryoPARES.projmatching.projmatching">Command-Line Interface</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/reconstruction.html">Reconstruction API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/reconstruction.html#module-cryoPARES.reconstruction.reconstructor">Reconstructor</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/reconstruction.html#module-cryoPARES.reconstruction.reconstruct">Command-Line Interface</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/data_management.html">Data Management API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/data_management.html#module-cryoPARES.datamanager.datamanager">Data Manager</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/data_management.html#module-cryoPARES.datamanager.particlesDataset">Particles Dataset</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/data_management.html#module-cryoPARES.datamanager.augmentations">Augmentations</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/data_management.html#module-cryoPARES.datamanager.ctf.rfft_ctf">CTF Correction</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/models.html">Models API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/models.html#module-cryoPARES.models.model">PyTorch Lightning Model</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/models.html#module-cryoPARES.models.image2sphere.image2sphere">Image2Sphere Network</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/models.html#image-encoders">Image Encoders</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/models.html#module-cryoPARES.models.directionalNormalizer.directionalNormalizer">Directional Normalizer</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/utils.html">Utilities API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/utils.html#checkpoint-management">Checkpoint Management</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/utils.html#module-cryoPARES.utils.paths">Path Utilities</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/utils.html#module-cryoPARES.utils.torchUtils">PyTorch Utilities</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/utils.html#module-cryoPARES.utils.reconstructionUtils">Reconstruction Utilities</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/utils.html#geometry-utilities">Geometry Utilities</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Additional Resources</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference external" href="https://github.com/rsanchezgarc/cryoPARES">GitHub Repository</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://www.biorxiv.org/content/10.1101/2025.03.04.641536v2">Paper</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">CryoPARES</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">cryoPARES.inference.inferencer</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for cryoPARES.inference.inferencer</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span><span class="w"> </span><span class="nn">glob</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">functools</span><span class="w"> </span><span class="kn">import</span> <span class="n">cached_property</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">yaml</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">scipy.spatial.transform</span><span class="w"> </span><span class="kn">import</span> <span class="n">Rotation</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">tqdm</span><span class="w"> </span><span class="kn">import</span> <span class="n">tqdm</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">List</span><span class="p">,</span> <span class="n">Literal</span><span class="p">,</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">Any</span><span class="p">,</span> <span class="n">Tuple</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryoPARES.constants</span><span class="w"> </span><span class="kn">import</span> <span class="n">RELION_ANGLES_NAMES</span><span class="p">,</span> <span class="n">RELION_SHIFTS_NAMES</span><span class="p">,</span> <span class="n">RELION_PRED_POSE_CONFIDENCE_NAME</span><span class="p">,</span> \
+    <span class="n">RELION_EULER_CONVENTION</span><span class="p">,</span> <span class="n">DIRECTIONAL_ZSCORE_NAME</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryoPARES</span><span class="w"> </span><span class="kn">import</span> <span class="n">constants</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">autoCLI_config</span><span class="w"> </span><span class="kn">import</span> <span class="n">ConfigOverrideSystem</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">autoCLI_config</span><span class="w"> </span><span class="kn">import</span> <span class="n">inject_defaults_from_config</span><span class="p">,</span> <span class="n">CONFIG_PARAM</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryoPARES.configs.mainConfig</span><span class="w"> </span><span class="kn">import</span> <span class="n">main_config</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryoPARES.constants</span><span class="w"> </span><span class="kn">import</span> <span class="n">BEST_DIRECTIONAL_NORMALIZER</span><span class="p">,</span> <span class="n">BEST_CHECKPOINT_BASENAME</span><span class="p">,</span> <span class="n">BEST_MODEL_SCRIPT_BASENAME</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryoPARES.geometry.convert_angles</span><span class="w"> </span><span class="kn">import</span> <span class="n">matrix_to_euler_angles</span><span class="p">,</span> <span class="n">euler_angles_to_matrix</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryoPARES.geometry.metrics_angles</span><span class="w"> </span><span class="kn">import</span> <span class="n">rotation_error_with_sym</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryoPARES.inference.nnetWorkers.inferenceModel</span><span class="w"> </span><span class="kn">import</span> <span class="n">InferenceModel</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryoPARES.models.model</span><span class="w"> </span><span class="kn">import</span> <span class="n">PlModel</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryoPARES.datamanager.datamanager</span><span class="w"> </span><span class="kn">import</span> <span class="n">DataManager</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryoPARES.projmatching.projMatcher</span><span class="w"> </span><span class="kn">import</span> <span class="n">ProjectionMatcher</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryoPARES.reconstruction.reconstructor</span><span class="w"> </span><span class="kn">import</span> <span class="n">Reconstructor</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryoPARES.utils.paths</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_most_recent_file</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryoPARES.scripts.computeFsc</span><span class="w"> </span><span class="kn">import</span> <span class="n">compute_fsc</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryoPARES.utils.reconstructionUtils</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_vol</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryoPARES.utils.checkpointReader</span><span class="w"> </span><span class="kn">import</span> <span class="n">CheckpointReader</span>
+
+
+<div class="viewcode-block" id="SingleInferencer">
+<a class="viewcode-back" href="../../../api/inference.html#cryoPARES.inference.inferencer.SingleInferencer">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">SingleInferencer</span><span class="p">:</span>
+
+<div class="viewcode-block" id="SingleInferencer.__init__">
+<a class="viewcode-back" href="../../../api/inference.html#cryoPARES.inference.inferencer.SingleInferencer.__init__">[docs]</a>
+    <span class="nd">@inject_defaults_from_config</span><span class="p">(</span><span class="n">main_config</span><span class="o">.</span><span class="n">inference</span><span class="p">,</span> <span class="n">update_config_with_args</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span>
+                 <span class="n">particles_star_fname</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+                 <span class="n">checkpoint_dir</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+                 <span class="n">results_dir</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+                 <span class="n">data_halfset</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;half1&quot;</span><span class="p">,</span> <span class="s2">&quot;half2&quot;</span><span class="p">,</span> <span class="s2">&quot;allParticles&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;allParticles&quot;</span><span class="p">,</span>
+                 <span class="n">model_halfset</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;half1&quot;</span><span class="p">,</span> <span class="s2">&quot;half2&quot;</span><span class="p">,</span> <span class="s2">&quot;allCombinations&quot;</span><span class="p">,</span> <span class="s2">&quot;matchingHalf&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;matchingHalf&quot;</span><span class="p">,</span>
+                 <span class="n">particles_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                 <span class="n">batch_size</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">CONFIG_PARAM</span><span class="p">(),</span>
+                 <span class="n">num_dataworkers</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">CONFIG_PARAM</span><span class="p">(</span><span class="n">config</span><span class="o">=</span><span class="n">main_config</span><span class="o">.</span><span class="n">datamanager</span><span class="p">),</span>
+                 <span class="n">use_cuda</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="n">CONFIG_PARAM</span><span class="p">(),</span>
+                 <span class="n">n_cpus_if_no_cuda</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">CONFIG_PARAM</span><span class="p">(),</span>
+                 <span class="n">compile_model</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+                 <span class="n">top_k_poses_nnet</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">CONFIG_PARAM</span><span class="p">(),</span>
+                 <span class="n">top_k_poses_localref</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">CONFIG_PARAM</span><span class="p">(</span><span class="n">config</span><span class="o">=</span><span class="n">main_config</span><span class="o">.</span><span class="n">projmatching</span><span class="p">),</span>
+                 <span class="n">grid_distance_degs</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">CONFIG_PARAM</span><span class="p">(</span><span class="n">config</span><span class="o">=</span><span class="n">main_config</span><span class="o">.</span><span class="n">projmatching</span><span class="p">),</span>
+                 <span class="n">reference_map</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                 <span class="n">reference_mask</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="c1">#Only used for FSC estimation</span>
+                 <span class="n">directional_zscore_thr</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="n">CONFIG_PARAM</span><span class="p">(),</span>
+                 <span class="n">skip_localrefinement</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="n">CONFIG_PARAM</span><span class="p">(),</span>
+                 <span class="n">skip_reconstruction</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="n">CONFIG_PARAM</span><span class="p">(),</span>
+                 <span class="n">subset_idxs</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="nb">int</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                 <span class="n">n_first_particles</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                 <span class="n">show_debug_stats</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+                 <span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Initializes the SingleInferencer for running inference on a set of particles.</span>
+
+<span class="sd">        :param particles_star_fname: Path to the STAR file containing particle information.</span>
+<span class="sd">        :param checkpoint_dir: Directory where the trained model checkpoints are stored.</span>
+<span class="sd">        :param results_dir: Directory where the inference results will be saved.</span>
+<span class="sd">        :param data_halfset: Specifies which half-set of the data to use (&quot;half1&quot;, &quot;half2&quot;, or &quot;allParticles&quot;).</span>
+<span class="sd">        :param model_halfset: Specifies which half-set of the model to use (&quot;half1&quot;, &quot;half2&quot;, &quot;allCombinations&quot;, or &quot;matchingHalf&quot;).</span>
+<span class="sd">        :param particles_dir: Directory where the particle images are located. If None, paths in the STAR file are assumed to be absolute.</span>
+<span class="sd">        :param batch_size: The number of particles to process in each batch.</span>
+<span class="sd">        :param num_dataworkers: The number of worker processes to use for data loading.</span>
+<span class="sd">        :param use_cuda: Whether to use a CUDA-enabled GPU for inference.</span>
+<span class="sd">        :param n_cpus_if_no_cuda: The number of CPU cores to use if CUDA is not available.</span>
+<span class="sd">        :param compile_model: Whether to compile the model using `torch.compile` for potential speed-up.</span>
+<span class="sd">        :param top_k_poses_nnet: The number of top predictions to predict with the nn for each particle.</span>
+<span class="sd">        :param top_k_poses_localref: The number of top predictions to return after local refinement.</span>
+<span class="sd">        :param grid_distance_degs: The size of the local refinement grid in degrees. Grid will go from -grid_distance_degs to +grid_distance_degs</span>
+<span class="sd">        :param reference_map: Path to the reference map for local refinement. If not provided, it will be loaded from the checkpoint.</span>
+<span class="sd">        :param reference_mask: Path to the mask of the reference map. Used only for FSC calculation.</span>
+<span class="sd">        :param directional_zscore_thr: The threshold for the directional Z-score to filter particles.</span>
+<span class="sd">        :param skip_localrefinement: Whether to skip local refinement of the particle poses.</span>
+<span class="sd">        :param skip_reconstruction: Whether to skip 3D reconstruction from the inferred poses.</span>
+<span class="sd">        :param subset_idxs: A list of indices to process a subset of particles.</span>
+<span class="sd">        :param n_first_particles: The number of first particles to process. Cannot be used with `subset_idxs`.</span>
+<span class="sd">        :param show_debug_stats: Whether to print debug statistics, such as rotation errors if ground truth in the starfile.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">particles_star_fname</span> <span class="o">=</span> <span class="n">particles_star_fname</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">particles_dir</span> <span class="o">=</span> <span class="n">particles_dir</span>
+        <span class="k">assert</span> <span class="n">top_k_poses_nnet</span> <span class="o">&gt;=</span> <span class="n">top_k_poses_localref</span><span class="p">,</span> <span class="s2">&quot;Error, top_k_poses_nnet &gt;= top_k_poses_localref required&quot;</span>
+
+        <span class="c1"># Support both directory and ZIP checkpoints</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">checkpoint_dir</span> <span class="o">=</span> <span class="n">checkpoint_dir</span>
+        <span class="k">if</span> <span class="n">checkpoint_dir</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s1">&#39;.zip&#39;</span><span class="p">):</span>
+            <span class="k">assert</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">checkpoint_dir</span><span class="p">),</span> <span class="sa">f</span><span class="s2">&quot;checkpoint_dir </span><span class="si">{</span><span class="n">checkpoint_dir</span><span class="si">}</span><span class="s2"> is not a valid ZIP file&quot;</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">assert</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isdir</span><span class="p">(</span><span class="n">checkpoint_dir</span><span class="p">),</span> <span class="sa">f</span><span class="s2">&quot;checkpoint_dir </span><span class="si">{</span><span class="n">checkpoint_dir</span><span class="si">}</span><span class="s2"> needs to be a directory&quot;</span>
+
+        <span class="c1"># Initialize checkpoint reader</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_checkpoint_reader</span> <span class="o">=</span> <span class="n">CheckpointReader</span><span class="p">(</span><span class="n">checkpoint_dir</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">n_first_particles</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">assert</span> <span class="n">subset_idxs</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;Error, only n_first_particles or subset_idxs can be provided&quot;</span>
+            <span class="n">subset_idxs</span> <span class="o">=</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_first_particles</span><span class="p">)</span>
+        <span class="n">main_config</span><span class="o">.</span><span class="n">datamanager</span><span class="o">.</span><span class="n">num_augmented_copies_per_batch</span> <span class="o">=</span> <span class="mi">1</span>  <span class="c1"># We have not implemented test-time augmentation</span>
+        <span class="n">main_config</span><span class="o">.</span><span class="n">datamanager</span><span class="o">.</span><span class="n">particlesdataset</span><span class="o">.</span><span class="n">store_data_in_memory</span> <span class="o">=</span> <span class="kc">False</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">batch_size</span> <span class="o">=</span> <span class="n">batch_size</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">use_cuda</span> <span class="o">=</span> <span class="n">use_cuda</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">n_cpus_if_no_cuda</span> <span class="o">=</span> <span class="n">n_cpus_if_no_cuda</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">results_dir</span> <span class="o">=</span> <span class="n">results_dir</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">data_halfset</span> <span class="o">=</span> <span class="n">data_halfset</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">model_halfset</span> <span class="o">=</span> <span class="n">model_halfset</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">compile_model</span> <span class="o">=</span> <span class="n">compile_model</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">top_k_poses_nnet</span> <span class="o">=</span> <span class="n">top_k_poses_nnet</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">top_k_poses_localref</span> <span class="o">=</span> <span class="n">top_k_poses_localref</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">reference_map</span> <span class="o">=</span> <span class="n">reference_map</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">reference_mask</span> <span class="o">=</span> <span class="n">reference_mask</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">directional_zscore_thr</span> <span class="o">=</span> <span class="n">directional_zscore_thr</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">skip_localrefinement</span> <span class="o">=</span> <span class="n">skip_localrefinement</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">skip_reconstruction</span> <span class="o">=</span> <span class="n">skip_reconstruction</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">update_progressbar_n_batches</span> <span class="o">=</span> <span class="n">main_config</span><span class="o">.</span><span class="n">inference</span><span class="o">.</span><span class="n">update_progressbar_n_batches</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">show_debug_stats</span> <span class="o">=</span> <span class="n">show_debug_stats</span>
+
+        <span class="k">if</span> <span class="n">results_dir</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">results_dir</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_setup_accelerator</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_pbar</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_model</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_reconstructor</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_datamanager</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_subset_idxs</span> <span class="o">=</span> <span class="n">subset_idxs</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_last_dataset_processed</span> <span class="o">=</span> <span class="mi">0</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_setup_accelerator</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Sets up the computational device (CPU or CUDA) and determines the number of available devices.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">use_cuda</span> <span class="ow">and</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">():</span>
+            <span class="n">accelerator</span> <span class="o">=</span> <span class="s2">&quot;cuda&quot;</span>
+            <span class="n">device_count</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">device_count</span><span class="p">()</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">accelerator</span> <span class="o">=</span> <span class="s2">&quot;cpu&quot;</span>
+            <span class="n">device_count</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_cpus_if_no_cuda</span>
+
+        <span class="c1"># print(f&#39;devices={device_count} accelerator={accelerator}&#39;, flush=True)</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">set_num_threads</span><span class="p">(</span><span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">get_num_threads</span><span class="p">()</span> <span class="o">//</span> <span class="n">device_count</span><span class="p">))</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">device_count</span> <span class="o">=</span> <span class="n">accelerator</span><span class="p">,</span> <span class="n">device_count</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_setup_reconstructor</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">symmetry</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Initializes the Reconstructor object, which is responsible for 3D reconstruction from 2D particle images.</span>
+
+<span class="sd">        :param symmetry: The symmetry of the object being reconstructed. If not provided, it&#39;s retrieved from the class&#39;s `symmetry` attribute.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">symmetry</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">symmetry</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">symmetry</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_reconstructor</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_reconstructor</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">particles_star_fname</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">particles_dir</span><span class="p">,</span> <span class="n">symmetry</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_reconstructor</span>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_get_reconstructor</span><span class="p">(</span><span class="n">particles_star_fname</span><span class="p">,</span> <span class="n">particles_dir</span><span class="p">,</span> <span class="n">symmetry</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Creates and configures a Reconstructor instance.</span>
+
+<span class="sd">        :param particles_star_fname: Path to the STAR file containing particle information.</span>
+<span class="sd">        :param particles_dir: Directory where particle data is stored.</span>
+<span class="sd">        :param symmetry: The symmetry of the object.</span>
+<span class="sd">        :return: An initialized Reconstructor object.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">reconstructor</span> <span class="o">=</span> <span class="n">Reconstructor</span><span class="p">(</span><span class="n">symmetry</span><span class="o">=</span><span class="n">symmetry</span><span class="p">,</span> <span class="n">correct_ctf</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">reconstructor</span><span class="o">.</span><span class="n">_get_reconstructionParticlesDataset</span><span class="p">(</span><span class="n">particles_star_fname</span><span class="p">,</span> <span class="n">particles_dir</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">reconstructor</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_setup_model</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">rank</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Loads and configures the machine learning model for inference. This includes loading the main model,</span>
+<span class="sd">        the percentile model for score normalization, and setting up the local refiner and reconstructor if enabled.</span>
+
+<span class="sd">        :param rank: The rank of the current process in a distributed setup.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="c1"># Detect actual halfset directory (handles allParticles vs half1/half2)</span>
+        <span class="n">actual_halfset</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_detect_actual_halfset</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_checkpoint_reader</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">model_halfset</span><span class="p">)</span>
+
+        <span class="c1"># Try to load SO3 model (prefer TorchScript, fallback to checkpoint)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">model_path</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">actual_halfset</span><span class="si">}</span><span class="s2">/checkpoints/</span><span class="si">{</span><span class="n">BEST_MODEL_SCRIPT_BASENAME</span><span class="si">}</span><span class="s2">&quot;</span>
+            <span class="n">so3Model</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_checkpoint_reader</span><span class="o">.</span><span class="n">load_jit</span><span class="p">(</span><span class="n">model_path</span><span class="p">)</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">ValueError</span><span class="p">,</span> <span class="ne">IOError</span><span class="p">,</span> <span class="ne">FileNotFoundError</span><span class="p">):</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">model_path</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">actual_halfset</span><span class="si">}</span><span class="s2">/checkpoints/</span><span class="si">{</span><span class="n">BEST_CHECKPOINT_BASENAME</span><span class="si">}</span><span class="s2">&quot;</span>
+                <span class="c1"># For PlModel.load_from_checkpoint, we need a real file path</span>
+                <span class="n">so3Model_fname</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_checkpoint_reader</span><span class="o">.</span><span class="n">get_real_path</span><span class="p">(</span><span class="n">model_path</span><span class="p">)</span>
+                <span class="n">so3Model</span> <span class="o">=</span> <span class="n">PlModel</span><span class="o">.</span><span class="n">load_from_checkpoint</span><span class="p">(</span><span class="n">so3Model_fname</span><span class="p">,</span> <span class="n">weights_only</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">FileNotFoundError</span><span class="p">:</span>
+                <span class="n">model_path</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">actual_halfset</span><span class="si">}</span><span class="s2">/checkpoints/last.ckpt&quot;</span>
+                <span class="n">so3Model_fname</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_checkpoint_reader</span><span class="o">.</span><span class="n">get_real_path</span><span class="p">(</span><span class="n">model_path</span><span class="p">)</span>
+                <span class="n">so3Model</span> <span class="o">=</span> <span class="n">PlModel</span><span class="o">.</span><span class="n">load_from_checkpoint</span><span class="p">(</span><span class="n">so3Model_fname</span><span class="p">,</span> <span class="n">weights_only</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+        <span class="c1"># Try to load directional normalizer</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">normalizer_path</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">actual_halfset</span><span class="si">}</span><span class="s2">/checkpoints/</span><span class="si">{</span><span class="n">BEST_DIRECTIONAL_NORMALIZER</span><span class="si">}</span><span class="s2">&quot;</span>
+            <span class="n">percentilemodel</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_checkpoint_reader</span><span class="o">.</span><span class="n">load_torch</span><span class="p">(</span><span class="n">normalizer_path</span><span class="p">,</span> <span class="n">weights_only</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">FileNotFoundError</span><span class="p">:</span>
+            <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">directional_zscore_thr</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">,</span> <span class="p">(</span><span class="s2">&quot;Error, if no percentilemodel available, you cannot set a &quot;</span>
+                                                         <span class="s2">&quot;directional_zscore_thr&quot;</span><span class="p">)</span>
+            <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No percentilemodel found at </span><span class="si">{</span><span class="n">normalizer_path</span><span class="si">}</span><span class="s2">. Directional normalized z-scores&quot;</span>
+                          <span class="sa">f</span><span class="s2">&quot; won&#39;t be computed!!!&quot;</span><span class="p">)</span>
+            <span class="n">percentilemodel</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="c1"># Get reference map</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">reference_map</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># Need real path for mrcfile</span>
+            <span class="n">reference_map_path</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">actual_halfset</span><span class="si">}</span><span class="s2">/reconstructions/0.mrc&quot;</span>
+            <span class="n">reference_map</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_checkpoint_reader</span><span class="o">.</span><span class="n">get_real_path</span><span class="p">(</span><span class="n">reference_map_path</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">reference_map</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">reference_map</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">skip_localrefinement</span><span class="p">:</span>
+            <span class="n">localRefiner</span> <span class="o">=</span> <span class="n">ProjectionMatcher</span><span class="p">(</span><span class="n">reference_vol</span><span class="o">=</span><span class="n">reference_map</span><span class="p">,</span> <span class="n">top_k_poses_localref</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">top_k_poses_localref</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">localRefiner</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">skip_reconstruction</span><span class="p">:</span>
+            <span class="n">reconstructor</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_setup_reconstructor</span><span class="p">(</span><span class="n">so3Model</span><span class="o">.</span><span class="n">symmetry</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">reconstructor</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="n">model</span> <span class="o">=</span> <span class="n">InferenceModel</span><span class="p">(</span><span class="n">so3Model</span><span class="p">,</span> <span class="n">percentilemodel</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">directional_zscore_thr</span><span class="p">,</span> <span class="n">localRefiner</span><span class="p">,</span>
+                               <span class="n">reconstructor</span><span class="o">=</span><span class="n">reconstructor</span><span class="p">,</span>
+                               <span class="n">top_k_poses_nnet</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">top_k_poses_nnet</span><span class="p">)</span>
+
+        <span class="c1"># Handle missing symmetry attribute</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="s1">&#39;symmetry&#39;</span><span class="p">):</span>
+            <span class="c1"># Try to get from hyperparameters or set default</span>
+            <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="s1">&#39;hparams&#39;</span><span class="p">)</span> <span class="ow">and</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">hparams</span><span class="p">,</span> <span class="s1">&#39;symmetry&#39;</span><span class="p">):</span>
+                <span class="n">model</span><span class="o">.</span><span class="n">symmetry</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">hparams</span><span class="o">.</span><span class="n">symmetry</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;Symmetry not found in model&quot;</span><span class="p">)</span>
+
+        <span class="n">device</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;cuda:</span><span class="si">{</span><span class="n">rank</span><span class="si">}</span><span class="s1">&#39;</span> <span class="k">if</span> <span class="n">rank</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="s1">&#39;cuda&#39;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">device</span> <span class="o">==</span> <span class="s2">&quot;cpu&quot;</span><span class="p">:</span>
+            <span class="n">device</span> <span class="o">=</span> <span class="s2">&quot;cpu&quot;</span>
+
+        <span class="n">model</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">compile_model</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Compiling model on device </span><span class="si">{</span><span class="n">device</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="n">model</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="n">model</span><span class="p">)</span>
+
+        <span class="n">model</span><span class="o">.</span><span class="n">eval</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_model</span> <span class="o">=</span> <span class="n">model</span>
+        <span class="k">return</span> <span class="n">model</span>
+
+    <span class="nd">@cached_property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">symmetry</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        The symmetry of the model, loaded from the hyperparameters file.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_symmetry</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_checkpoint_reader</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">model_halfset</span><span class="p">)</span>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_detect_actual_halfset</span><span class="p">(</span><span class="n">checkpoint_reader</span><span class="p">:</span> <span class="n">CheckpointReader</span><span class="p">,</span> <span class="n">model_halfset</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Detects the actual halfset directory in the checkpoint.</span>
+<span class="sd">        If checkpoint was trained with --NOT_split_halves, it will have &#39;allParticles&#39; instead of &#39;half1&#39;/&#39;half2&#39;.</span>
+
+<span class="sd">        :param checkpoint_reader: CheckpointReader instance</span>
+<span class="sd">        :param model_halfset: Requested model half-set name</span>
+<span class="sd">        :return: The actual halfset directory name to use</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># If allParticles is requested, use it</span>
+        <span class="k">if</span> <span class="n">model_halfset</span> <span class="o">==</span> <span class="s2">&quot;allParticles&quot;</span><span class="p">:</span>
+            <span class="k">return</span> <span class="s2">&quot;allParticles&quot;</span>
+
+        <span class="c1"># If half1/half2 is requested, check if allParticles exists instead</span>
+        <span class="k">if</span> <span class="n">model_halfset</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;half1&quot;</span><span class="p">,</span> <span class="s2">&quot;half2&quot;</span><span class="p">]:</span>
+            <span class="k">if</span> <span class="n">checkpoint_reader</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="s2">&quot;allParticles/hparams.yaml&quot;</span><span class="p">)</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">checkpoint_reader</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">model_halfset</span><span class="si">}</span><span class="s2">/hparams.yaml&quot;</span><span class="p">):</span>
+                <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Checkpoint was trained with --NOT_split_halves. &quot;</span>
+                    <span class="sa">f</span><span class="s2">&quot;Using &#39;allParticles&#39; model for requested halfset &#39;</span><span class="si">{</span><span class="n">model_halfset</span><span class="si">}</span><span class="s2">&#39;. &quot;</span>
+                    <span class="sa">f</span><span class="s2">&quot;Note: FSC between halves can be overoptimistic as both halves use the same model.&quot;</span>
+                <span class="p">)</span>
+                <span class="k">return</span> <span class="s2">&quot;allParticles&quot;</span>
+
+        <span class="k">return</span> <span class="n">model_halfset</span>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_get_symmetry</span><span class="p">(</span><span class="n">checkpoint_reader</span><span class="p">:</span> <span class="n">CheckpointReader</span><span class="p">,</span> <span class="n">model_halfset</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Retrieves the symmetry value from the `hparams.yaml` file in the checkpoint directory.</span>
+
+<span class="sd">        :param checkpoint_reader: CheckpointReader instance</span>
+<span class="sd">        :param model_halfset: Model half-set name</span>
+<span class="sd">        :return: The symmetry value.</span>
+<span class="sd">        :raises RuntimeError: If the symmetry cannot be loaded from the file.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">actual_halfset</span> <span class="o">=</span> <span class="n">SingleInferencer</span><span class="o">.</span><span class="n">_detect_actual_halfset</span><span class="p">(</span><span class="n">checkpoint_reader</span><span class="p">,</span> <span class="n">model_halfset</span><span class="p">)</span>
+        <span class="n">hparams_path</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">actual_halfset</span><span class="si">}</span><span class="s2">/hparams.yaml&quot;</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">hparams_text</span> <span class="o">=</span> <span class="n">checkpoint_reader</span><span class="o">.</span><span class="n">read_text</span><span class="p">(</span><span class="n">hparams_path</span><span class="p">)</span>
+            <span class="n">symmetry</span> <span class="o">=</span> <span class="n">yaml</span><span class="o">.</span><span class="n">safe_load</span><span class="p">(</span><span class="n">hparams_text</span><span class="p">)[</span><span class="s2">&quot;symmetry&quot;</span><span class="p">]</span>
+            <span class="k">return</span> <span class="n">symmetry</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">FileNotFoundError</span><span class="p">,</span> <span class="n">yaml</span><span class="o">.</span><span class="n">YAMLError</span><span class="p">,</span> <span class="ne">KeyError</span><span class="p">)</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Failed to load symmetry from </span><span class="si">{</span><span class="n">hparams_path</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_get_datamanager</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">rank</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Initializes the DataManager, which is responsible for loading and preparing the particle data.</span>
+
+<span class="sd">        :param rank: The rank of the current process in a distributed setup.</span>
+<span class="sd">        :return: An initialized DataManager object.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">data_halfset</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">data_halfset</span> <span class="o">==</span> <span class="s2">&quot;half1&quot;</span><span class="p">:</span>
+            <span class="n">data_halfset</span> <span class="o">=</span> <span class="mi">1</span>
+        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">data_halfset</span> <span class="o">==</span> <span class="s2">&quot;half2&quot;</span><span class="p">:</span>
+            <span class="n">data_halfset</span> <span class="o">=</span> <span class="mi">2</span>
+        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">data_halfset</span> <span class="o">==</span> <span class="s2">&quot;allParticles&quot;</span><span class="p">:</span>
+            <span class="n">data_halfset</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error, not valid self.data_halfset </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">data_halfset</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">datamanager</span> <span class="o">=</span> <span class="n">DataManager</span><span class="p">(</span>
+            <span class="n">star_fnames</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">particles_star_fname</span><span class="p">,</span>
+            <span class="n">symmetry</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">symmetry</span><span class="p">,</span>
+            <span class="n">particles_dir</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">particles_dir</span><span class="p">,</span>
+            <span class="n">batch_size</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">batch_size</span><span class="p">,</span>
+            <span class="n">augment_train</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>  <span class="c1"># No augmentation during inference</span>
+            <span class="n">halfset</span><span class="o">=</span><span class="n">data_halfset</span><span class="p">,</span>
+            <span class="n">is_global_zero</span><span class="o">=</span><span class="n">rank</span> <span class="o">==</span> <span class="mi">0</span> <span class="k">if</span> <span class="n">rank</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="n">save_train_val_partition_dir</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>  <span class="c1"># Not needed for inference</span>
+            <span class="n">return_ori_imagen</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>  <span class="c1"># Needed for inference,</span>
+            <span class="n">subset_idxs</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_subset_idxs</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="n">datamanager</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_setup_dataloader</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">rank</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Creates the data loader for inference.</span>
+
+<span class="sd">        :param rank: The rank of the current process in a distributed setup.</span>
+<span class="sd">        :return: The PyTorch DataLoader for inference.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_datamanager</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_datamanager</span><span class="p">(</span><span class="n">rank</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_datamanager</span><span class="o">.</span><span class="n">predict_dataloader</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_process_batch</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">model</span><span class="p">:</span> <span class="n">PlModel</span><span class="p">,</span> <span class="n">batch</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">batch_idx</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+                       <span class="n">gpu_offload</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Processes a single batch of data through the model and returns the predictions.</span>
+
+<span class="sd">        :param model: The inference model.</span>
+<span class="sd">        :param batch: The batch of data to process. If None, it flushes the model&#39;s buffer.</span>
+<span class="sd">        :param batch_idx: The index of the current batch.</span>
+<span class="sd">        :param gpu_offload: If True, the results will be moved from GPU to CPU</span>
+<span class="sd">        :return: A tuple containing the particle IDs, predicted Euler angles, shifts, scores, and normalized scores. Returns None if there are no results.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">device</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">device</span>
+        <span class="k">if</span> <span class="n">batch</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="s1">&#39;transfer_batch_to_device&#39;</span><span class="p">):</span>
+                <span class="n">batch</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">transfer_batch_to_device</span><span class="p">(</span><span class="n">batch</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">,</span> <span class="n">dataloader_idx</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="c1"># Fallback: manually transfer tensors</span>
+                <span class="n">non_blocking</span> <span class="o">=</span> <span class="kc">True</span>
+                <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">batch</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+                        <span class="n">batch</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">value</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">,</span> <span class="n">non_blocking</span><span class="o">=</span><span class="n">non_blocking</span><span class="p">)</span>
+                    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="p">(</span><span class="nb">list</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">))</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="n">value</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="ow">and</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+                        <span class="n">batch</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">v</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">,</span> <span class="n">non_blocking</span><span class="o">=</span><span class="n">non_blocking</span><span class="p">)</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="k">else</span> <span class="n">v</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span>
+                                      <span class="n">value</span><span class="p">]</span>
+
+            <span class="c1"># Use predict_step as requested</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">predict_step</span><span class="p">(</span><span class="n">batch</span><span class="p">,</span> <span class="n">batch_idx</span><span class="o">=</span><span class="n">batch_idx</span><span class="p">,</span> <span class="n">dataloader_idx</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">flush</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">result</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span>
+        <span class="n">ids</span><span class="p">,</span> <span class="n">pred_rotmats</span><span class="p">,</span> <span class="n">pred_shiftsXYangs</span><span class="p">,</span> <span class="n">score</span><span class="p">,</span> <span class="n">norm_nn_score</span> <span class="o">=</span> <span class="n">result</span>
+        <span class="c1"># Convert rotation matrices to euler angles</span>
+        <span class="n">euler_degs</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">rad2deg</span><span class="p">(</span><span class="n">matrix_to_euler_angles</span><span class="p">(</span><span class="n">pred_rotmats</span><span class="p">,</span> <span class="n">RELION_EULER_CONVENTION</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">gpu_offload</span><span class="p">:</span>
+            <span class="n">euler_degs</span> <span class="o">=</span> <span class="n">euler_degs</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span>
+            <span class="n">pred_shiftsXYangs</span> <span class="o">=</span> <span class="n">pred_shiftsXYangs</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span> <span class="k">if</span> <span class="n">pred_shiftsXYangs</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="kc">None</span>
+            <span class="n">score</span> <span class="o">=</span> <span class="n">score</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span>
+            <span class="n">norm_nn_score</span> <span class="o">=</span> <span class="n">norm_nn_score</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">ids</span><span class="p">,</span> <span class="n">euler_degs</span><span class="p">,</span> <span class="n">pred_shiftsXYangs</span><span class="p">,</span> <span class="n">score</span><span class="p">,</span> <span class="n">norm_nn_score</span>
+
+<div class="viewcode-block" id="SingleInferencer.run">
+<a class="viewcode-back" href="../../../api/inference.html#cryoPARES.inference.inferencer.SingleInferencer.run">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Runs the inference process. It iterates through the specified data and model half-sets,</span>
+<span class="sd">        performing inference for each combination.</span>
+
+<span class="sd">        :return: A list of tuples, where each tuple contains the particle metadata and the reconstructed volume for each inference run.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="n">torch</span><span class="o">.</span><span class="n">set_float32_matmul_precision</span><span class="p">(</span><span class="n">main_config</span><span class="o">.</span><span class="n">inference</span><span class="o">.</span><span class="n">float32_matmul_precision</span><span class="p">)</span>
+
+        <span class="n">data_halfset_list</span><span class="p">,</span> <span class="n">model_halfset_list</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">resolve_halfset_lists</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">data_halfset</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">model_halfset</span><span class="p">)</span>
+
+        <span class="n">all_out_list</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">model_halfset</span> <span class="ow">in</span> <span class="n">model_halfset_list</span><span class="p">:</span>
+            <span class="n">out_list</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="n">sampling_rate</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="k">for</span> <span class="n">data_halfset</span> <span class="ow">in</span> <span class="n">data_halfset_list</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">model_halfset</span> <span class="o">=</span> <span class="n">data_halfset</span> <span class="k">if</span> <span class="n">model_halfset</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">model_halfset</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">data_halfset</span> <span class="o">=</span> <span class="n">data_halfset</span>
+                <span class="n">actual_model_dir</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_detect_actual_halfset</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_checkpoint_reader</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">model_halfset</span><span class="p">)</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Running inference for data </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">data_halfset</span><span class="si">}</span><span class="s2"> with model </span><span class="si">{</span><span class="n">actual_model_dir</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                <span class="n">out</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_run</span><span class="p">()</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_model</span> <span class="ow">and</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">skip_reconstruction</span> <span class="ow">and</span> <span class="nb">hasattr</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_model</span><span class="p">,</span> <span class="s2">&quot;reconstructor&quot;</span><span class="p">):</span>
+                    <span class="n">sampling_rate</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">reconstructor</span><span class="o">.</span><span class="n">sampling_rate</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">clean_reconstructer_buffers</span><span class="p">()</span> <span class="c1"># Clean the reconstructor after each half is processed</span>
+                <span class="n">out_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">out</span><span class="p">)</span>
+                <span class="n">all_out_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">out_list</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">out_list</span><span class="p">)</span> <span class="o">==</span> <span class="mi">2</span> <span class="ow">and</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">skip_reconstruction</span><span class="p">:</span>
+                <span class="n">vol1</span> <span class="o">=</span> <span class="n">out_list</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+                <span class="n">vol2</span> <span class="o">=</span> <span class="n">out_list</span><span class="p">[</span><span class="mi">1</span><span class="p">][</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+                <span class="k">if</span> <span class="n">vol1</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">vol2</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">sampling_rate</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Computing FSC...&quot;</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">reference_mask</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                        <span class="n">reference_mask</span> <span class="o">=</span> <span class="n">get_vol</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">reference_mask</span><span class="p">,</span> <span class="n">pixel_size</span><span class="o">=</span><span class="kc">None</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="n">reference_mask</span> <span class="o">=</span> <span class="kc">None</span>
+                    <span class="n">fsc</span><span class="p">,</span> <span class="n">spatial_freq</span><span class="p">,</span> <span class="n">resolution_A</span><span class="p">,</span> <span class="p">(</span><span class="n">res_05</span><span class="p">,</span> <span class="n">res_0143</span><span class="p">)</span> <span class="o">=</span> <span class="n">compute_fsc</span><span class="p">(</span><span class="n">vol1</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">(),</span>
+                                                                                      <span class="n">vol2</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">(),</span>
+                                                                                      <span class="n">sampling_rate</span><span class="p">,</span>
+                                                                                      <span class="n">mask</span><span class="o">=</span><span class="n">reference_mask</span><span class="p">)</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Resolution at FSC=0.143 (&#39;gold-standard&#39;): </span><span class="si">{</span><span class="n">res_0143</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> Å&quot;</span><span class="p">)</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Resolution at FSC=0.5: </span><span class="si">{</span><span class="n">res_05</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> Å&quot;</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_model</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="c1"># Clean up checkpoint reader</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_checkpoint_reader</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+
+        <span class="k">return</span> <span class="n">all_out_list</span></div>
+
+
+<div class="viewcode-block" id="SingleInferencer.clean_reconstructer_buffers">
+<a class="viewcode-back" href="../../../api/inference.html#cryoPARES.inference.inferencer.SingleInferencer.clean_reconstructer_buffers">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">clean_reconstructer_buffers</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">reconstructor</span><span class="o">.</span><span class="n">zero_buffers</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="SingleInferencer.resolve_halfset_lists">
+<a class="viewcode-back" href="../../../api/inference.html#cryoPARES.inference.inferencer.SingleInferencer.resolve_halfset_lists">[docs]</a>
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">resolve_halfset_lists</span><span class="p">(</span>
+        <span class="n">data_halfset</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;half1&quot;</span><span class="p">,</span> <span class="s2">&quot;half2&quot;</span><span class="p">,</span> <span class="s2">&quot;allParticles&quot;</span><span class="p">],</span>
+        <span class="n">model_halfset</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;half1&quot;</span><span class="p">,</span> <span class="s2">&quot;half2&quot;</span><span class="p">,</span> <span class="s2">&quot;allCombinations&quot;</span><span class="p">,</span> <span class="s2">&quot;matchingHalf&quot;</span><span class="p">,</span> <span class="s2">&quot;allParticles&quot;</span><span class="p">],</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;half1&quot;</span><span class="p">,</span> <span class="s2">&quot;half2&quot;</span><span class="p">]],</span> <span class="n">List</span><span class="p">[</span><span class="n">Optional</span><span class="p">[</span><span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;half1&quot;</span><span class="p">,</span> <span class="s2">&quot;half2&quot;</span><span class="p">,</span> <span class="s2">&quot;allParticles&quot;</span><span class="p">]]]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot; Return normalized lists of data and model-half policies for iteration.</span>
+<span class="sd">        - data list is concrete halves: [&quot;half1&quot;], [&quot;half2&quot;], or [&quot;half1&quot;,&quot;half2&quot;].</span>
+<span class="sd">        - model list is [&quot;half1&quot;], [&quot;half2&quot;], [None] (matchingHalf), [&quot;half1&quot;,&quot;half2&quot;] (allCombinations),</span>
+<span class="sd">          or [&quot;allParticles&quot;] (only valid if checkpoint was trained with --NOT_split_halves).</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">data_list</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;half1&quot;</span><span class="p">,</span> <span class="s2">&quot;half2&quot;</span><span class="p">]]</span>
+        <span class="k">if</span> <span class="n">data_halfset</span> <span class="o">==</span> <span class="s2">&quot;allParticles&quot;</span><span class="p">:</span>
+            <span class="n">data_list</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;half1&quot;</span><span class="p">,</span> <span class="s2">&quot;half2&quot;</span><span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">data_list</span> <span class="o">=</span> <span class="p">[</span><span class="n">data_halfset</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">model_halfset</span> <span class="o">==</span> <span class="s2">&quot;allCombinations&quot;</span><span class="p">:</span>
+            <span class="n">model_list</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Optional</span><span class="p">[</span><span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;half1&quot;</span><span class="p">,</span> <span class="s2">&quot;half2&quot;</span><span class="p">,</span> <span class="s2">&quot;allParticles&quot;</span><span class="p">]]]</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;half1&quot;</span><span class="p">,</span> <span class="s2">&quot;half2&quot;</span><span class="p">]</span>
+        <span class="k">elif</span> <span class="n">model_halfset</span> <span class="o">==</span> <span class="s2">&quot;matchingHalf&quot;</span><span class="p">:</span>
+            <span class="n">model_list</span> <span class="o">=</span> <span class="p">[</span><span class="kc">None</span><span class="p">]</span>
+        <span class="k">elif</span> <span class="n">model_halfset</span> <span class="o">==</span> <span class="s2">&quot;allParticles&quot;</span><span class="p">:</span>
+            <span class="n">model_list</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;allParticles&quot;</span><span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">model_list</span> <span class="o">=</span> <span class="p">[</span><span class="n">model_halfset</span><span class="p">]</span>
+        <span class="k">return</span> <span class="n">data_list</span><span class="p">,</span> <span class="n">model_list</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_get_pbar</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">total</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Initializes or updates a progress bar for tracking the inference process.</span>
+
+<span class="sd">        :param total: The total number of batches to process.</span>
+<span class="sd">        :return: The progress bar object.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pbar</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">tqdm</span><span class="p">(</span><span class="n">total</span><span class="o">=</span><span class="n">total</span><span class="p">,</span> <span class="n">desc</span><span class="o">=</span><span class="s2">&quot;Processing batches&quot;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_pbar</span><span class="p">,</span> <span class="s2">&quot;set_total_steps&quot;</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_pbar</span><span class="o">.</span><span class="n">set_total_steps</span><span class="p">(</span><span class="n">total</span><span class="p">)</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pbar</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_get_outsuffix</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">extension</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Generates a suffix for the output file names based on the current data and model half-sets.</span>
+
+<span class="sd">        :param extension: The file extension.</span>
+<span class="sd">        :return: The generated file suffix.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">model_halfset</span> <span class="o">==</span> <span class="s2">&quot;allParticles&quot;</span><span class="p">:</span>
+            <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;_data_</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">data_halfset</span><span class="si">}</span><span class="s2">_model_</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">model_halfset</span><span class="si">}</span><span class="s2">.</span><span class="si">{</span><span class="n">extension</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;_</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">data_halfset</span><span class="si">}</span><span class="s2">.</span><span class="si">{</span><span class="n">extension</span><span class="si">}</span><span class="s2">&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">materialize_reconstruction</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        The main private method that executes a single inference run. It sets up the data loader and model,</span>
+<span class="sd">        processes all batches, and saves the results.</span>
+
+<span class="sd">        :return: A tuple containing the particle metadata and the reconstructed volume.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_last_dataset_processed</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="c1"># Get total dataset info</span>
+        <span class="n">dataloader</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_setup_dataloader</span><span class="p">()</span>
+        <span class="n">dataset</span> <span class="o">=</span> <span class="n">dataloader</span><span class="o">.</span><span class="n">dataset</span>
+        <span class="n">total_batches</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">dataloader</span><span class="p">)</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Processing </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">dataset</span><span class="p">)</span><span class="si">}</span><span class="s2"> particles in </span><span class="si">{</span><span class="n">total_batches</span><span class="si">}</span><span class="s2"> batches&quot;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_model</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">model</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_setup_model</span><span class="p">()</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">model</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_model</span>
+
+        <span class="n">pbar</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_pbar</span><span class="p">(</span><span class="n">total_batches</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">all_results</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_process_all_batches</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">dataloader</span><span class="p">,</span> <span class="n">pbar</span><span class="o">=</span><span class="n">pbar</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Aggregating results and saving to STAR files...&quot;</span><span class="p">)</span>
+            <span class="n">particles_md</span><span class="p">,</span> <span class="n">optics_md</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_save_particles_results</span><span class="p">(</span><span class="n">all_results</span><span class="p">,</span> <span class="n">dataset</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">skip_reconstruction</span> <span class="ow">and</span> <span class="n">materialize_reconstruction</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Materializing reconstruction...&quot;</span><span class="p">)</span>
+                <span class="n">vol</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_save_reconstruction</span><span class="p">(</span><span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">skip_reconstruction</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">vol</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="k">return</span> <span class="n">particles_md</span><span class="p">,</span> <span class="n">optics_md</span><span class="p">,</span> <span class="n">vol</span>
+        <span class="k">finally</span><span class="p">:</span>
+            <span class="n">pbar</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_process_all_batches</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">model</span><span class="p">,</span> <span class="n">dataloader</span><span class="p">,</span> <span class="n">pbar</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">gpu_offload</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Iterates through all batches in the data loader, processes them, and collects the results.</span>
+
+<span class="sd">        :param model: The inference model.</span>
+<span class="sd">        :param dataloader: The data loader.</span>
+<span class="sd">        :param pbar: The progress bar.</span>
+<span class="sd">        :param gpu_offload: If true, results are moved from the GPU to the CPU</span>
+<span class="sd">        :return: A list of results from processing each batch.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">all_results</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">inference_mode</span><span class="p">():</span>
+            <span class="k">for</span> <span class="n">batch_idx</span><span class="p">,</span> <span class="n">batch</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">dataloader</span><span class="p">):</span>
+                <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_process_batch</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">batch</span><span class="p">,</span> <span class="n">batch_idx</span><span class="p">,</span> <span class="n">gpu_offload</span><span class="o">=</span><span class="n">gpu_offload</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">result</span><span class="p">:</span>
+                    <span class="n">all_results</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">pbar</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span> <span class="n">pbar</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_process_batch</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">batch</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">batch_idx</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span> <span class="n">gpu_offload</span><span class="o">=</span><span class="n">gpu_offload</span><span class="p">)</span>  <span class="c1"># batch=None flushes the model buffer</span>
+            <span class="k">if</span> <span class="n">result</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">all_results</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+
+        <span class="c1"># Warn if no particles passed the directional_zscore threshold</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">all_results</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">directional_zscore_thr</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No particles passed directional_zscore_thr=</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">directional_zscore_thr</span><span class="si">}</span><span class="s2">. &quot;</span>
+                         <span class="sa">f</span><span class="s2">&quot;All particles were filtered out. Consider lowering the threshold or setting it to None.&quot;</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">all_results</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_save_reconstruction</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">save_to_file</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">materialize</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Saves the reconstructed volume to a file.</span>
+
+<span class="sd">        :param save_to_file: Whether to save the volume to a file.</span>
+<span class="sd">        :param materialize: Whether to generate the full volume or save the components.</span>
+<span class="sd">        :return: The reconstructed volume, or None if not generated.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">vol</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="n">save_to_file</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">results_dir</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">save_to_file</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">materialize</span><span class="p">:</span>
+                    <span class="n">out_fname</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">results_dir</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;reconstruction&quot;</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_outsuffix</span><span class="p">(</span><span class="s2">&quot;mrc&quot;</span><span class="p">))</span>
+                    <span class="n">vol</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">reconstructor</span><span class="o">.</span><span class="n">generate_volume</span><span class="p">(</span><span class="n">out_fname</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">out_fname</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">results_dir</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;mapcomponents&quot;</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_outsuffix</span><span class="p">(</span><span class="s2">&quot;npz&quot;</span><span class="p">))</span>
+                    <span class="n">components</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">reconstructor</span><span class="o">.</span><span class="n">get_buffers</span><span class="p">()</span>
+                    <span class="n">components</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">components</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+                    <span class="n">components</span><span class="p">[</span><span class="s2">&quot;sampling_rate&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="bp">self</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">reconstructor</span><span class="o">.</span><span class="n">sampling_rate</span><span class="p">])</span>
+                    <span class="n">np</span><span class="o">.</span><span class="n">savez</span><span class="p">(</span><span class="n">out_fname</span><span class="p">,</span> <span class="o">**</span><span class="n">components</span><span class="p">)</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">out_fname</span><span class="si">}</span><span class="s2"> saved!&quot;</span><span class="p">,</span> <span class="n">flush</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">vol</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_save_particles_results</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">all_results</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Any</span><span class="p">],</span> <span class="n">dataset</span><span class="p">,</span> <span class="n">save_to_file</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Aggregates the results from all batches and saves them to STAR files.</span>
+
+<span class="sd">        :param all_results: A list of results from all processed batches.</span>
+<span class="sd">        :param dataset: The dataset containing the particle information.</span>
+<span class="sd">        :param save_to_file: Whether to save the results to STAR files.</span>
+<span class="sd">        :return: A list of pandas DataFrames containing the particle metadata with the inference results.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="c1"># Create result tensors to hold data from all batches</span>
+        <span class="n">n_particles</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">v</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">all_results</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">n_particles</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Warning: No particle results to save.&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="p">[]</span>
+
+        <span class="k">assert</span> <span class="n">all_results</span><span class="p">,</span> <span class="s2">&quot;Error, no results were computed&quot;</span>
+        <span class="n">n_poses</span> <span class="o">=</span> <span class="n">all_results</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+        <span class="n">result_arrays</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s1">&#39;eulerdegs&#39;</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">n_particles</span><span class="p">,</span> <span class="n">n_poses</span><span class="p">,</span> <span class="mi">3</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">),</span>
+            <span class="s1">&#39;score&#39;</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">n_particles</span><span class="p">,</span> <span class="n">n_poses</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">),</span>
+            <span class="s1">&#39;shiftsXYangs&#39;</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">n_particles</span><span class="p">,</span> <span class="n">n_poses</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">),</span>
+            <span class="s1">&#39;top1_directional_zscore&#39;</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">n_particles</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">),</span>
+            <span class="s1">&#39;ids&#39;</span><span class="p">:</span> <span class="p">[</span><span class="kc">None</span><span class="p">]</span> <span class="o">*</span> <span class="n">n_particles</span>
+        <span class="p">}</span>
+
+        <span class="c1"># Fill result arrays by concatenating all batch results</span>
+        <span class="n">current_idx</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">for</span> <span class="n">batch_idx</span><span class="p">,</span> <span class="n">elem</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">all_results</span><span class="p">):</span>
+            <span class="n">idd</span><span class="p">,</span> <span class="n">euler_degs</span><span class="p">,</span> <span class="n">pred_shiftsXYangs</span><span class="p">,</span> <span class="n">maxprobs</span><span class="p">,</span> <span class="n">top1_directional_zscore</span> <span class="o">=</span> <span class="n">elem</span>
+
+            <span class="n">batch_size</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">idd</span><span class="p">)</span>
+            <span class="n">end_idx</span> <span class="o">=</span> <span class="n">current_idx</span> <span class="o">+</span> <span class="n">batch_size</span>
+            <span class="n">result_arrays</span><span class="p">[</span><span class="s1">&#39;eulerdegs&#39;</span><span class="p">][</span><span class="n">current_idx</span><span class="p">:</span><span class="n">end_idx</span><span class="p">]</span> <span class="o">=</span> <span class="n">euler_degs</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span>
+            <span class="n">result_arrays</span><span class="p">[</span><span class="s1">&#39;score&#39;</span><span class="p">][</span><span class="n">current_idx</span><span class="p">:</span><span class="n">end_idx</span><span class="p">]</span> <span class="o">=</span> <span class="n">maxprobs</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span>
+            <span class="k">if</span> <span class="n">pred_shiftsXYangs</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">pred_shiftsXYangs</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="o">*</span><span class="n">euler_degs</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="mi">2</span><span class="p">)</span>
+            <span class="n">result_arrays</span><span class="p">[</span><span class="s1">&#39;shiftsXYangs&#39;</span><span class="p">][</span><span class="n">current_idx</span><span class="p">:</span><span class="n">end_idx</span><span class="p">]</span> <span class="o">=</span> <span class="n">pred_shiftsXYangs</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span>
+            <span class="n">result_arrays</span><span class="p">[</span><span class="s1">&#39;top1_directional_zscore&#39;</span><span class="p">][</span><span class="n">current_idx</span><span class="p">:</span><span class="n">end_idx</span><span class="p">]</span> <span class="o">=</span> <span class="n">top1_directional_zscore</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span>
+            <span class="n">result_arrays</span><span class="p">[</span><span class="s1">&#39;ids&#39;</span><span class="p">][</span><span class="n">current_idx</span><span class="p">:</span><span class="n">end_idx</span><span class="p">]</span> <span class="o">=</span> <span class="n">idd</span>
+            <span class="n">current_idx</span> <span class="o">=</span> <span class="n">end_idx</span>
+
+        <span class="n">all_processed_ids_np</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">result_arrays</span><span class="p">[</span><span class="s2">&quot;ids&quot;</span><span class="p">])</span>
+        <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">all_processed_ids_np</span><span class="p">)</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">all_processed_ids_np</span><span class="p">)),</span> \
+            <span class="s2">&quot;Duplicate particle IDs found in the inference results.&quot;</span>
+
+        <span class="c1"># Create a mapping from particle ID to its index in the results array</span>
+        <span class="n">particles_md_list</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">optics_md_list</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">datIdx</span><span class="p">,</span> <span class="n">_dataset</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">dataset</span><span class="o">.</span><span class="n">datasets</span><span class="p">):</span>
+            <span class="n">particlesSet</span> <span class="o">=</span> <span class="n">_dataset</span><span class="o">.</span><span class="n">particles</span>
+            <span class="n">particles_md</span> <span class="o">=</span> <span class="n">particlesSet</span><span class="o">.</span><span class="n">particles_md</span>
+            <span class="n">optics_md</span> <span class="o">=</span> <span class="n">particlesSet</span><span class="o">.</span><span class="n">optics_md</span>
+            <span class="c1"># Find which of the processed IDs are in the current dataset&#39;s index</span>
+            <span class="n">ids_to_update_in_df</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="n">result_indices</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">id_val</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">all_processed_ids_np</span><span class="p">):</span>
+                <span class="k">if</span> <span class="n">id_val</span> <span class="ow">in</span> <span class="n">particles_md</span><span class="o">.</span><span class="n">index</span><span class="p">:</span>
+                    <span class="n">ids_to_update_in_df</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">id_val</span><span class="p">)</span>
+                    <span class="n">result_indices</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">ids_to_update_in_df</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="k">continue</span>
+
+            <span class="c1"># --- Assertion for shape consistency ---</span>
+            <span class="n">num_updates</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">ids_to_update_in_df</span><span class="p">)</span>
+            <span class="k">assert</span> <span class="n">num_updates</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="n">result_indices</span><span class="p">),</span> \
+                <span class="s2">&quot;Shape mismatch between IDs to update and the filtered result data.&quot;</span>
+
+            <span class="c1"># Update the DataFrame with the correctly ordered results</span>
+            <span class="n">particles_md</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">ids_to_update_in_df</span><span class="p">,</span> <span class="n">DIRECTIONAL_ZSCORE_NAME</span><span class="p">]</span> <span class="o">=</span> <span class="n">result_arrays</span><span class="p">[</span><span class="s2">&quot;top1_directional_zscore&quot;</span><span class="p">][</span>
+                <span class="n">result_indices</span><span class="p">]</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>
+            <span class="k">for</span> <span class="n">angname</span> <span class="ow">in</span> <span class="n">RELION_ANGLES_NAMES</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">angname</span> <span class="ow">in</span> <span class="n">particles_md</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+                    <span class="n">particles_md</span><span class="p">[</span><span class="n">angname</span><span class="o">+</span><span class="s2">&quot;_ori&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">particles_md</span><span class="p">[</span><span class="n">angname</span><span class="p">]</span>
+
+            <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_poses</span><span class="p">):</span>
+                <span class="n">suffix</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span> <span class="k">if</span> <span class="n">k</span> <span class="o">==</span> <span class="mi">0</span> <span class="k">else</span> <span class="sa">f</span><span class="s2">&quot;_top</span><span class="si">{</span><span class="n">k</span><span class="o">+</span><span class="mi">1</span><span class="si">}</span><span class="s2">&quot;</span>
+                <span class="n">angles_names</span> <span class="o">=</span> <span class="p">[</span><span class="n">x</span> <span class="o">+</span> <span class="n">suffix</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">RELION_ANGLES_NAMES</span><span class="p">]</span>
+                <span class="n">shiftsXYangs_names</span> <span class="o">=</span> <span class="p">[</span><span class="n">x</span> <span class="o">+</span> <span class="n">suffix</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">RELION_SHIFTS_NAMES</span><span class="p">]</span>
+                <span class="n">confide_name</span> <span class="o">=</span> <span class="n">RELION_PRED_POSE_CONFIDENCE_NAME</span> <span class="o">+</span> <span class="n">suffix</span>
+
+                <span class="k">for</span> <span class="n">col</span> <span class="ow">in</span> <span class="n">angles_names</span> <span class="o">+</span> <span class="n">shiftsXYangs_names</span> <span class="o">+</span> <span class="p">[</span><span class="n">confide_name</span><span class="p">]:</span>
+                    <span class="k">if</span> <span class="n">col</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">particles_md</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+                        <span class="n">particles_md</span><span class="p">[</span><span class="n">col</span><span class="p">]</span> <span class="o">=</span> <span class="mf">0.0</span>
+
+                <span class="n">eulerdegs</span> <span class="o">=</span> <span class="n">result_arrays</span><span class="p">[</span><span class="s2">&quot;eulerdegs&quot;</span><span class="p">][</span><span class="n">result_indices</span><span class="p">,</span> <span class="n">k</span><span class="p">,</span> <span class="p">:]</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>
+                <span class="n">shiftsXYangs</span> <span class="o">=</span> <span class="n">result_arrays</span><span class="p">[</span><span class="s2">&quot;shiftsXYangs&quot;</span><span class="p">][</span><span class="n">result_indices</span><span class="p">,</span> <span class="n">k</span><span class="p">,</span> <span class="p">:]</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debug_stats</span><span class="p">:</span>
+                    <span class="c1">######## Debug code</span>
+                    <span class="n">r1</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">FloatTensor</span><span class="p">(</span><span class="n">Rotation</span><span class="o">.</span><span class="n">from_euler</span><span class="p">(</span><span class="n">RELION_EULER_CONVENTION</span><span class="p">,</span>
+                                                               <span class="n">eulerdegs</span><span class="p">,</span>
+                                                               <span class="n">degrees</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">as_matrix</span><span class="p">())</span>
+                    <span class="n">r2</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">FloatTensor</span><span class="p">(</span><span class="n">Rotation</span><span class="o">.</span><span class="n">from_euler</span><span class="p">(</span><span class="n">RELION_EULER_CONVENTION</span><span class="p">,</span>
+                                                               <span class="n">particles_md</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">ids_to_update_in_df</span><span class="p">,</span> <span class="n">angles_names</span><span class="p">],</span>
+                                                               <span class="n">degrees</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">as_matrix</span><span class="p">())</span>
+                    <span class="n">ang_err</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">rad2deg</span><span class="p">(</span><span class="n">rotation_error_with_sym</span><span class="p">(</span><span class="n">r1</span><span class="p">,</span> <span class="n">r2</span><span class="p">,</span> <span class="n">symmetry</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">symmetry</span><span class="p">))</span>
+
+                    <span class="n">s2</span> <span class="o">=</span> <span class="n">particles_md</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">ids_to_update_in_df</span><span class="p">,</span> <span class="n">shiftsXYangs_names</span><span class="p">]</span><span class="o">.</span><span class="n">values</span>
+                    <span class="n">shift_error</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(((</span><span class="n">shiftsXYangs</span> <span class="o">-</span> <span class="n">s2</span><span class="p">)</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">))</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Median Ang   Displacement (degs) (top-</span><span class="si">{</span><span class="n">k</span><span class="o">+</span><span class="mi">1</span><span class="si">}</span><span class="s2">):&quot;</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">median</span><span class="p">(</span><span class="n">ang_err</span><span class="p">))</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Median Shift Displacement (Angs) (top-</span><span class="si">{</span><span class="n">k</span><span class="o">+</span><span class="mi">1</span><span class="si">}</span><span class="s2">):&quot;</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">median</span><span class="p">(</span><span class="n">shift_error</span><span class="p">))</span>
+                    <span class="c1">######## END of Debug code</span>
+
+                <span class="n">particles_md</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">ids_to_update_in_df</span><span class="p">,</span> <span class="n">angles_names</span><span class="p">]</span> <span class="o">=</span> <span class="n">eulerdegs</span>
+                <span class="n">particles_md</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">ids_to_update_in_df</span><span class="p">,</span> <span class="n">shiftsXYangs_names</span><span class="p">]</span> <span class="o">=</span> <span class="n">shiftsXYangs</span>
+                <span class="n">particles_md</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">ids_to_update_in_df</span><span class="p">,</span> <span class="n">confide_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">result_arrays</span><span class="p">[</span><span class="s2">&quot;score&quot;</span><span class="p">][</span><span class="n">result_indices</span><span class="p">,</span> <span class="n">k</span><span class="p">]</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>
+
+            <span class="n">particles_md_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">particles_md</span><span class="p">)</span>
+            <span class="n">optics_md_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">optics_md</span><span class="p">)</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">results_dir</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">save_to_file</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">particlesSet</span><span class="o">.</span><span class="n">starFname</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">basename</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">particlesSet</span><span class="o">.</span><span class="n">starFname</span><span class="p">)</span><span class="o">.</span><span class="n">removesuffix</span><span class="p">(</span><span class="s2">&quot;.star&quot;</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">basename</span> <span class="o">=</span> <span class="s2">&quot;particles</span><span class="si">%d</span><span class="s2">&quot;</span> <span class="o">%</span> <span class="bp">self</span><span class="o">.</span><span class="n">_last_dataset_processed</span>
+
+                <span class="n">out_fname</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">results_dir</span><span class="p">,</span> <span class="n">basename</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_outsuffix</span><span class="p">(</span><span class="s2">&quot;star&quot;</span><span class="p">))</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Results were saved at </span><span class="si">{</span><span class="n">out_fname</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                <span class="n">particlesSet</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">out_fname</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_last_dataset_processed</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="k">return</span> <span class="n">particles_md_list</span><span class="p">,</span> <span class="n">optics_md_list</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__enter__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__exit__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">exc_type</span><span class="p">,</span> <span class="n">exc_val</span><span class="p">,</span> <span class="n">exc_tb</span><span class="p">):</span>
+        <span class="k">return</span> <span class="kc">False</span>  <span class="c1"># Don&#39;t suppress exceptions</span></div>
+
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="c1"># from lightning import seed_everything</span>
+    <span class="c1"># seed_everything(111)</span>
+    <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="n">constants</span><span class="o">.</span><span class="n">SCRIPT_ENTRY_POINT</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;inferencer.py&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;---------------------------------------&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">))</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;---------------------------------------&quot;</span><span class="p">)</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">autoCLI_config</span><span class="w"> </span><span class="kn">import</span> <span class="n">ConfigArgumentParser</span>
+
+    <span class="n">parser</span> <span class="o">=</span> <span class="n">ConfigArgumentParser</span><span class="p">(</span><span class="n">prog</span><span class="o">=</span><span class="s2">&quot;infer_cryoPARES&quot;</span><span class="p">,</span> <span class="n">description</span><span class="o">=</span><span class="s2">&quot;Run inference with cryoPARES model&quot;</span><span class="p">,</span>
+                                  <span class="n">config_obj</span><span class="o">=</span><span class="n">main_config</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_args_from_function</span><span class="p">(</span><span class="n">SingleInferencer</span><span class="o">.</span><span class="fm">__init__</span><span class="p">)</span>
+    <span class="n">args</span><span class="p">,</span> <span class="n">config_args</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
+    <span class="k">assert</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isdir</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">checkpoint_dir</span><span class="p">),</span> <span class="sa">f</span><span class="s2">&quot;Error, checkpoint_dir </span><span class="si">{</span><span class="n">args</span><span class="o">.</span><span class="n">checkpoint_dir</span><span class="si">}</span><span class="s2"> not found&quot;</span>
+    <span class="n">config_fname</span> <span class="o">=</span> <span class="n">get_most_recent_file</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">checkpoint_dir</span><span class="p">,</span> <span class="s2">&quot;configs_*.yml&quot;</span><span class="p">)</span>
+    <span class="n">ConfigOverrideSystem</span><span class="o">.</span><span class="n">update_config_from_file</span><span class="p">(</span><span class="n">main_config</span><span class="p">,</span> <span class="n">config_fname</span><span class="p">,</span> <span class="n">drop_paths</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;inference&quot;</span><span class="p">,</span> <span class="s2">&quot;projmatching&quot;</span><span class="p">])</span>
+    <span class="n">ConfigOverrideSystem</span><span class="o">.</span><span class="n">update_config_from_configstrings</span><span class="p">(</span><span class="n">main_config</span><span class="p">,</span> <span class="n">config_args</span><span class="p">,</span> <span class="n">verbose</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="k">with</span> <span class="n">SingleInferencer</span><span class="p">(</span><span class="o">**</span><span class="nb">vars</span><span class="p">(</span><span class="n">args</span><span class="p">))</span> <span class="k">as</span> <span class="n">inferencer</span><span class="p">:</span>
+        <span class="n">inferencer</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">python -m cryoPARES.inference.inferencer \</span>
+<span class="sd">--particles_star_fname /home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data/1000particles.star  --results_dir /tmp/cryoPARES_train/cryoPARES_inference/ --particles_dir /home/sanchezg/cryo/data/preAlignedParticles/EMPIAR-10166/data --checkpoint_dir /tmp/cryoPARES_train/version_0/ --NOT_use_cuda --config inference.before_refiner_buffer_size=4 --batch_size 8     </span>
+<span class="sd">    </span>
+<span class="sd">    &quot;&quot;&quot;</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Ruben Sanchez-Garcia.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

@@ -1,0 +1,1067 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>cryoPARES.models.image2sphere.image2sphere &mdash; CryoPARES 0.1.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../_static/documentation_options.js?v=01f34227"></script>
+      <script src="../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../index.html" class="icon icon-home">
+            CryoPARES
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../training_guide.html">Training Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../training_guide.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../training_guide.html#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../training_guide.html#quick-start">Quick Start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../training_guide.html#training-parameters">Training Parameters</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../training_guide.html#essential-parameters">Essential Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../training_guide.html#data-configuration-parameters">Data Configuration Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../training_guide.html#optimizer-configuration">Optimizer Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../training_guide.html#model-architecture-parameters">Model Architecture Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../training_guide.html#data-augmentation-parameters">Data Augmentation Parameters</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../training_guide.html#monitoring-training-with-tensorboard">Monitoring Training with TensorBoard</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../training_guide.html#launching-tensorboard">Launching TensorBoard</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../training_guide.html#key-metrics-to-monitor">Key Metrics to Monitor</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../../training_guide.html#training-loss-loss">1. Training Loss (<code class="docutils literal notranslate"><span class="pre">loss</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../../training_guide.html#validation-loss-val-loss">2. Validation Loss (<code class="docutils literal notranslate"><span class="pre">val_loss</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../../training_guide.html#angular-error-geo-degs-val-geo-degs">3. Angular Error (<code class="docutils literal notranslate"><span class="pre">geo_degs</span></code>, <code class="docutils literal notranslate"><span class="pre">val_geo_degs</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../../training_guide.html#median-angular-error-val-median-geo-degs">4. Median Angular Error (<code class="docutils literal notranslate"><span class="pre">val_median_geo_degs</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../../training_guide.html#learning-rate-lr">5. Learning Rate (<code class="docutils literal notranslate"><span class="pre">lr</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../../training_guide.html#visualization-rotation-matrices">6. Visualization: Rotation Matrices</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../training_guide.html#example-tensorboard-monitoring-session">Example TensorBoard Monitoring Session</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../training_guide.html#overfitting-and-underfitting">Overfitting and Underfitting</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../training_guide.html#what-is-overfitting">What is Overfitting?</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../training_guide.html#what-is-underfitting">What is Underfitting?</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../training_guide.html#the-sweet-spot">The Sweet Spot</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../training_guide.html#data-preprocessing">Data Preprocessing</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../training_guide.html#image-size-and-sampling-rate">Image Size and Sampling Rate</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../training_guide.html#masking">Masking</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../training_guide.html#ctf-correction">CTF Correction</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../training_guide.html#advanced-training-options">Advanced Training Options</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../training_guide.html#continue-training">Continue Training</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../training_guide.html#fine-tuning">Fine-tuning</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../training_guide.html#half-set-training">Half-Set Training</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../training_guide.html#simulated-pre-training">Simulated Pre-training</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../training_guide.html#model-compilation">Model Compilation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../training_guide.html#debugging-overfitting-on-small-batches">Debugging: Overfitting on Small Batches</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../training_guide.html#troubleshooting-training-issues">Troubleshooting Training Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../training_guide.html#training-is-very-slow">Training is very slow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../training_guide.html#out-of-memory-errors">Out of memory errors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../training_guide.html#too-many-open-files-error">“Too many open files” error</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../training_guide.html#loss-is-nan">Loss is NaN</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../training_guide.html#model-not-improving">Model not improving</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../training_guide.html#validation-loss-jumps-around">Validation loss jumps around</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../training_guide.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../configuration_guide.html">Configuration Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../configuration_guide.html#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../configuration_guide.html#configuration-system-overview">Configuration System Overview</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../configuration_guide.html#configuration-sources-in-order-of-precedence">Configuration Sources (in order of precedence)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../configuration_guide.html#using-config-overrides">Using Config Overrides</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../configuration_guide.html#using-yaml-config-files">Using YAML Config Files</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../configuration_guide.html#viewing-available-options">Viewing Available Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../configuration_guide.html#configuration-hierarchy">Configuration Hierarchy</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../configuration_guide.html#reading-configuration-files">Reading Configuration Files</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../configuration_guide.html#configuration-file-locations">Configuration File Locations</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../configuration_guide.html#how-to-read-configuration-files">How to Read Configuration Files</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../configuration_guide.html#example-finding-training-parameters">Example: Finding Training Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../configuration_guide.html#example-finding-nested-parameters">Example: Finding Nested Parameters</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../configuration_guide.html#quick-parameter-reference">Quick Parameter Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../configuration_guide.html#saving-and-loading-configurations">Saving and Loading Configurations</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../configuration_guide.html#exporting-current-configuration">Exporting Current Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../configuration_guide.html#reusing-a-configuration">Reusing a Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../configuration_guide.html#overriding-loaded-config">Overriding Loaded Config</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../configuration_guide.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../cli.html">Command-Line Interface</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../cli.html#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../cli.html#cryopares-train"><code class="docutils literal notranslate"><span class="pre">cryopares_train</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../cli.html#usage">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../cli.html#parameters">Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../cli.html#configuration-overrides">Configuration Overrides</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../cli.html#view-all-config-options">View All Config Options</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../cli.html#examples">Examples</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../cli.html#important-notes">Important Notes</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../cli.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../cli.html#cryopares-infer"><code class="docutils literal notranslate"><span class="pre">cryopares_infer</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../cli.html#id1">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../cli.html#id2">Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../cli.html#id3">Configuration Overrides</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../cli.html#id4">Examples</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../cli.html#output-files">Output Files</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../cli.html#id5">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../cli.html#cryopares-projmatching"><code class="docutils literal notranslate"><span class="pre">cryopares_projmatching</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../cli.html#id6">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../cli.html#id7">Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../cli.html#example">Example</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../cli.html#cryopares-reconstruct"><code class="docutils literal notranslate"><span class="pre">cryopares_reconstruct</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../cli.html#id8">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../cli.html#id9">Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../cli.html#id10">Example</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../cli.html#compactify-checkpoint"><code class="docutils literal notranslate"><span class="pre">compactify_checkpoint</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../cli.html#id11">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../cli.html#required-arguments">Required Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../cli.html#optional-arguments">Optional Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../cli.html#id12">Examples</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../cli.html#what-s-included">What’s Included</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../cli.html#size-reduction">Size Reduction</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../cli.html#using-compactified-checkpoints">Using Compactified Checkpoints</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../cli.html#utility-scripts">Utility Scripts</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../cli.html#gmm-histogram-analysis">GMM Histogram Analysis</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../cli.html#fsc-computation">FSC Computation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../cli.html#pose-comparison">Pose Comparison</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../cli.html#learning-curve-visualization">Learning Curve Visualization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../cli.html#star-file-histograms">STAR File Histograms</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../cli.html#id13">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../troubleshooting.html">Troubleshooting Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../troubleshooting.html#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../troubleshooting.html#installation-issues">Installation Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#pip-install-fails-with-dependency-conflicts">pip install fails with dependency conflicts</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#importerror-no-module-named-cryopares">ImportError: No module named ‘cryoPARES’</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#cuda-version-mismatch">CUDA version mismatch</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../troubleshooting.html#configuration-issues">Configuration Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#type-mismatch-errors-when-using-config">Type mismatch errors when using –config</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../troubleshooting.html#file-system-issues">File System Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#too-many-open-files-error">“Too many open files” error</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#permission-denied-when-writing-outputs">Permission denied when writing outputs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#particle-files-not-found">Particle files not found</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../troubleshooting.html#memory-issues">Memory Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#out-of-memory-oom-during-training">Out of memory (OOM) during training</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#out-of-memory-during-inference">Out of memory during inference</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#ram-exhausted-when-loading-data">RAM exhausted when loading data</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../troubleshooting.html#training-issues">Training Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#loss-becomes-nan">Loss becomes NaN</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#training-doesn-t-improve">Training doesn’t improve</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#validation-loss-higher-than-training-loss">Validation loss higher than training loss</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#training-crashes-with-killed">Training crashes with “Killed”</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#checkpoints-not-saving">Checkpoints not saving</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../troubleshooting.html#inference-issues">Inference Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#predicted-poses-are-random">Predicted poses are random</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#reconstruction-is-blurry">Reconstruction is blurry</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#no-particles-passed-confidence-threshold">“No particles passed confidence threshold”</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#inference-slower-than-expected">Inference slower than expected</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../troubleshooting.html#data-issues">Data Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#ctf-parameters-missing">CTF parameters missing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#orientation-columns-missing">Orientation columns missing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#particles-are-poorly-centered">Particles are poorly centered</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#different-sampling-rate-in-data-vs-reference">Different sampling rate in data vs. reference</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../troubleshooting.html#performance-issues">Performance Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#training-is-very-slow">Training is very slow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#inference-is-very-slow">Inference is very slow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#data-loading-is-bottleneck">Data loading is bottleneck</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../troubleshooting.html#cuda-gpu-issues">CUDA/GPU Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#cuda-out-of-memory-but-gpu-seems-empty">“CUDA out of memory” but GPU seems empty</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#multiple-gpus-not-being-used">Multiple GPUs not being used</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#gpu-slower-than-expected">GPU slower than expected</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../troubleshooting.html#output-quality-issues">Output Quality Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#reconstruction-has-artifacts">Reconstruction has artifacts</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#fsc-is-lower-than-expected">FSC is lower than expected</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#reconstructed-map-has-wrong-hand">Reconstructed map has wrong hand</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../troubleshooting.html#getting-more-help">Getting More Help</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#enable-debug-mode">Enable Debug Mode</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#check-logs">Check Logs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../troubleshooting.html#report-issues">Report Issues</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../troubleshooting.html#see-also">See Also</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../api/index.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../../api/index.html#core-modules">Core Modules</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../../api/training.html">Training API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../../api/training.html#module-cryoPARES.train.train">Main Training Module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../../api/training.html#module-cryoPARES.train.runTrainOnePartition">Training Execution</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../api/inference.html">Inference API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../../api/inference.html#module-cryoPARES.inference.inferencer">Single Inferencer</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../../api/inference.html#module-cryoPARES.inference.infer">Distributed Inference</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../../api/inference.html#daemon-mode">Daemon Mode</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../api/projection_matching.html">Projection Matching API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../../api/projection_matching.html#module-cryoPARES.projmatching.projMatcher">Projection Matcher</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../../api/projection_matching.html#module-cryoPARES.projmatching.projmatching">Command-Line Interface</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../api/reconstruction.html">Reconstruction API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../../api/reconstruction.html#module-cryoPARES.reconstruction.reconstructor">Reconstructor</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../../api/reconstruction.html#module-cryoPARES.reconstruction.reconstruct">Command-Line Interface</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../api/data_management.html">Data Management API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../../api/data_management.html#module-cryoPARES.datamanager.datamanager">Data Manager</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../../api/data_management.html#module-cryoPARES.datamanager.particlesDataset">Particles Dataset</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../../api/data_management.html#module-cryoPARES.datamanager.augmentations">Augmentations</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../../api/data_management.html#module-cryoPARES.datamanager.ctf.rfft_ctf">CTF Correction</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../api/models.html">Models API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../../api/models.html#module-cryoPARES.models.model">PyTorch Lightning Model</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../../api/models.html#module-cryoPARES.models.image2sphere.image2sphere">Image2Sphere Network</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../../api/models.html#image-encoders">Image Encoders</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../../api/models.html#module-cryoPARES.models.directionalNormalizer.directionalNormalizer">Directional Normalizer</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../../api/utils.html">Utilities API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../../api/utils.html#checkpoint-management">Checkpoint Management</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../../api/utils.html#module-cryoPARES.utils.paths">Path Utilities</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../../api/utils.html#module-cryoPARES.utils.torchUtils">PyTorch Utilities</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../../api/utils.html#module-cryoPARES.utils.reconstructionUtils">Reconstruction Utilities</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../../api/utils.html#geometry-utilities">Geometry Utilities</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Additional Resources</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference external" href="https://github.com/rsanchezgarc/cryoPARES">GitHub Repository</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://www.biorxiv.org/content/10.1101/2025.03.04.641536v2">Paper</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../index.html">CryoPARES</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">cryoPARES.models.image2sphere.image2sphere</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for cryoPARES.models.image2sphere.image2sphere</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span><span class="w"> </span><span class="nn">functools</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections</span><span class="w"> </span><span class="kn">import</span> <span class="n">defaultdict</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">dataclasses</span><span class="w"> </span><span class="kn">import</span> <span class="n">asdict</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">Any</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">e3nn</span><span class="w"> </span><span class="kn">import</span> <span class="n">o3</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">torch</span><span class="w"> </span><span class="kn">import</span> <span class="n">nn</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryoPARES.cacheManager</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_cache</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryoPARES.configs.mainConfig</span><span class="w"> </span><span class="kn">import</span> <span class="n">main_config</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryoPARES.constants</span><span class="w"> </span><span class="kn">import</span> <span class="n">BATCH_PARTICLES_NAME</span><span class="p">,</span> <span class="n">SCRIPT_ENTRY_POINT</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryoPARES.datamanager.datamanager</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_example_random_batch</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryoPARES.geometry.metrics_angles</span><span class="w"> </span><span class="kn">import</span> <span class="n">mean_rot_matrix</span><span class="p">,</span> <span class="n">rotation_error_rads</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryoPARES.geometry.nearest_neigs_sphere</span><span class="w"> </span><span class="kn">import</span> <span class="n">compute_nearest_neighbours</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryoPARES.models.image2sphere.imageEncoder.imageEncoder</span><span class="w"> </span><span class="kn">import</span> <span class="n">ImageEncoder</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryoPARES.models.image2sphere.so3Components</span><span class="w"> </span><span class="kn">import</span> <span class="n">S2Conv</span><span class="p">,</span> <span class="n">SO3Conv</span><span class="p">,</span> <span class="n">I2SProjector</span><span class="p">,</span> <span class="n">SO3OutputGrid</span><span class="p">,</span> <span class="n">SO3Activation</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">autoCLI_config</span><span class="w"> </span><span class="kn">import</span> <span class="n">inject_defaults_from_config</span><span class="p">,</span> <span class="n">CONFIG_PARAM</span>
+
+
+<div class="viewcode-block" id="Image2Sphere">
+<a class="viewcode-back" href="../../../../api/models.html#cryoPARES.models.image2sphere.image2sphere.Image2Sphere">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">Image2Sphere</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">    Instantiate Image2Sphere-style network for predicting distributions over SO(3) from</span>
+<span class="sd">    single image</span>
+<span class="sd">    &#39;&#39;&#39;</span>
+
+    <span class="n">cache</span> <span class="o">=</span> <span class="n">get_cache</span><span class="p">(</span><span class="n">cache_name</span><span class="o">=</span><span class="vm">__qualname__</span><span class="p">)</span>
+
+<div class="viewcode-block" id="Image2Sphere.__init__">
+<a class="viewcode-back" href="../../../../api/models.html#cryoPARES.models.image2sphere.image2sphere.Image2Sphere.__init__">[docs]</a>
+    <span class="nd">@inject_defaults_from_config</span><span class="p">(</span><span class="n">main_config</span><span class="o">.</span><span class="n">models</span><span class="o">.</span><span class="n">image2sphere</span><span class="p">,</span> <span class="n">update_config_with_args</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">symmetry</span><span class="p">:</span><span class="nb">str</span><span class="p">,</span> <span class="n">lmax</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">CONFIG_PARAM</span><span class="p">(),</span>
+                 <span class="n">hp_order</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">CONFIG_PARAM</span><span class="p">(</span><span class="n">config</span><span class="o">=</span><span class="n">main_config</span><span class="o">.</span><span class="n">models</span><span class="o">.</span><span class="n">image2sphere</span><span class="o">.</span><span class="n">so3components</span><span class="o">.</span><span class="n">so3outputgrid</span><span class="p">),</span>
+                 <span class="n">label_smoothing</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">CONFIG_PARAM</span><span class="p">(),</span>
+                 <span class="n">num_augmented_copies_per_batch</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="n">CONFIG_PARAM</span><span class="p">(</span><span class="n">config</span><span class="o">=</span><span class="n">main_config</span><span class="o">.</span><span class="n">datamanager</span><span class="p">),</span>
+                 <span class="n">enforce_symmetry</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="n">CONFIG_PARAM</span><span class="p">(),</span>
+                 <span class="n">encoder</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                 <span class="n">use_simCLR</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="n">CONFIG_PARAM</span><span class="p">(),</span>
+                 <span class="n">simCLR_temperature</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">CONFIG_PARAM</span><span class="p">(),</span>
+                 <span class="n">simCLR_loss_weight</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">CONFIG_PARAM</span><span class="p">(),</span>
+                 <span class="n">average_neigs_for_pred</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="n">CONFIG_PARAM</span><span class="p">(),</span>
+                 <span class="n">example_batch</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">encoder</span> <span class="o">=</span> <span class="n">encoder</span> <span class="k">if</span> <span class="n">encoder</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">ImageEncoder</span><span class="p">()</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">symmetry</span> <span class="o">=</span> <span class="n">symmetry</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">lmax</span> <span class="o">=</span> <span class="n">lmax</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">hp_order_output</span> <span class="o">=</span> <span class="n">hp_order</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">label_smoothing</span> <span class="o">=</span> <span class="n">label_smoothing</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">num_augmented_copies_per_batch</span> <span class="o">=</span> <span class="n">num_augmented_copies_per_batch</span> <span class="c1">#TODO: refactor SimCLR</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">use_simCLR</span> <span class="o">=</span> <span class="n">use_simCLR</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">simCLR_temperature</span> <span class="o">=</span> <span class="n">simCLR_temperature</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">simCLR_loss_weight</span> <span class="o">=</span> <span class="n">simCLR_loss_weight</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">n_neigs_to_compute</span> <span class="o">=</span> <span class="n">main_config</span><span class="o">.</span><span class="n">models</span><span class="o">.</span><span class="n">image2sphere</span><span class="o">.</span><span class="n">n_neigs_to_compute</span>
+
+        <span class="k">if</span> <span class="n">example_batch</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">example_batch</span> <span class="o">=</span> <span class="n">get_example_random_batch</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="n">example_batch</span><span class="p">[</span><span class="n">BATCH_PARTICLES_NAME</span><span class="p">]</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">encoder</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">projector</span> <span class="o">=</span> <span class="n">I2SProjector</span><span class="p">(</span><span class="n">fmap_shape</span><span class="o">=</span><span class="n">out</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">:],</span> <span class="n">lmax</span><span class="o">=</span><span class="n">lmax</span><span class="p">)</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">projector</span><span class="p">(</span><span class="n">out</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">s2_conv</span> <span class="o">=</span> <span class="n">S2Conv</span><span class="p">(</span><span class="n">f_in</span><span class="o">=</span><span class="n">out</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">lmax</span><span class="o">=</span><span class="n">lmax</span><span class="p">)</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">s2_conv</span><span class="p">(</span><span class="n">out</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">so3_act</span> <span class="o">=</span> <span class="n">SO3Activation</span><span class="p">(</span><span class="n">lmax</span><span class="o">=</span><span class="n">lmax</span><span class="p">)</span>
+
+        <span class="n">out</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">so3_act</span><span class="p">(</span><span class="n">out</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">so3_conv</span> <span class="o">=</span> <span class="n">SO3Conv</span><span class="p">(</span><span class="n">f_in</span><span class="o">=</span><span class="n">out</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">lmax</span><span class="o">=</span><span class="n">lmax</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">so3_grid</span> <span class="o">=</span> <span class="n">SO3OutputGrid</span><span class="p">(</span><span class="n">lmax</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">lmax</span><span class="p">,</span> <span class="n">hp_order</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">hp_order_output</span><span class="p">,</span> <span class="n">symmetry</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">symmetry</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">symmetry</span> <span class="o">=</span> <span class="n">symmetry</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">has_symmetry</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">symmetry</span> <span class="o">!=</span> <span class="s2">&quot;C1&quot;</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">enforce_symmetry</span> <span class="o">=</span> <span class="n">enforce_symmetry</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">average_neigs_for_pred</span> <span class="o">=</span> <span class="n">average_neigs_for_pred</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_initialize_caches</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_initialize_neigs</span><span class="p">()</span> <span class="c1"># Register nearest neighbors buffer</span>
+
+        <span class="k">if</span> <span class="n">average_neigs_for_pred</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">forward</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">forward_with_neigs</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">forward</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">forward_standard</span></div>
+
+
+    <span class="nd">@torch</span><span class="o">.</span><span class="n">jit</span><span class="o">.</span><span class="n">ignore</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_initialize_neigs</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">k</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Initialize nearest neighbors matrix.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">k</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">k</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_neigs_to_compute</span>
+        <span class="n">euler_angles</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">so3_grid</span><span class="o">.</span><span class="n">output_eulerRad_yxy</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span>
+        <span class="n">neigs</span> <span class="o">=</span> <span class="n">compute_nearest_neighbours</span><span class="p">(</span>
+                <span class="n">euler_angles</span><span class="p">,</span>
+                <span class="n">k</span><span class="o">=</span><span class="n">k</span><span class="p">,</span>
+                <span class="n">cache_dir</span><span class="o">=</span><span class="n">main_config</span><span class="o">.</span><span class="n">cachedir</span><span class="p">,</span>
+                <span class="n">n_jobs</span><span class="o">=</span><span class="mi">1</span> <span class="c1">#TODO: Use more jobs. Read from config the num of threads</span>
+            <span class="p">)[</span><span class="s2">&quot;nearest_neigbours&quot;</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">register_buffer</span><span class="p">(</span><span class="s2">&quot;_neigs&quot;</span><span class="p">,</span> <span class="n">neigs</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_neigs</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_initialize_caches</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># self.register_buffer(&quot;_cached_batch_size_range&quot;, torch.tensor(-1, dtype=torch.int64), persistent=False)</span>
+        <span class="c1"># self.register_buffer(&quot;_cached_batch_indices&quot;, torch.empty(0, dtype=torch.int64), persistent=False)</span>
+
+        <span class="n">batch_size</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">main_config</span><span class="o">.</span><span class="n">train</span><span class="o">.</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">main_config</span><span class="o">.</span><span class="n">inference</span><span class="o">.</span><span class="n">batch_size</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_max_indices_buffer_size</span> <span class="o">=</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">batch_size</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">register_buffer</span><span class="p">(</span><span class="s2">&quot;_indices_buffer&quot;</span><span class="p">,</span>
+                           <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_max_indices_buffer_size</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">long</span><span class="p">),</span>
+                           <span class="n">persistent</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+<div class="viewcode-block" id="Image2Sphere.predict_wignerDs">
+<a class="viewcode-back" href="../../../../api/models.html#cryoPARES.models.image2sphere.image2sphere.Image2Sphere.predict_wignerDs">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">predict_wignerDs</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+
+<span class="sd">        :param x: image, tensor of shape (B, c, L, L)</span>
+<span class="sd">        :return: flatten so3 irreps</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="n">x</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">encoder</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">projector</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">s2_conv</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="c1">#Conv2 does not work the same as before</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">so3_act</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">so3_conv</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">x</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_from_wignerD_to_logits</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
+        <span class="n">rotMat_logits</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">matmul</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">so3_grid</span><span class="o">.</span><span class="n">output_wigners</span><span class="p">)</span><span class="o">.</span><span class="n">squeeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">enforce_symmetry</span><span class="p">:</span>
+            <span class="n">rotMat_logits</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">so3_grid</span><span class="o">.</span><span class="n">aggregate_symmetry</span><span class="p">(</span><span class="n">rotMat_logits</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">rotMat_logits</span>
+
+
+<div class="viewcode-block" id="Image2Sphere.from_wignerD_to_topKMats">
+<a class="viewcode-back" href="../../../../api/models.html#cryoPARES.models.image2sphere.image2sphere.Image2Sphere.from_wignerD_to_topKMats">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">from_wignerD_to_topKMats</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">wD</span><span class="p">,</span> <span class="n">k</span><span class="p">:</span><span class="nb">int</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+
+<span class="sd">        :param wD: The wignerD matrices</span>
+<span class="sd">        :param k: The number of top-K matrices to report</span>
+<span class="sd">        :return:</span>
+<span class="sd">            rotMat_logits: (BxP) The logits obtained from the wignerD matrices by projecting them to the SO(3) grid</span>
+<span class="sd">            pred_rotmat_id: (BxK) The top-K rotation matrix idxs. They refer to the original idxs, not the subset selected according to symmetry reduction</span>
+<span class="sd">            pred_rotmat: (BxKx3x3) The top-K rotation matrices. They refer to the original matrices, not the subset selected according to symmetry reduction</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">rotMat_logits</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_from_wignerD_to_logits</span><span class="p">(</span><span class="n">wD</span><span class="p">)</span> <span class="c1">#This has symmetry summed values (symmetry contraction)</span>
+        <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">no_grad</span><span class="p">():</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">enforce_symmetry</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">so3_grid</span><span class="o">.</span><span class="n">has_symmetry</span><span class="p">:</span>
+                <span class="n">reduced_sym_selected_idxs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">so3_grid</span><span class="o">.</span><span class="n">selected_rotmat_idxs</span>
+                <span class="n">_rotMat_logits</span> <span class="o">=</span> <span class="n">rotMat_logits</span><span class="p">[:,</span> <span class="n">reduced_sym_selected_idxs</span><span class="p">]</span>
+                <span class="n">_</span><span class="p">,</span> <span class="n">pred_rotmat_id</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">topk</span><span class="p">(</span><span class="n">_rotMat_logits</span><span class="p">,</span> <span class="n">k</span><span class="o">=</span><span class="n">k</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span> <span class="n">largest</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+                <span class="n">pred_rotmat_id</span> <span class="o">=</span> <span class="n">reduced_sym_selected_idxs</span><span class="p">[</span><span class="n">pred_rotmat_id</span><span class="p">]</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">_</span><span class="p">,</span> <span class="n">pred_rotmat_id</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">topk</span><span class="p">(</span><span class="n">rotMat_logits</span><span class="p">,</span> <span class="n">k</span><span class="o">=</span><span class="n">k</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span> <span class="n">largest</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+            <span class="n">pred_rotmat</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">so3_grid</span><span class="o">.</span><span class="n">output_rotmats</span><span class="p">[</span><span class="n">pred_rotmat_id</span><span class="p">]</span>
+        <span class="k">return</span> <span class="n">rotMat_logits</span><span class="p">,</span> <span class="n">pred_rotmat_id</span><span class="p">,</span> <span class="n">pred_rotmat</span></div>
+
+
+<div class="viewcode-block" id="Image2Sphere.forward_standard">
+<a class="viewcode-back" href="../../../../api/models.html#cryoPARES.models.image2sphere.image2sphere.Image2Sphere.forward_standard">[docs]</a>
+    <span class="nd">@torch</span><span class="o">.</span><span class="n">jit</span><span class="o">.</span><span class="n">export</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward_standard</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">img</span><span class="p">:</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">top_k</span><span class="p">:</span><span class="nb">int</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&#39;&#39;&#39;</span>
+
+<span class="sd">        :img: float tensor of shape (B, c, L, L)</span>
+<span class="sd">        :top_k: int number of top K elements to return</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        <span class="n">wD</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">predict_wignerDs</span><span class="p">(</span><span class="n">img</span><span class="p">)</span>
+        <span class="n">rotMat_logits</span><span class="p">,</span> <span class="n">pred_rotmat_id</span><span class="p">,</span> <span class="n">pred_rotmat</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">from_wignerD_to_topKMats</span><span class="p">(</span><span class="n">wD</span><span class="p">,</span> <span class="n">top_k</span><span class="p">)</span>
+
+        <span class="n">probs</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">functional</span><span class="o">.</span><span class="n">softmax</span><span class="p">(</span><span class="n">rotMat_logits</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">maxprob</span> <span class="o">=</span> <span class="n">probs</span><span class="o">.</span><span class="n">gather</span><span class="p">(</span><span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="n">pred_rotmat_id</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">wD</span><span class="p">,</span> <span class="n">rotMat_logits</span><span class="p">,</span> <span class="n">pred_rotmat_id</span><span class="p">,</span> <span class="n">pred_rotmat</span><span class="p">,</span> <span class="n">maxprob</span></div>
+
+
+<div class="viewcode-block" id="Image2Sphere.forward_with_neigs">
+<a class="viewcode-back" href="../../../../api/models.html#cryoPARES.models.image2sphere.image2sphere.Image2Sphere.forward_with_neigs">[docs]</a>
+    <span class="nd">@torch</span><span class="o">.</span><span class="n">jit</span><span class="o">.</span><span class="n">export</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward_with_neigs</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">img</span><span class="p">:</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">top_k</span><span class="p">:</span><span class="nb">int</span><span class="p">):</span>
+
+        <span class="n">wD</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">predict_wignerDs</span><span class="p">(</span><span class="n">img</span><span class="p">)</span>
+        <span class="n">rotMat_logits</span><span class="p">,</span> <span class="n">pred_rotmat_id</span><span class="p">,</span> <span class="n">pred_rotmat</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">from_wignerD_to_topKMats</span><span class="p">(</span><span class="n">wD</span><span class="p">,</span> <span class="n">top_k</span><span class="p">)</span>
+        <span class="c1"># If self.enforce_symmetry == True, then pred_rotmat_id contain indices corresponding to a reduced area of the projection sphere that covers all the possible views</span>
+        <span class="c1"># Thus, if self.enforce_symmetry == True, the top-K won&#39;t have K-picks of equivalent points according to the symmetry</span>
+        <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">no_grad</span><span class="p">():</span>
+            <span class="n">probs</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">functional</span><span class="o">.</span><span class="n">softmax</span><span class="p">(</span><span class="n">rotMat_logits</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+            <span class="n">neigs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_neigs_matrix</span><span class="p">()[</span><span class="n">pred_rotmat_id</span><span class="p">,:]</span> <span class="c1">#These are the neigs of the top-K predicted rotation matrices</span>
+            <span class="n">batch_indices</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_batch_indices</span><span class="p">(</span><span class="n">neigs</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">neigs</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+            <span class="n">_probs</span> <span class="o">=</span> <span class="n">probs</span><span class="p">[</span><span class="n">batch_indices</span><span class="p">[:,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">],</span> <span class="n">neigs</span><span class="p">]</span>
+            <span class="n">maxprob</span> <span class="o">=</span> <span class="n">_probs</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">keepdim</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+            <span class="n">_rotmats</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">so3_grid</span><span class="o">.</span><span class="n">output_rotmats</span><span class="p">[</span><span class="n">neigs</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span>
+            <span class="n">_probs</span> <span class="o">=</span> <span class="n">_probs</span> <span class="o">/</span> <span class="n">maxprob</span>
+            <span class="n">pred_rotmat</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">mean_rot_matrix</span><span class="p">(</span><span class="n">_rotmats</span><span class="p">,</span> <span class="n">weights</span><span class="o">=</span><span class="n">_probs</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">compute_dispersion</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+            <span class="c1"># from scipy.spatial.transform import Rotation as R</span>
+            <span class="c1"># print(_probs.round(decimals=3))</span>
+            <span class="c1"># print(R.from_matrix(_rotmats[torch.arange(4),_probs.argmax(-1)]).as_euler(&quot;ZYZ&quot;, degrees=True).round(3))</span>
+            <span class="c1"># print(R.from_matrix(pred_rotmat).as_euler(&quot;ZYZ&quot;, degrees=True).round(3))</span>
+        <span class="k">return</span> <span class="n">wD</span><span class="p">,</span> <span class="n">rotMat_logits</span><span class="p">,</span> <span class="n">pred_rotmat_id</span><span class="p">,</span> <span class="n">pred_rotmat</span><span class="p">,</span> <span class="n">maxprob</span><span class="o">.</span><span class="n">squeeze</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span></div>
+
+
+    <span class="c1"># def __get_batch_indices(self, batch_size: int, device: torch.device) -&gt; torch.Tensor:</span>
+    <span class="c1">#     &quot;&quot;&quot;</span>
+    <span class="c1">#     Used for indexing in forward_with_neigs</span>
+    <span class="c1">#     :param batch_size:</span>
+    <span class="c1">#     :param device:</span>
+    <span class="c1">#     :return:</span>
+    <span class="c1">#     &quot;&quot;&quot;</span>
+    <span class="c1">#     if self._cached_batch_size_range != batch_size or self._cached_batch_indices.device != device:</span>
+    <span class="c1">#         # Update cache</span>
+    <span class="c1">#         indices = torch.arange(batch_size, device=device)</span>
+    <span class="c1">#         self._cached_batch_indices = indices</span>
+    <span class="c1">#         self._cached_batch_size_range.copy_(torch.tensor(batch_size, device=device))</span>
+    <span class="c1">#     return self._cached_batch_indices</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_get_batch_indices</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">batch_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">device</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">device</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Memory-efficient batch indices using pre-allocated buffer&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">batch_size</span> <span class="o">&lt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_max_indices_buffer_size</span><span class="p">:</span>
+            <span class="c1"># Use pre-allocated buffer</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_indices_buffer</span><span class="o">.</span><span class="n">device</span> <span class="o">!=</span> <span class="n">device</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_indices_buffer</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_indices_buffer</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">,</span> <span class="n">non_blocking</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_indices_buffer</span><span class="p">[:</span><span class="n">batch_size</span><span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># For very large batches, create new tensor</span>
+            <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_get_neigs_matrix</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+
+<span class="sd">        :param k: The number of nearest neighbours to compute</span>
+<span class="sd">        :return: Tesor Pxk, where P is the number of points in SO(3) and k is the number of nearest neigbors</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># neigs = getattr(self, &quot;_neigs&quot;, None)</span>
+        <span class="c1"># if neigs is None:</span>
+        <span class="c1">#     self._initialize_neigs()</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_neigs</span>
+
+
+<div class="viewcode-block" id="Image2Sphere.compute_probabilities">
+<a class="viewcode-back" href="../../../../api/models.html#cryoPARES.models.image2sphere.image2sphere.Image2Sphere.compute_probabilities">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">compute_probabilities</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">img</span><span class="p">,</span> <span class="n">hp_order</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+
+        <span class="k">if</span> <span class="n">hp_order</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">so3_grid</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">so3_grid</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">so3_grid</span> <span class="o">=</span> <span class="n">SO3OutputGrid</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">lmax</span><span class="p">,</span> <span class="n">hp_order</span><span class="p">,</span> <span class="n">symmetry</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">symmetry</span><span class="p">)</span>
+
+        <span class="n">x</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">predict_wignerDs</span><span class="p">(</span><span class="n">img</span><span class="p">)</span>
+        <span class="n">logits</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">matmul</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">so3_grid</span><span class="o">.</span><span class="n">output_wigners</span><span class="p">)</span><span class="o">.</span><span class="n">squeeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">probs</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Softmax</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)(</span><span class="n">logits</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">probs</span><span class="p">,</span> <span class="n">so3_grid</span><span class="o">.</span><span class="n">output_rotmats</span></div>
+
+
+
+<div class="viewcode-block" id="Image2Sphere.simCLR_like_loss">
+<a class="viewcode-back" href="../../../../api/models.html#cryoPARES.models.image2sphere.image2sphere.Image2Sphere.simCLR_like_loss">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">simCLR_like_loss</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">wD</span><span class="p">,</span> <span class="n">temperature</span><span class="o">=</span><span class="mf">0.5</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Compute SimCLR-like contrastive loss using in-plane rotation invariant features.</span>
+
+<span class="sd">        The loss encourages different augmented views of the same particle to have similar</span>
+<span class="sd">        representations in the spherical harmonic feature space (which is invariant to in-plane rotations).</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            wD: Wigner-D coefficients of shape (B, 1, D) where B = num_particles * num_augmented_copies_per_batch</span>
+<span class="sd">            temperature: Temperature parameter for NT-Xent loss (controls concentration)</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Scalar contrastive loss value</span>
+
+<span class="sd">        Implementation details:</span>
+<span class="sd">            1. Extract spherical harmonic coefficients (m&#39;=0 column) which are invariant to in-plane rotations</span>
+<span class="sd">            2. Reshape to group augmented copies: (num_particles, num_augmented_copies, feature_dim)</span>
+<span class="sd">            3. Compute NT-Xent (Normalized Temperature-scaled Cross Entropy) loss</span>
+<span class="sd">            4. Positive pairs: different augmented views of same particle</span>
+<span class="sd">            5. Negative pairs: views from different particles</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_augmented_copies_per_batch</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_augmented_copies_per_batch</span> <span class="o">&lt;=</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="c1"># No augmented copies, contrastive loss not applicable</span>
+            <span class="k">return</span> <span class="mf">0.0</span>
+
+        <span class="c1"># Extract in-plane rotation invariant spherical harmonic features</span>
+        <span class="c1"># wD shape: (B, 1, D) -&gt; sh_coeffs shape: (B, D&#39;)</span>
+        <span class="n">sh_coeffs</span> <span class="o">=</span> <span class="n">extract_sh_coeffs_fast</span><span class="p">(</span><span class="n">wD</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">lmax</span><span class="p">)</span><span class="o">.</span><span class="n">squeeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+
+        <span class="n">batch_size</span> <span class="o">=</span> <span class="n">sh_coeffs</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">num_aug</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_augmented_copies_per_batch</span>
+
+        <span class="c1"># Verify batch size is divisible by num_augmented_copies</span>
+        <span class="k">if</span> <span class="n">batch_size</span> <span class="o">%</span> <span class="n">num_aug</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;Error, batch_size % num_aug == 0 required &quot;</span><span class="p">)</span>
+
+        <span class="n">num_particles</span> <span class="o">=</span> <span class="n">batch_size</span> <span class="o">//</span> <span class="n">num_aug</span>
+        <span class="n">feature_dim</span> <span class="o">=</span> <span class="n">sh_coeffs</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+
+        <span class="c1"># Reshape to group augmented copies: (num_particles, num_aug, feature_dim)</span>
+        <span class="n">sh_coeffs</span> <span class="o">=</span> <span class="n">sh_coeffs</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">num_particles</span><span class="p">,</span> <span class="n">num_aug</span><span class="p">,</span> <span class="n">feature_dim</span><span class="p">)</span>
+
+        <span class="c1"># L2 normalize for cosine similarity</span>
+        <span class="n">sh_coeffs</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">functional</span><span class="o">.</span><span class="n">normalize</span><span class="p">(</span><span class="n">sh_coeffs</span><span class="p">,</span> <span class="n">p</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+
+        <span class="c1"># Flatten back to (batch_size, feature_dim) for easier indexing</span>
+        <span class="n">sh_coeffs_flat</span> <span class="o">=</span> <span class="n">sh_coeffs</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">feature_dim</span><span class="p">)</span>
+
+        <span class="c1"># Compute similarity matrix: (batch_size, batch_size)</span>
+        <span class="n">similarity_matrix</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">matmul</span><span class="p">(</span><span class="n">sh_coeffs_flat</span><span class="p">,</span> <span class="n">sh_coeffs_flat</span><span class="o">.</span><span class="n">t</span><span class="p">())</span> <span class="o">/</span> <span class="n">temperature</span>
+
+        <span class="c1"># Create mask for positive pairs (same particle, different augmentation)</span>
+        <span class="c1"># Particles are arranged as [p0_aug0, p0_aug1, ..., p0_augN, p1_aug0, p1_aug1, ...]</span>
+        <span class="n">particle_ids</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">wD</span><span class="o">.</span><span class="n">device</span><span class="p">)</span> <span class="o">//</span> <span class="n">num_aug</span>
+        <span class="n">positive_mask</span> <span class="o">=</span> <span class="p">(</span><span class="n">particle_ids</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span> <span class="o">==</span> <span class="n">particle_ids</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span><span class="o">.</span><span class="n">float</span><span class="p">()</span>
+
+        <span class="c1"># Remove self-similarity (diagonal)</span>
+        <span class="n">positive_mask</span> <span class="o">=</span> <span class="n">positive_mask</span> <span class="o">-</span> <span class="n">torch</span><span class="o">.</span><span class="n">eye</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">wD</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+
+        <span class="c1"># Mask for all pairs except self (for denominator)</span>
+        <span class="n">all_pairs_mask</span> <span class="o">=</span> <span class="mf">1.0</span> <span class="o">-</span> <span class="n">torch</span><span class="o">.</span><span class="n">eye</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">wD</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+
+        <span class="c1"># Compute NT-Xent loss</span>
+        <span class="c1"># For numerical stability, subtract max before exp</span>
+        <span class="n">similarity_matrix_stable</span> <span class="o">=</span> <span class="n">similarity_matrix</span> <span class="o">-</span> <span class="n">similarity_matrix</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">keepdim</span><span class="o">=</span><span class="kc">True</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span>
+
+        <span class="c1"># Numerator: sum of exp(sim) for positive pairs</span>
+        <span class="n">exp_sim</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="n">similarity_matrix_stable</span><span class="p">)</span>
+        <span class="n">positive_sim</span> <span class="o">=</span> <span class="p">(</span><span class="n">exp_sim</span> <span class="o">*</span> <span class="n">positive_mask</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+
+        <span class="c1"># Denominator: sum of exp(sim) for all pairs except self</span>
+        <span class="n">all_sim</span> <span class="o">=</span> <span class="p">(</span><span class="n">exp_sim</span> <span class="o">*</span> <span class="n">all_pairs_mask</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+
+        <span class="c1"># Avoid log(0) by adding small epsilon</span>
+        <span class="n">loss</span> <span class="o">=</span> <span class="o">-</span><span class="n">torch</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="n">positive_sim</span> <span class="o">/</span> <span class="p">(</span><span class="n">all_sim</span> <span class="o">+</span> <span class="mf">1e-8</span><span class="p">)</span> <span class="o">+</span> <span class="mf">1e-8</span><span class="p">)</span>
+
+        <span class="c1"># Average over batch</span>
+        <span class="k">return</span> <span class="n">loss</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="Image2Sphere.forward_and_loss">
+<a class="viewcode-back" href="../../../../api/models.html#cryoPARES.models.image2sphere.image2sphere.Image2Sphere.forward_and_loss">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward_and_loss</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">img</span><span class="p">,</span> <span class="n">gt_rotmat</span><span class="p">,</span> <span class="n">per_img_weight</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">top_k</span><span class="p">:</span><span class="nb">int</span><span class="o">=</span><span class="mi">1</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&#39;&#39;&#39;Compute cross entropy loss using ground truth rotation, the correct label</span>
+<span class="sd">        is the nearest rotation in the spatial grid to the ground truth rotation</span>
+
+<span class="sd">        :img: float tensor of shape (B, c, L, L)</span>
+<span class="sd">        :gt_rotmat: float tensor of valid rotation matrices, tensor of shape (B, 3, 3)</span>
+<span class="sd">        :per_img_weight: float tensor of shape (B,) with per_image_weight for loss calculation</span>
+<span class="sd">        :top_k: int number of top K elements to return</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+
+        <span class="n">wD</span><span class="p">,</span> <span class="n">rotMat_logits</span><span class="p">,</span> <span class="n">pred_rotmat_ids</span><span class="p">,</span> <span class="n">pred_rotmats</span><span class="p">,</span> <span class="n">maxprobs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">forward</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">top_k</span><span class="o">=</span><span class="n">top_k</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">use_simCLR</span><span class="p">:</span>
+            <span class="n">contrast_loss</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">simCLR_loss_weight</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">simCLR_like_loss</span><span class="p">(</span><span class="n">wD</span><span class="p">,</span> <span class="n">temperature</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">simCLR_temperature</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">contrast_loss</span> <span class="o">=</span> <span class="mi">0</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">has_symmetry</span><span class="p">:</span>
+            <span class="n">n_groupElems</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">so3_grid</span><span class="o">.</span><span class="n">symmetryGroupMatrix</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">rows</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">rotMat_logits</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">n_groupElems</span><span class="p">)</span>
+            <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">no_grad</span><span class="p">():</span> <span class="c1">#TODO: Try to use error_rads as part of the loss function</span>
+                <span class="n">gtrotMats</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">so3_grid</span><span class="o">.</span><span class="n">symmetryGroupMatrix</span><span class="p">[</span><span class="kc">None</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">@</span> <span class="n">gt_rotmat</span><span class="p">[:,</span> <span class="kc">None</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span>
+                <span class="n">rotMat_gtIds</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">so3_grid</span><span class="o">.</span><span class="n">nearest_rotmat_idx</span><span class="p">(</span><span class="n">gtrotMats</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">))[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">view</span><span class="p">(</span>
+                    <span class="n">rotMat_logits</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+                <span class="n">target_ohe</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">rotMat_logits</span><span class="p">)</span>
+                <span class="n">target_ohe</span><span class="p">[</span><span class="n">rows</span><span class="p">,</span> <span class="n">rotMat_gtIds</span><span class="p">]</span> <span class="o">=</span> <span class="mi">1</span> <span class="o">/</span> <span class="n">n_groupElems</span>
+                <span class="n">error_rads</span> <span class="o">=</span> <span class="n">rotation_error_rads</span><span class="p">(</span><span class="n">gtrotMats</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span><span class="mi">3</span><span class="p">,</span><span class="mi">3</span><span class="p">),</span>
+                                                 <span class="n">torch</span><span class="o">.</span><span class="n">repeat_interleave</span><span class="p">(</span><span class="n">pred_rotmats</span><span class="p">,</span> <span class="n">n_groupElems</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">)[:,</span><span class="mi">0</span><span class="p">,</span><span class="o">...</span><span class="p">])</span>
+                <span class="n">error_rads</span> <span class="o">=</span> <span class="n">error_rads</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">n_groupElems</span><span class="p">)</span>
+                <span class="n">error_rads</span> <span class="o">=</span> <span class="n">error_rads</span><span class="o">.</span><span class="n">min</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">values</span>
+            <span class="n">loss</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">functional</span><span class="o">.</span><span class="n">cross_entropy</span><span class="p">(</span><span class="n">rotMat_logits</span><span class="p">,</span> <span class="n">target_ohe</span><span class="p">,</span> <span class="n">reduction</span><span class="o">=</span><span class="s2">&quot;none&quot;</span><span class="p">,</span> <span class="n">label_smoothing</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">label_smoothing</span><span class="p">)</span>
+
+        <span class="k">else</span><span class="p">:</span>
+
+            <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">no_grad</span><span class="p">():</span>
+                <span class="c1"># find nearest grid point to ground truth rotation matrix</span>
+                <span class="n">rot_idx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">so3_grid</span><span class="o">.</span><span class="n">nearest_rotmat_idx</span><span class="p">(</span><span class="n">gt_rotmat</span><span class="p">)[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+                <span class="c1">#We will consider top1 only</span>
+                <span class="n">error_rads</span> <span class="o">=</span> <span class="n">rotation_error_rads</span><span class="p">(</span><span class="n">gt_rotmat</span><span class="p">,</span> <span class="n">pred_rotmats</span><span class="p">[:,</span><span class="mi">0</span><span class="p">,</span><span class="o">...</span><span class="p">])</span>
+            <span class="n">loss</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">functional</span><span class="o">.</span><span class="n">cross_entropy</span><span class="p">(</span><span class="n">rotMat_logits</span><span class="p">,</span> <span class="n">rot_idx</span><span class="p">,</span> <span class="n">reduction</span><span class="o">=</span><span class="s2">&quot;none&quot;</span><span class="p">,</span>
+                                               <span class="n">label_smoothing</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">label_smoothing</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">per_img_weight</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">loss</span> <span class="o">=</span> <span class="n">loss</span> <span class="o">*</span> <span class="n">per_img_weight</span><span class="o">.</span><span class="n">squeeze</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">loss</span> <span class="o">=</span> <span class="n">loss</span>
+        <span class="n">loss</span> <span class="o">=</span> <span class="n">loss</span> <span class="o">+</span> <span class="n">contrast_loss</span>
+
+        <span class="k">return</span> <span class="p">(</span><span class="n">wD</span><span class="p">,</span> <span class="n">rotMat_logits</span><span class="p">,</span> <span class="n">pred_rotmat_ids</span><span class="p">,</span> <span class="n">pred_rotmats</span><span class="p">,</span> <span class="n">maxprobs</span><span class="p">),</span> <span class="n">loss</span><span class="p">,</span> <span class="n">error_rads</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="create_extraction_mask">
+<a class="viewcode-back" href="../../../../api/models.html#cryoPARES.models.image2sphere.image2sphere.create_extraction_mask">[docs]</a>
+<span class="nd">@functools</span><span class="o">.</span><span class="n">lru_cache</span><span class="p">(</span><span class="n">maxsize</span><span class="o">=</span><span class="mi">5</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">create_extraction_mask</span><span class="p">(</span><span class="n">lmax</span><span class="p">,</span> <span class="n">device</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Create a boolean mask to extract middle columns (m&#39;=0) from flattened Wigner-D matrices.</span>
+<span class="sd">    This mask is created once and can be reused for all extractions. Used to get the spherical harmonics</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        lmax: Maximum degree l</span>
+<span class="sd">        device_type: String indicating device type (&#39;cuda&#39; or &#39;cpu&#39;)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">mask</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="nb">sum</span><span class="p">((</span><span class="mi">2</span> <span class="o">*</span> <span class="n">l</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span> <span class="k">for</span> <span class="n">l</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">lmax</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">bool</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+    <span class="n">idx</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">for</span> <span class="n">l</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">lmax</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+        <span class="n">dim</span> <span class="o">=</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">l</span> <span class="o">+</span> <span class="mi">1</span>
+        <span class="c1"># Calculate indices for the middle column (m&#39;=0)</span>
+        <span class="n">middle_col_indices</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">idx</span> <span class="o">+</span> <span class="n">l</span><span class="p">,</span> <span class="n">idx</span> <span class="o">+</span> <span class="n">dim</span> <span class="o">**</span> <span class="mi">2</span><span class="p">,</span> <span class="n">dim</span><span class="p">)</span>
+        <span class="n">mask</span><span class="p">[</span><span class="n">middle_col_indices</span><span class="p">]</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="n">idx</span> <span class="o">+=</span> <span class="n">dim</span> <span class="o">**</span> <span class="mi">2</span>
+    <span class="k">return</span> <span class="n">mask</span></div>
+
+
+
+<div class="viewcode-block" id="extract_sh_coeffs_fast">
+<a class="viewcode-back" href="../../../../api/models.html#cryoPARES.models.image2sphere.image2sphere.extract_sh_coeffs_fast">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">extract_sh_coeffs_fast</span><span class="p">(</span><span class="n">flat_wigner_d</span><span class="p">,</span> <span class="n">lmax</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Efficiently extract spherical harmonic coefficients from flattened Wigner-D matrices</span>
+<span class="sd">    using cached mask.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">device_type</span> <span class="o">=</span> <span class="s1">&#39;cuda&#39;</span> <span class="k">if</span> <span class="n">flat_wigner_d</span><span class="o">.</span><span class="n">is_cuda</span> <span class="k">else</span> <span class="s1">&#39;cpu&#39;</span>
+    <span class="n">extraction_mask</span> <span class="o">=</span> <span class="n">create_extraction_mask</span><span class="p">(</span><span class="n">lmax</span><span class="p">,</span> <span class="n">device_type</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">flat_wigner_d</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">flat_wigner_d</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="n">extraction_mask</span><span class="p">]</span></div>
+
+
+
+<div class="viewcode-block" id="plot_so3_distribution">
+<a class="viewcode-back" href="../../../../api/models.html#cryoPARES.models.image2sphere.image2sphere.plot_so3_distribution">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">plot_so3_distribution</span><span class="p">(</span><span class="n">probs</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+                          <span class="n">rots</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+                          <span class="n">gt_rotation</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                          <span class="n">fig</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                          <span class="n">ax</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                          <span class="n">display_threshold_probability</span><span class="o">=</span><span class="mf">0.000005</span><span class="p">,</span>
+                          <span class="n">show_color_wheel</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+                          <span class="n">canonical_rotation</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">eye</span><span class="p">(</span><span class="mi">3</span><span class="p">),</span>
+                          <span class="p">):</span>
+<span class="w">    </span><span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">    Taken from https://github.com/google-research/google-research/blob/master/implicit_pdf/evaluation.py</span>
+<span class="sd">    &#39;&#39;&#39;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+    <span class="n">cmap</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">cm</span><span class="o">.</span><span class="n">hsv</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_show_single_marker</span><span class="p">(</span><span class="n">ax</span><span class="p">,</span> <span class="n">rotation</span><span class="p">,</span> <span class="n">marker</span><span class="p">,</span> <span class="n">edgecolors</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">facecolors</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="n">alpha</span><span class="p">,</span> <span class="n">beta</span><span class="p">,</span> <span class="n">gamma</span> <span class="o">=</span> <span class="n">o3</span><span class="o">.</span><span class="n">matrix_to_angles</span><span class="p">(</span><span class="n">rotation</span><span class="p">)</span>
+        <span class="n">color</span> <span class="o">=</span> <span class="n">cmap</span><span class="p">(</span><span class="mf">0.5</span> <span class="o">+</span> <span class="n">gamma</span><span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span> <span class="o">/</span> <span class="mf">2.</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="p">)[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span><span class="n">alpha</span><span class="p">,</span> <span class="n">beta</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mi">2</span><span class="p">,</span> <span class="n">s</span><span class="o">=</span><span class="mi">2000</span><span class="p">,</span> <span class="n">edgecolors</span><span class="o">=</span><span class="n">color</span><span class="p">,</span> <span class="n">facecolors</span><span class="o">=</span><span class="s1">&#39;none&#39;</span><span class="p">,</span> <span class="n">marker</span><span class="o">=</span><span class="n">marker</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="mi">5</span><span class="p">)</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span><span class="n">alpha</span><span class="p">,</span> <span class="n">beta</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mi">2</span><span class="p">,</span> <span class="n">s</span><span class="o">=</span><span class="mi">1500</span><span class="p">,</span> <span class="n">edgecolors</span><span class="o">=</span><span class="s1">&#39;k&#39;</span><span class="p">,</span> <span class="n">facecolors</span><span class="o">=</span><span class="s1">&#39;none&#39;</span><span class="p">,</span> <span class="n">marker</span><span class="o">=</span><span class="n">marker</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span><span class="n">alpha</span><span class="p">,</span> <span class="n">beta</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mi">2</span><span class="p">,</span> <span class="n">s</span><span class="o">=</span><span class="mi">2500</span><span class="p">,</span> <span class="n">edgecolors</span><span class="o">=</span><span class="s1">&#39;k&#39;</span><span class="p">,</span> <span class="n">facecolors</span><span class="o">=</span><span class="s1">&#39;none&#39;</span><span class="p">,</span> <span class="n">marker</span><span class="o">=</span><span class="n">marker</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">ax</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">fig</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">figure</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">8</span><span class="p">,</span> <span class="mi">4</span><span class="p">),</span> <span class="n">dpi</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span>
+        <span class="n">fig</span><span class="o">.</span><span class="n">subplots_adjust</span><span class="p">(</span><span class="mf">0.01</span><span class="p">,</span> <span class="mf">0.08</span><span class="p">,</span> <span class="mf">0.90</span><span class="p">,</span> <span class="mf">0.95</span><span class="p">)</span>
+        <span class="n">ax</span> <span class="o">=</span> <span class="n">fig</span><span class="o">.</span><span class="n">add_subplot</span><span class="p">(</span><span class="mi">111</span><span class="p">,</span> <span class="n">projection</span><span class="o">=</span><span class="s1">&#39;mollweide&#39;</span><span class="p">)</span>
+
+    <span class="n">rots</span> <span class="o">=</span> <span class="n">rots</span> <span class="o">@</span> <span class="n">canonical_rotation</span>
+    <span class="n">scatterpoint_scaling</span> <span class="o">=</span> <span class="mf">3e3</span>
+    <span class="n">alpha</span><span class="p">,</span> <span class="n">beta</span><span class="p">,</span> <span class="n">gamma</span> <span class="o">=</span> <span class="n">o3</span><span class="o">.</span><span class="n">matrix_to_angles</span><span class="p">(</span><span class="n">rots</span><span class="p">)</span>
+
+    <span class="c1"># offset alpha and beta so different gammas are visible</span>
+    <span class="n">R</span> <span class="o">=</span> <span class="mf">0.02</span>
+    <span class="n">alpha</span> <span class="o">+=</span> <span class="n">R</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">gamma</span><span class="p">)</span>
+    <span class="n">beta</span> <span class="o">+=</span> <span class="n">R</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">gamma</span><span class="p">)</span>
+
+    <span class="n">which_to_display</span> <span class="o">=</span> <span class="p">(</span><span class="n">probs</span> <span class="o">&gt;</span> <span class="n">display_threshold_probability</span><span class="p">)</span>
+
+    <span class="c1"># Display the distribution</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span><span class="n">alpha</span><span class="p">[</span><span class="n">which_to_display</span><span class="p">],</span>
+               <span class="n">beta</span><span class="p">[</span><span class="n">which_to_display</span><span class="p">]</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mi">2</span><span class="p">,</span>
+               <span class="n">s</span><span class="o">=</span><span class="n">scatterpoint_scaling</span> <span class="o">*</span> <span class="n">probs</span><span class="p">[</span><span class="n">which_to_display</span><span class="p">],</span>
+               <span class="n">c</span><span class="o">=</span><span class="n">cmap</span><span class="p">(</span><span class="mf">0.5</span> <span class="o">+</span> <span class="n">gamma</span><span class="p">[</span><span class="n">which_to_display</span><span class="p">]</span> <span class="o">/</span> <span class="mf">2.</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="p">))</span>
+    <span class="k">if</span> <span class="n">gt_rotation</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">gt_rotation</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">==</span> <span class="mi">2</span><span class="p">:</span>
+            <span class="n">gt_rotation</span> <span class="o">=</span> <span class="n">gt_rotation</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+        <span class="n">gt_rotation</span> <span class="o">=</span> <span class="n">gt_rotation</span> <span class="o">@</span> <span class="n">canonical_rotation</span>
+        <span class="n">_show_single_marker</span><span class="p">(</span><span class="n">ax</span><span class="p">,</span> <span class="n">gt_rotation</span><span class="p">,</span> <span class="s1">&#39;o&#39;</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">grid</span><span class="p">()</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_xticklabels</span><span class="p">([])</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_yticklabels</span><span class="p">([])</span>
+
+    <span class="k">if</span> <span class="n">show_color_wheel</span><span class="p">:</span>
+        <span class="c1"># Add a color wheel showing the tilt angle to color conversion.</span>
+        <span class="n">ax</span> <span class="o">=</span> <span class="n">fig</span><span class="o">.</span><span class="n">add_axes</span><span class="p">([</span><span class="mf">0.86</span><span class="p">,</span> <span class="mf">0.17</span><span class="p">,</span> <span class="mf">0.12</span><span class="p">,</span> <span class="mf">0.12</span><span class="p">],</span> <span class="n">projection</span><span class="o">=</span><span class="s1">&#39;polar&#39;</span><span class="p">)</span>
+        <span class="n">theta</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="o">-</span><span class="mi">3</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mi">2</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">200</span><span class="p">)</span>
+        <span class="n">radii</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="mf">0.4</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+        <span class="n">_</span><span class="p">,</span> <span class="n">theta_grid</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">meshgrid</span><span class="p">(</span><span class="n">radii</span><span class="p">,</span> <span class="n">theta</span><span class="p">)</span>
+        <span class="n">colormap_val</span> <span class="o">=</span> <span class="mf">0.5</span> <span class="o">+</span> <span class="n">theta_grid</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mf">2.</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">pcolormesh</span><span class="p">(</span><span class="n">theta</span><span class="p">,</span> <span class="n">radii</span><span class="p">,</span> <span class="n">colormap_val</span><span class="o">.</span><span class="n">T</span><span class="p">,</span> <span class="n">cmap</span><span class="o">=</span><span class="n">cmap</span><span class="p">)</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">set_yticklabels</span><span class="p">([])</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">set_xticklabels</span><span class="p">([</span><span class="sa">r</span><span class="s1">&#39;90$\degree$&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span>
+                            <span class="sa">r</span><span class="s1">&#39;180$\degree$&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span>
+                            <span class="sa">r</span><span class="s1">&#39;270$\degree$&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span>
+                            <span class="sa">r</span><span class="s1">&#39;0$\degree$&#39;</span><span class="p">],</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">14</span><span class="p">)</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">spines</span><span class="p">[</span><span class="s1">&#39;polar&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">set_visible</span><span class="p">(</span><span class="kc">False</span><span class="p">)</span>
+        <span class="n">plt</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mf">0.5</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="s1">&#39;Tilt&#39;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">14</span><span class="p">,</span>
+                 <span class="n">horizontalalignment</span><span class="o">=</span><span class="s1">&#39;center&#39;</span><span class="p">,</span>
+                 <span class="n">verticalalignment</span><span class="o">=</span><span class="s1">&#39;center&#39;</span><span class="p">,</span> <span class="n">transform</span><span class="o">=</span><span class="n">ax</span><span class="o">.</span><span class="n">transAxes</span><span class="p">)</span>
+
+    <span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_update_config_for_test</span><span class="p">():</span>
+    <span class="n">main_config</span><span class="o">.</span><span class="n">models</span><span class="o">.</span><span class="n">image2sphere</span><span class="o">.</span><span class="n">lmax</span> <span class="o">=</span> <span class="mi">6</span>
+    <span class="n">main_config</span><span class="o">.</span><span class="n">models</span><span class="o">.</span><span class="n">image2sphere</span><span class="o">.</span><span class="n">so3components</span><span class="o">.</span><span class="n">i2sprojector</span><span class="o">.</span><span class="n">sphere_fdim</span> <span class="o">=</span> <span class="mi">512</span>
+    <span class="n">main_config</span><span class="o">.</span><span class="n">models</span><span class="o">.</span><span class="n">image2sphere</span><span class="o">.</span><span class="n">so3components</span><span class="o">.</span><span class="n">i2sprojector</span><span class="o">.</span><span class="n">rand_fraction_points_to_project</span> <span class="o">=</span> <span class="mf">1.</span>
+    <span class="n">main_config</span><span class="o">.</span><span class="n">models</span><span class="o">.</span><span class="n">image2sphere</span><span class="o">.</span><span class="n">so3components</span><span class="o">.</span><span class="n">i2sprojector</span><span class="o">.</span><span class="n">hp_order</span> <span class="o">=</span> <span class="mi">2</span>
+    <span class="n">main_config</span><span class="o">.</span><span class="n">models</span><span class="o">.</span><span class="n">image2sphere</span><span class="o">.</span><span class="n">so3components</span><span class="o">.</span><span class="n">s2conv</span><span class="o">.</span><span class="n">hp_order</span> <span class="o">=</span> <span class="mi">2</span>
+    <span class="n">main_config</span><span class="o">.</span><span class="n">models</span><span class="o">.</span><span class="n">image2sphere</span><span class="o">.</span><span class="n">so3components</span><span class="o">.</span><span class="n">s2conv</span><span class="o">.</span><span class="n">f_out</span> <span class="o">=</span> <span class="mi">16</span>
+    <span class="n">main_config</span><span class="o">.</span><span class="n">models</span><span class="o">.</span><span class="n">image2sphere</span><span class="o">.</span><span class="n">so3components</span><span class="o">.</span><span class="n">so3outputgrid</span><span class="o">.</span><span class="n">hp_order</span> <span class="o">=</span> <span class="mi">3</span>
+
+    <span class="n">main_config</span><span class="o">.</span><span class="n">datamanager</span><span class="o">.</span><span class="n">particlesdataset</span><span class="o">.</span><span class="n">image_size_px_for_nnet</span> <span class="o">=</span> <span class="mi">224</span>
+    <span class="n">main_config</span><span class="o">.</span><span class="n">models</span><span class="o">.</span><span class="n">image2sphere</span><span class="o">.</span><span class="n">so3components</span><span class="o">.</span><span class="n">i2sprojector</span><span class="o">.</span><span class="n">rand_fraction_points_to_project</span> <span class="o">=</span> <span class="mi">1</span>
+    <span class="n">main_config</span><span class="o">.</span><span class="n">models</span><span class="o">.</span><span class="n">image2sphere</span><span class="o">.</span><span class="n">label_smoothing</span> <span class="o">=</span> <span class="mf">0.1</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_test</span><span class="p">():</span>
+    <span class="n">_update_config_for_test</span><span class="p">()</span>
+    <span class="n">b</span> <span class="o">=</span> <span class="mi">4</span>
+    <span class="n">example_batch</span> <span class="o">=</span> <span class="n">get_example_random_batch</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">n_channels</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="mi">42</span><span class="p">)</span>
+    <span class="n">imgs</span> <span class="o">=</span> <span class="n">example_batch</span><span class="p">[</span><span class="n">BATCH_PARTICLES_NAME</span><span class="p">]</span>
+
+    <span class="kn">import</span><span class="w"> </span><span class="nn">torchvision</span>
+    <span class="n">encoder</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Sequential</span><span class="p">(</span><span class="o">*</span><span class="nb">list</span><span class="p">(</span><span class="n">torchvision</span><span class="o">.</span><span class="n">models</span><span class="o">.</span><span class="n">resnet18</span><span class="p">(</span><span class="n">weights</span><span class="o">=</span><span class="n">torchvision</span><span class="o">.</span><span class="n">models</span><span class="o">.</span><span class="n">ResNet18_Weights</span><span class="o">.</span><span class="n">IMAGENET1K_V1</span><span class="p">)</span><span class="o">.</span><span class="n">children</span><span class="p">())[:</span><span class="o">-</span><span class="mi">2</span><span class="p">])</span>
+
+    <span class="n">model</span> <span class="o">=</span> <span class="n">Image2Sphere</span><span class="p">(</span><span class="n">encoder</span><span class="o">=</span><span class="n">encoder</span><span class="p">,</span> <span class="n">symmetry</span><span class="o">=</span><span class="s2">&quot;C2&quot;</span><span class="p">,</span> <span class="n">enforce_symmetry</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">example_batch</span><span class="o">=</span><span class="n">example_batch</span><span class="p">)</span>
+    <span class="n">model</span><span class="o">.</span><span class="n">eval</span><span class="p">()</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">imgs</span><span class="p">,</span> <span class="n">top_k</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
+    <span class="n">scripted_model</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">jit</span><span class="o">.</span><span class="n">script</span><span class="p">(</span><span class="n">model</span><span class="p">)</span>
+    <span class="n">torch</span><span class="o">.</span><span class="n">jit</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">scripted_model</span><span class="p">,</span> <span class="s1">&#39;/tmp/scripted_model.pt&#39;</span><span class="p">)</span>
+    <span class="n">model</span> <span class="o">=</span> <span class="n">scripted_model</span>
+    <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">inference_mode</span><span class="p">():</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">scipy.spatial.transform</span><span class="w"> </span><span class="kn">import</span> <span class="n">Rotation</span>
+        <span class="n">gt_rot</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">from_numpy</span><span class="p">(</span><span class="n">Rotation</span><span class="o">.</span><span class="n">random</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">random_state</span><span class="o">=</span><span class="mi">42</span><span class="p">)</span><span class="o">.</span><span class="n">as_matrix</span><span class="p">()</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">))</span>
+        <span class="n">wD</span><span class="p">,</span> <span class="n">rotMat_logits</span><span class="p">,</span> <span class="n">pred_rotmat_idxs</span><span class="p">,</span> <span class="n">pred_rotmat</span><span class="p">,</span> <span class="n">maxprob1</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">forward</span><span class="p">(</span><span class="n">imgs</span><span class="p">,</span> <span class="n">top_k</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+        <span class="n">wD2</span><span class="p">,</span> <span class="n">rotMat_logits2</span><span class="p">,</span> <span class="n">pred_rotmat_idxs2</span><span class="p">,</span> <span class="n">pred_rotmat2</span><span class="p">,</span> <span class="n">maxprob2</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">forward_with_neigs</span><span class="p">(</span><span class="n">imgs</span><span class="p">,</span> <span class="n">top_k</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+        <span class="n">wD3</span><span class="p">,</span> <span class="n">rotMat_logits3</span><span class="p">,</span> <span class="n">pred_rotmat_idxs3</span><span class="p">,</span> <span class="n">pred_rotmat3</span><span class="p">,</span> <span class="n">maxprob3</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">forward_standard</span><span class="p">(</span><span class="n">imgs</span><span class="p">,</span> <span class="n">top_k</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">maxprob1</span><span class="o">.</span><span class="n">allclose</span><span class="p">(</span><span class="n">maxprob2</span><span class="p">),</span> <span class="n">maxprob1</span><span class="o">.</span><span class="n">allclose</span><span class="p">(</span><span class="n">maxprob3</span><span class="p">),</span> <span class="n">maxprob2</span><span class="o">.</span><span class="n">allclose</span><span class="p">(</span><span class="n">maxprob3</span><span class="p">))</span>
+        <span class="c1"># (wD, rotMat_logits, pred_rotmat_ids, pred_rotmat, maxprobs), loss, error_rads = model.forward_and_loss(imgs, gt_rot)</span>
+
+
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;logits&quot;</span><span class="p">,</span> <span class="n">rotMat_logits</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;pred_rotmat&quot;</span><span class="p">,</span> <span class="n">pred_rotmat</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
+        <span class="n">fog_wn</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">forward_with_neigs</span><span class="p">(</span><span class="n">imgs</span><span class="p">,</span> <span class="n">top_k</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="c1"># probs, output_rotmats = model.compute_probabilities(imgs) #Not working in jitted model</span>
+        <span class="n">probs</span><span class="p">,</span> <span class="n">output_rotmats</span> <span class="o">=</span> <span class="n">rotMat_logits</span><span class="o">.</span><span class="n">softmax</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">),</span> <span class="n">model</span><span class="o">.</span><span class="n">so3_grid</span><span class="o">.</span><span class="n">output_rotmats</span>
+        <span class="n">plot_so3_distribution</span><span class="p">(</span><span class="n">probs</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">output_rotmats</span><span class="p">,</span> <span class="n">gt_rotation</span><span class="o">=</span><span class="n">gt_rot</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Done!&quot;</span><span class="p">)</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_test_rotation_invariance</span><span class="p">(</span><span class="n">n_samples</span><span class="o">=</span><span class="mi">10</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Test to verify that spherical harmonic coefficients are invariant to image rotations of 90 degrees.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">_update_config_for_test</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">compute_relative_errors</span><span class="p">(</span><span class="n">coeffs1</span><span class="p">,</span> <span class="n">coeffs2</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Compute relative errors between two sets of coefficients</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">error</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">coeffs1</span> <span class="o">-</span> <span class="n">coeffs2</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">coeffs1</span><span class="p">)</span> <span class="o">+</span> <span class="mf">1e-6</span><span class="p">)</span>
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s1">&#39;mean_error&#39;</span><span class="p">:</span> <span class="n">error</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="o">.</span><span class="n">item</span><span class="p">(),</span>
+            <span class="s1">&#39;max_error&#39;</span><span class="p">:</span> <span class="n">error</span><span class="o">.</span><span class="n">max</span><span class="p">()</span><span class="o">.</span><span class="n">item</span><span class="p">(),</span>
+            <span class="s1">&#39;std_error&#39;</span><span class="p">:</span> <span class="n">error</span><span class="o">.</span><span class="n">std</span><span class="p">()</span><span class="o">.</span><span class="n">item</span><span class="p">(),</span>
+            <span class="s1">&#39;median_error&#39;</span><span class="p">:</span> <span class="n">error</span><span class="o">.</span><span class="n">median</span><span class="p">()</span><span class="o">.</span><span class="n">item</span><span class="p">(),</span>
+            <span class="s1">&#39;p90_error&#39;</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">quantile</span><span class="p">(</span><span class="n">error</span><span class="p">,</span> <span class="mf">0.9</span><span class="p">)</span><span class="o">.</span><span class="n">item</span><span class="p">()}</span>
+
+    <span class="c1"># Initialize model</span>
+    <span class="n">imgs</span> <span class="o">=</span> <span class="n">get_example_random_batch</span><span class="p">(</span><span class="mi">1</span><span class="p">)[</span><span class="n">BATCH_PARTICLES_NAME</span><span class="p">]</span>
+
+    <span class="n">encoder</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Conv2d</span><span class="p">(</span><span class="n">imgs</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">main_config</span><span class="o">.</span><span class="n">models</span><span class="o">.</span><span class="n">image2sphere</span><span class="o">.</span><span class="n">so3components</span><span class="o">.</span><span class="n">i2sprojector</span><span class="o">.</span><span class="n">sphere_fdim</span><span class="p">,</span>
+                        <span class="n">kernel_size</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">padding</span><span class="o">=</span><span class="s2">&quot;same&quot;</span><span class="p">)</span>
+    <span class="n">model</span> <span class="o">=</span> <span class="n">Image2Sphere</span><span class="p">(</span><span class="n">symmetry</span><span class="o">=</span><span class="s2">&quot;D2&quot;</span><span class="p">,</span> <span class="n">lmax</span><span class="o">=</span><span class="mi">6</span><span class="p">,</span> <span class="n">enforce_symmetry</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoder</span><span class="o">=</span><span class="n">encoder</span><span class="p">)</span>
+    <span class="n">model</span><span class="o">.</span><span class="n">eval</span><span class="p">()</span>
+
+    <span class="c1"># Store all results</span>
+    <span class="n">rotation_errors</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">list</span><span class="p">)</span>
+    <span class="n">baseline_errors</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="k">for</span> <span class="n">sample_idx</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_samples</span><span class="p">):</span>
+        <span class="c1"># Get two different random batches for baseline comparison</span>
+        <span class="n">batch1</span> <span class="o">=</span> <span class="n">get_example_random_batch</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">batch2</span> <span class="o">=</span> <span class="n">get_example_random_batch</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">img1</span> <span class="o">=</span> <span class="n">batch1</span><span class="p">[</span><span class="n">BATCH_PARTICLES_NAME</span><span class="p">][</span><span class="mi">0</span><span class="p">:</span><span class="mi">1</span><span class="p">]</span>
+        <span class="n">img2</span> <span class="o">=</span> <span class="n">batch2</span><span class="p">[</span><span class="n">BATCH_PARTICLES_NAME</span><span class="p">][</span><span class="mi">0</span><span class="p">:</span><span class="mi">1</span><span class="p">]</span>
+
+        <span class="c1"># Test 1: Rotation Invariance</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">torchvision</span><span class="w"> </span><span class="kn">import</span> <span class="n">transforms</span>
+        <span class="n">rotations</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="n">transforms</span><span class="o">.</span><span class="n">functional</span><span class="o">.</span><span class="n">rotate</span><span class="p">(</span><span class="n">img1</span><span class="p">,</span> <span class="n">angle</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">angle</span> <span class="ow">in</span> <span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">90</span><span class="p">,</span> <span class="mi">180</span><span class="p">,</span> <span class="mi">270</span><span class="p">]</span>
+        <span class="p">]</span>
+        <span class="n">rotations</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">rotations</span><span class="p">)</span>
+
+        <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">no_grad</span><span class="p">():</span>
+            <span class="c1"># Get coefficients for rotated versions</span>
+            <span class="n">wDs_rot</span> <span class="o">=</span> <span class="p">[</span><span class="n">model</span><span class="o">.</span><span class="n">predict_wignerDs</span><span class="p">(</span><span class="n">rot_img</span><span class="p">)</span> <span class="k">for</span> <span class="n">rot_img</span> <span class="ow">in</span> <span class="n">rotations</span><span class="p">]</span>
+            <span class="n">sh_coeffs_rot</span> <span class="o">=</span> <span class="p">[</span><span class="n">extract_sh_coeffs_fast</span><span class="p">(</span><span class="n">wd</span><span class="p">,</span> <span class="n">model</span><span class="o">.</span><span class="n">lmax</span><span class="p">)</span><span class="o">.</span><span class="n">squeeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span> <span class="k">for</span> <span class="n">wd</span> <span class="ow">in</span> <span class="n">wDs_rot</span><span class="p">]</span>
+
+            <span class="c1"># Get coefficients for different image (baseline)</span>
+            <span class="n">wD2</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">predict_wignerDs</span><span class="p">(</span><span class="n">img2</span><span class="p">)</span>
+            <span class="n">sh_coeffs2</span> <span class="o">=</span> <span class="n">extract_sh_coeffs_fast</span><span class="p">(</span><span class="n">wD2</span><span class="p">,</span> <span class="n">model</span><span class="o">.</span><span class="n">lmax</span><span class="p">)</span><span class="o">.</span><span class="n">squeeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+
+        <span class="c1"># Compare rotated versions to original</span>
+        <span class="n">base_coeffs</span> <span class="o">=</span> <span class="n">sh_coeffs_rot</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">rot_coeffs</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">sh_coeffs_rot</span><span class="p">[</span><span class="mi">1</span><span class="p">:],</span> <span class="mi">1</span><span class="p">):</span>
+            <span class="n">errors</span> <span class="o">=</span> <span class="n">compute_relative_errors</span><span class="p">(</span><span class="n">base_coeffs</span><span class="p">,</span> <span class="n">rot_coeffs</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">errors</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="n">rotation_errors</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">i</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">90</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">key</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>  <span class="c1"># Changed key format</span>
+
+        <span class="c1"># Baseline: Compare different images</span>
+        <span class="n">baseline</span> <span class="o">=</span> <span class="n">compute_relative_errors</span><span class="p">(</span><span class="n">base_coeffs</span><span class="p">,</span> <span class="n">sh_coeffs2</span><span class="p">)</span>
+        <span class="n">baseline_errors</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">baseline</span><span class="p">)</span>
+
+    <span class="c1"># Compute statistics</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">compute_stats</span><span class="p">(</span><span class="n">errors_list</span><span class="p">):</span>
+        <span class="n">stats</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">errors_list</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">keys</span><span class="p">():</span>
+            <span class="n">values</span> <span class="o">=</span> <span class="p">[</span><span class="n">e</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">errors_list</span><span class="p">]</span>
+            <span class="n">stats</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+                <span class="s1">&#39;mean&#39;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">values</span><span class="p">),</span>
+                <span class="s1">&#39;std&#39;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">std</span><span class="p">(</span><span class="n">values</span><span class="p">),</span>
+                <span class="s1">&#39;min&#39;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">min</span><span class="p">(</span><span class="n">values</span><span class="p">),</span>
+                <span class="s1">&#39;max&#39;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">values</span><span class="p">)</span>
+            <span class="p">}</span>
+        <span class="k">return</span> <span class="n">stats</span>
+
+    <span class="c1"># Calculate statistics for both rotation and baseline errors</span>
+    <span class="n">rotation_stats</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">angle</span> <span class="ow">in</span> <span class="p">[</span><span class="mi">90</span><span class="p">,</span> <span class="mi">180</span><span class="p">,</span> <span class="mi">270</span><span class="p">]:</span>
+        <span class="c1"># Collect all errors for this angle</span>
+        <span class="n">angle_errors</span> <span class="o">=</span> <span class="p">[{</span><span class="n">k</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;_&#39;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)[</span><span class="mi">1</span><span class="p">]:</span> <span class="n">v</span>
+                         <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">rotation_errors</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+                         <span class="k">if</span> <span class="n">k</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">angle</span><span class="si">}</span><span class="s2">_&quot;</span><span class="p">)}]</span>
+        <span class="n">rotation_stats</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">angle</span><span class="si">}</span><span class="s2">deg&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">compute_stats</span><span class="p">(</span><span class="n">angle_errors</span><span class="p">)</span>
+
+    <span class="n">baseline_stats</span> <span class="o">=</span> <span class="n">compute_stats</span><span class="p">(</span><span class="n">baseline_errors</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Rotation Invariance Test Results (with baseline comparison):&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;--------------------------------------------------------&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Baseline (Different Images):&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">metric</span><span class="p">,</span> <span class="n">values</span> <span class="ow">in</span> <span class="n">baseline_stats</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="si">{</span><span class="n">metric</span><span class="si">}</span><span class="s2">:&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">stat</span><span class="p">,</span> <span class="n">val</span> <span class="ow">in</span> <span class="n">values</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">stat</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">val</span><span class="si">:</span><span class="s2">.6f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Rotation Results:&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">angle</span><span class="p">,</span> <span class="n">stats</span> <span class="ow">in</span> <span class="n">rotation_stats</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="si">{</span><span class="n">angle</span><span class="si">}</span><span class="s2">:&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">metric</span><span class="p">,</span> <span class="n">values</span> <span class="ow">in</span> <span class="n">stats</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">metric</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">values</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Interpretation:&quot;</span><span class="p">)</span>
+    <span class="c1"># Compare mean errors</span>
+    <span class="k">for</span> <span class="n">angle</span><span class="p">,</span> <span class="n">stats</span> <span class="ow">in</span> <span class="n">rotation_stats</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">ratio</span> <span class="o">=</span> <span class="n">stats</span><span class="p">[</span><span class="s1">&#39;mean_error&#39;</span><span class="p">][</span><span class="s1">&#39;mean&#39;</span><span class="p">]</span> <span class="o">/</span> <span class="n">baseline_stats</span><span class="p">[</span><span class="s1">&#39;mean_error&#39;</span><span class="p">][</span><span class="s1">&#39;mean&#39;</span><span class="p">]</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="si">{</span><span class="n">angle</span><span class="si">}</span><span class="s2"> rotation mean error is </span><span class="si">{</span><span class="n">ratio</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">x smaller than baseline&quot;</span><span class="p">)</span>
+        <span class="n">max_ratio</span> <span class="o">=</span> <span class="n">stats</span><span class="p">[</span><span class="s1">&#39;max_error&#39;</span><span class="p">][</span><span class="s1">&#39;mean&#39;</span><span class="p">]</span> <span class="o">/</span> <span class="n">baseline_stats</span><span class="p">[</span><span class="s1">&#39;max_error&#39;</span><span class="p">][</span><span class="s1">&#39;mean&#39;</span><span class="p">]</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">angle</span><span class="si">}</span><span class="s2"> rotation max error is </span><span class="si">{</span><span class="n">max_ratio</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">x smaller than baseline&quot;</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">rotation_stats</span><span class="p">,</span> <span class="n">baseline_stats</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_test2</span><span class="p">():</span>
+    <span class="n">_update_config_for_test</span><span class="p">()</span>
+    <span class="n">b</span> <span class="o">=</span> <span class="mi">4</span>
+    <span class="n">example_batch</span> <span class="o">=</span> <span class="n">get_example_random_batch</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">n_channels</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="mi">42</span><span class="p">)</span>
+    <span class="n">imgs</span> <span class="o">=</span> <span class="n">example_batch</span><span class="p">[</span><span class="n">BATCH_PARTICLES_NAME</span><span class="p">]</span>
+
+    <span class="kn">import</span><span class="w"> </span><span class="nn">torchvision</span>
+    <span class="n">encoder</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Sequential</span><span class="p">(</span><span class="o">*</span><span class="nb">list</span><span class="p">(</span><span class="n">torchvision</span><span class="o">.</span><span class="n">models</span><span class="o">.</span><span class="n">resnet18</span><span class="p">(</span><span class="n">weights</span><span class="o">=</span><span class="n">torchvision</span><span class="o">.</span><span class="n">models</span><span class="o">.</span><span class="n">ResNet18_Weights</span><span class="o">.</span><span class="n">IMAGENET1K_V1</span><span class="p">)</span><span class="o">.</span><span class="n">children</span><span class="p">())[:</span><span class="o">-</span><span class="mi">2</span><span class="p">])</span>
+
+    <span class="n">model</span> <span class="o">=</span> <span class="n">Image2Sphere</span><span class="p">(</span><span class="n">encoder</span><span class="o">=</span><span class="n">encoder</span><span class="p">,</span> <span class="n">symmetry</span><span class="o">=</span><span class="s2">&quot;C1&quot;</span><span class="p">,</span> <span class="n">enforce_symmetry</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">example_batch</span><span class="o">=</span><span class="n">example_batch</span><span class="p">)</span>
+    <span class="n">model</span><span class="o">.</span><span class="n">eval</span><span class="p">()</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">imgs</span><span class="p">,</span> <span class="n">top_k</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="mi">4</span><span class="p">])</span>
+    <span class="n">out2</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">imgs</span><span class="p">[:</span><span class="mi">2</span><span class="p">],</span> <span class="n">top_k</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">out3</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">imgs</span><span class="p">[</span><span class="mi">2</span><span class="p">:],</span> <span class="n">top_k</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">out2</span><span class="p">[</span><span class="mi">4</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">out3</span><span class="p">[</span><span class="mi">4</span><span class="p">])</span>
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">_test</span><span class="p">()</span>
+    <span class="c1"># _test_rotation_invariance()</span>
+    <span class="n">_test2</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Done!&quot;</span><span class="p">)</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Ruben Sanchez-Garcia.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

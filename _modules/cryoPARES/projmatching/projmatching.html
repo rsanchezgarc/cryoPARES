@@ -1,0 +1,802 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>cryoPARES.projmatching.projmatching &mdash; CryoPARES 0.1.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=01f34227"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            CryoPARES
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../training_guide.html">Training Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../training_guide.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../training_guide.html#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../training_guide.html#quick-start">Quick Start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../training_guide.html#training-parameters">Training Parameters</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#essential-parameters">Essential Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#data-configuration-parameters">Data Configuration Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#optimizer-configuration">Optimizer Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#model-architecture-parameters">Model Architecture Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#data-augmentation-parameters">Data Augmentation Parameters</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../training_guide.html#monitoring-training-with-tensorboard">Monitoring Training with TensorBoard</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#launching-tensorboard">Launching TensorBoard</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#key-metrics-to-monitor">Key Metrics to Monitor</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../training_guide.html#training-loss-loss">1. Training Loss (<code class="docutils literal notranslate"><span class="pre">loss</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../training_guide.html#validation-loss-val-loss">2. Validation Loss (<code class="docutils literal notranslate"><span class="pre">val_loss</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../training_guide.html#angular-error-geo-degs-val-geo-degs">3. Angular Error (<code class="docutils literal notranslate"><span class="pre">geo_degs</span></code>, <code class="docutils literal notranslate"><span class="pre">val_geo_degs</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../training_guide.html#median-angular-error-val-median-geo-degs">4. Median Angular Error (<code class="docutils literal notranslate"><span class="pre">val_median_geo_degs</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../training_guide.html#learning-rate-lr">5. Learning Rate (<code class="docutils literal notranslate"><span class="pre">lr</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../training_guide.html#visualization-rotation-matrices">6. Visualization: Rotation Matrices</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#example-tensorboard-monitoring-session">Example TensorBoard Monitoring Session</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../training_guide.html#overfitting-and-underfitting">Overfitting and Underfitting</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#what-is-overfitting">What is Overfitting?</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#what-is-underfitting">What is Underfitting?</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#the-sweet-spot">The Sweet Spot</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../training_guide.html#data-preprocessing">Data Preprocessing</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#image-size-and-sampling-rate">Image Size and Sampling Rate</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#masking">Masking</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#ctf-correction">CTF Correction</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../training_guide.html#advanced-training-options">Advanced Training Options</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#continue-training">Continue Training</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#fine-tuning">Fine-tuning</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#half-set-training">Half-Set Training</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#simulated-pre-training">Simulated Pre-training</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#model-compilation">Model Compilation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#debugging-overfitting-on-small-batches">Debugging: Overfitting on Small Batches</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../training_guide.html#troubleshooting-training-issues">Troubleshooting Training Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#training-is-very-slow">Training is very slow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#out-of-memory-errors">Out of memory errors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#too-many-open-files-error">“Too many open files” error</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#loss-is-nan">Loss is NaN</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#model-not-improving">Model not improving</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../training_guide.html#validation-loss-jumps-around">Validation loss jumps around</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../training_guide.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../configuration_guide.html">Configuration Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../configuration_guide.html#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../configuration_guide.html#configuration-system-overview">Configuration System Overview</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../configuration_guide.html#configuration-sources-in-order-of-precedence">Configuration Sources (in order of precedence)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../configuration_guide.html#using-config-overrides">Using Config Overrides</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../configuration_guide.html#using-yaml-config-files">Using YAML Config Files</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../configuration_guide.html#viewing-available-options">Viewing Available Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../configuration_guide.html#configuration-hierarchy">Configuration Hierarchy</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../configuration_guide.html#reading-configuration-files">Reading Configuration Files</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../configuration_guide.html#configuration-file-locations">Configuration File Locations</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../configuration_guide.html#how-to-read-configuration-files">How to Read Configuration Files</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../configuration_guide.html#example-finding-training-parameters">Example: Finding Training Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../configuration_guide.html#example-finding-nested-parameters">Example: Finding Nested Parameters</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../configuration_guide.html#quick-parameter-reference">Quick Parameter Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../configuration_guide.html#saving-and-loading-configurations">Saving and Loading Configurations</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../configuration_guide.html#exporting-current-configuration">Exporting Current Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../configuration_guide.html#reusing-a-configuration">Reusing a Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../configuration_guide.html#overriding-loaded-config">Overriding Loaded Config</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../configuration_guide.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../cli.html">Command-Line Interface</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../cli.html#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../cli.html#cryopares-train"><code class="docutils literal notranslate"><span class="pre">cryopares_train</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#usage">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#parameters">Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#configuration-overrides">Configuration Overrides</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#view-all-config-options">View All Config Options</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#examples">Examples</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#important-notes">Important Notes</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../cli.html#cryopares-infer"><code class="docutils literal notranslate"><span class="pre">cryopares_infer</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#id1">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#id2">Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#id3">Configuration Overrides</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#id4">Examples</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#output-files">Output Files</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#id5">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../cli.html#cryopares-projmatching"><code class="docutils literal notranslate"><span class="pre">cryopares_projmatching</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#id6">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#id7">Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#example">Example</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../cli.html#cryopares-reconstruct"><code class="docutils literal notranslate"><span class="pre">cryopares_reconstruct</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#id8">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#id9">Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#id10">Example</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../cli.html#compactify-checkpoint"><code class="docutils literal notranslate"><span class="pre">compactify_checkpoint</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#id11">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#required-arguments">Required Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#optional-arguments">Optional Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#id12">Examples</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#what-s-included">What’s Included</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#size-reduction">Size Reduction</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#using-compactified-checkpoints">Using Compactified Checkpoints</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../cli.html#utility-scripts">Utility Scripts</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#gmm-histogram-analysis">GMM Histogram Analysis</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#fsc-computation">FSC Computation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#pose-comparison">Pose Comparison</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#learning-curve-visualization">Learning Curve Visualization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../cli.html#star-file-histograms">STAR File Histograms</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../cli.html#id13">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../troubleshooting.html">Troubleshooting Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../troubleshooting.html#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../troubleshooting.html#installation-issues">Installation Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#pip-install-fails-with-dependency-conflicts">pip install fails with dependency conflicts</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#importerror-no-module-named-cryopares">ImportError: No module named ‘cryoPARES’</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#cuda-version-mismatch">CUDA version mismatch</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../troubleshooting.html#configuration-issues">Configuration Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#type-mismatch-errors-when-using-config">Type mismatch errors when using –config</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../troubleshooting.html#file-system-issues">File System Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#too-many-open-files-error">“Too many open files” error</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#permission-denied-when-writing-outputs">Permission denied when writing outputs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#particle-files-not-found">Particle files not found</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../troubleshooting.html#memory-issues">Memory Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#out-of-memory-oom-during-training">Out of memory (OOM) during training</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#out-of-memory-during-inference">Out of memory during inference</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#ram-exhausted-when-loading-data">RAM exhausted when loading data</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../troubleshooting.html#training-issues">Training Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#loss-becomes-nan">Loss becomes NaN</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#training-doesn-t-improve">Training doesn’t improve</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#validation-loss-higher-than-training-loss">Validation loss higher than training loss</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#training-crashes-with-killed">Training crashes with “Killed”</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#checkpoints-not-saving">Checkpoints not saving</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../troubleshooting.html#inference-issues">Inference Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#predicted-poses-are-random">Predicted poses are random</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#reconstruction-is-blurry">Reconstruction is blurry</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#no-particles-passed-confidence-threshold">“No particles passed confidence threshold”</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#inference-slower-than-expected">Inference slower than expected</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../troubleshooting.html#data-issues">Data Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#ctf-parameters-missing">CTF parameters missing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#orientation-columns-missing">Orientation columns missing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#particles-are-poorly-centered">Particles are poorly centered</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#different-sampling-rate-in-data-vs-reference">Different sampling rate in data vs. reference</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../troubleshooting.html#performance-issues">Performance Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#training-is-very-slow">Training is very slow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#inference-is-very-slow">Inference is very slow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#data-loading-is-bottleneck">Data loading is bottleneck</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../troubleshooting.html#cuda-gpu-issues">CUDA/GPU Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#cuda-out-of-memory-but-gpu-seems-empty">“CUDA out of memory” but GPU seems empty</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#multiple-gpus-not-being-used">Multiple GPUs not being used</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#gpu-slower-than-expected">GPU slower than expected</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../troubleshooting.html#output-quality-issues">Output Quality Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#reconstruction-has-artifacts">Reconstruction has artifacts</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#fsc-is-lower-than-expected">FSC is lower than expected</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#reconstructed-map-has-wrong-hand">Reconstructed map has wrong hand</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../troubleshooting.html#getting-more-help">Getting More Help</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#enable-debug-mode">Enable Debug Mode</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#check-logs">Check Logs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../../troubleshooting.html#report-issues">Report Issues</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../troubleshooting.html#see-also">See Also</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../api/index.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../api/index.html#core-modules">Core Modules</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/training.html">Training API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/training.html#module-cryoPARES.train.train">Main Training Module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/training.html#module-cryoPARES.train.runTrainOnePartition">Training Execution</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/inference.html">Inference API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/inference.html#module-cryoPARES.inference.inferencer">Single Inferencer</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/inference.html#module-cryoPARES.inference.infer">Distributed Inference</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/inference.html#daemon-mode">Daemon Mode</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/projection_matching.html">Projection Matching API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/projection_matching.html#module-cryoPARES.projmatching.projMatcher">Projection Matcher</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/projection_matching.html#module-cryoPARES.projmatching.projmatching">Command-Line Interface</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/reconstruction.html">Reconstruction API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/reconstruction.html#module-cryoPARES.reconstruction.reconstructor">Reconstructor</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/reconstruction.html#module-cryoPARES.reconstruction.reconstruct">Command-Line Interface</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/data_management.html">Data Management API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/data_management.html#module-cryoPARES.datamanager.datamanager">Data Manager</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/data_management.html#module-cryoPARES.datamanager.particlesDataset">Particles Dataset</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/data_management.html#module-cryoPARES.datamanager.augmentations">Augmentations</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/data_management.html#module-cryoPARES.datamanager.ctf.rfft_ctf">CTF Correction</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/models.html">Models API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/models.html#module-cryoPARES.models.model">PyTorch Lightning Model</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/models.html#module-cryoPARES.models.image2sphere.image2sphere">Image2Sphere Network</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/models.html#image-encoders">Image Encoders</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/models.html#module-cryoPARES.models.directionalNormalizer.directionalNormalizer">Directional Normalizer</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api/utils.html">Utilities API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/utils.html#checkpoint-management">Checkpoint Management</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/utils.html#module-cryoPARES.utils.paths">Path Utilities</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/utils.html#module-cryoPARES.utils.torchUtils">PyTorch Utilities</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/utils.html#module-cryoPARES.utils.reconstructionUtils">Reconstruction Utilities</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api/utils.html#geometry-utilities">Geometry Utilities</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Additional Resources</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference external" href="https://github.com/rsanchezgarc/cryoPARES">GitHub Repository</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://www.biorxiv.org/content/10.1101/2025.03.04.641536v2">Paper</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">CryoPARES</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">cryoPARES.projmatching.projmatching</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for cryoPARES.projmatching.projmatching</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">tempfile</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">traceback</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Literal</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">starfile</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">progressBarDistributed</span><span class="w"> </span><span class="kn">import</span> <span class="n">SharedMemoryProgressBar</span><span class="p">,</span> <span class="n">SharedMemoryProgressBarWorker</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">torch</span><span class="w"> </span><span class="kn">import</span> <span class="n">multiprocessing</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">autoCLI_config</span><span class="w"> </span><span class="kn">import</span> <span class="n">inject_defaults_from_config</span><span class="p">,</span> <span class="n">inject_docs_from_config_params</span><span class="p">,</span> <span class="n">CONFIG_PARAM</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryoPARES.configs.mainConfig</span><span class="w"> </span><span class="kn">import</span> <span class="n">main_config</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryoPARES.constants</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">BATCH_ORI_IMAGE_NAME</span><span class="p">,</span>
+    <span class="n">BATCH_POSE_NAME</span><span class="p">,</span>
+    <span class="n">BATCH_ORI_CTF_NAME</span><span class="p">,</span>
+    <span class="n">RELION_ANGLES_NAMES</span><span class="p">,</span>
+    <span class="n">RELION_SHIFTS_NAMES</span><span class="p">,</span>
+    <span class="n">RELION_PRED_POSE_CONFIDENCE_NAME</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryoPARES.projmatching.projMatcher</span><span class="w"> </span><span class="kn">import</span> <span class="n">ProjectionMatcher</span><span class="p">,</span> <span class="n">align_star</span> <span class="k">as</span> <span class="n">single_job_align_star</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryoPARES.projmatching.projmatchingUtils.loggers</span><span class="w"> </span><span class="kn">import</span> <span class="n">getWorkerLogger</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryoPARES.projmatching.projMatcher</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_eulers</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">gc</span>
+
+<span class="n">_MATCHER</span> <span class="o">=</span> <span class="kc">None</span>
+
+
+<span class="c1"># --------------------------</span>
+<span class="c1"># Shared memory utilities</span>
+<span class="c1"># --------------------------</span>
+<div class="viewcode-block" id="create_shared_tensor">
+<a class="viewcode-back" href="../../../api/projection_matching.html#cryoPARES.projmatching.projmatching.create_shared_tensor">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">create_shared_tensor</span><span class="p">(</span><span class="n">shape</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">ctx</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">lock</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Create a shared multiprocessing.Array for storing tensor data.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        shape (tuple[int]): Desired tensor shape.</span>
+<span class="sd">        dtype (torch.dtype): PyTorch dtype (supports float32, float64, int64).</span>
+<span class="sd">        ctx: Multiprocessing context (default: torch.multiprocessing).</span>
+<span class="sd">        lock (bool): If False, disables lock for performance (safe when workers</span>
+<span class="sd">                     write disjoint slices).</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        (shared_array, shape): A multiprocessing.Array and the shape tuple.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">size</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">prod</span><span class="p">(</span><span class="n">shape</span><span class="p">))</span>
+    <span class="k">if</span> <span class="n">dtype</span> <span class="o">==</span> <span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">:</span>
+        <span class="n">typecode</span> <span class="o">=</span> <span class="s1">&#39;f&#39;</span>  <span class="c1"># float32</span>
+    <span class="k">elif</span> <span class="n">dtype</span> <span class="o">==</span> <span class="n">torch</span><span class="o">.</span><span class="n">float64</span><span class="p">:</span>
+        <span class="n">typecode</span> <span class="o">=</span> <span class="s1">&#39;d&#39;</span>  <span class="c1"># float64</span>
+    <span class="k">elif</span> <span class="n">dtype</span> <span class="o">==</span> <span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">:</span>
+        <span class="n">typecode</span> <span class="o">=</span> <span class="s1">&#39;q&#39;</span>  <span class="c1"># int64 (portable)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Unsupported dtype: </span><span class="si">{</span><span class="n">dtype</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">ctx</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">ctx</span> <span class="o">=</span> <span class="n">multiprocessing</span>
+    <span class="n">shared_array</span> <span class="o">=</span> <span class="n">ctx</span><span class="o">.</span><span class="n">Array</span><span class="p">(</span><span class="n">typecode</span><span class="p">,</span> <span class="n">size</span><span class="p">,</span> <span class="n">lock</span><span class="o">=</span><span class="n">lock</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">shared_array</span><span class="p">,</span> <span class="n">shape</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_ctypes_base</span><span class="p">(</span><span class="n">shared_array</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return the underlying ctypes object from a multiprocessing.Array.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">shared_array</span><span class="o">.</span><span class="n">get_obj</span><span class="p">()</span> <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">shared_array</span><span class="p">,</span> <span class="s2">&quot;get_obj&quot;</span><span class="p">)</span> <span class="k">else</span> <span class="n">shared_array</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_tensor_from_shared</span><span class="p">(</span><span class="n">shared_array</span><span class="p">,</span> <span class="n">shape</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Create a zero-copy Torch Tensor view from a shared multiprocessing.Array.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        shared_array: multiprocessing.Array allocated with create_shared_tensor().</span>
+<span class="sd">        shape (tuple[int]): Desired tensor shape.</span>
+<span class="sd">        dtype (torch.dtype): Expected dtype.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        torch.Tensor: A CPU tensor mapped to the shared memory.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">base</span> <span class="o">=</span> <span class="n">_ctypes_base</span><span class="p">(</span><span class="n">shared_array</span><span class="p">)</span>
+    <span class="n">np_arr</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ctypeslib</span><span class="o">.</span><span class="n">as_array</span><span class="p">(</span><span class="n">base</span><span class="p">)</span>
+    <span class="n">t</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">from_numpy</span><span class="p">(</span><span class="n">np_arr</span><span class="p">)</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="o">*</span><span class="n">shape</span><span class="p">)</span>
+
+    <span class="c1"># Check dtype consistency</span>
+    <span class="n">expected</span> <span class="o">=</span> <span class="p">{</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span>
+                <span class="n">torch</span><span class="o">.</span><span class="n">float64</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">float64</span><span class="p">,</span>
+                <span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">}[</span><span class="n">dtype</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">t</span><span class="o">.</span><span class="n">dtype</span> <span class="o">!=</span> <span class="n">expected</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Shared tensor dtype mismatch: got </span><span class="si">{</span><span class="n">t</span><span class="o">.</span><span class="n">dtype</span><span class="si">}</span><span class="s2">, expected </span><span class="si">{</span><span class="n">dtype</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">t</span>
+
+
+<span class="c1"># --------------------------</span>
+<span class="c1"># Worker</span>
+<span class="c1"># --------------------------</span>
+<div class="viewcode-block" id="worker">
+<a class="viewcode-back" href="../../../api/projection_matching.html#cryoPARES.projmatching.projmatching.worker">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">worker</span><span class="p">(</span><span class="n">worker_id</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Wrapper to catch exceptions in workers and print tracebacks.&quot;&quot;&quot;</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">_worker</span><span class="p">(</span><span class="n">worker_id</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[Worker </span><span class="si">{</span><span class="n">worker_id</span><span class="si">}</span><span class="s2">] Exception occurred: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">)</span>
+        <span class="n">traceback</span><span class="o">.</span><span class="n">print_exc</span><span class="p">()</span>
+
+        <span class="c1"># Print error summary for easier debugging</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">cryoPARES.utils.errorFormatting</span><span class="w"> </span><span class="kn">import</span> <span class="n">print_error_summary</span>
+        <span class="n">print_error_summary</span><span class="p">(</span>
+            <span class="n">e</span><span class="p">,</span>
+            <span class="n">description</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;Projection matching worker </span><span class="si">{</span><span class="n">worker_id</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+            <span class="n">worker_id</span><span class="o">=</span><span class="n">worker_id</span>
+        <span class="p">)</span>
+        <span class="k">raise</span> <span class="n">e</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_worker</span><span class="p">(</span><span class="n">worker_id</span><span class="p">,</span> <span class="n">pbar_fname</span><span class="p">,</span> <span class="n">particles_idxs</span><span class="p">,</span> <span class="n">matcher_init_kwargs</span><span class="p">,</span>
+            <span class="n">run_kwargs</span><span class="p">,</span> <span class="n">shared_results</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Worker process function for projection matching.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        worker_id (int): Worker index.</span>
+<span class="sd">        pbar_fname (str): Shared progress bar handle.</span>
+<span class="sd">        particles_idxs (list[int]): Subset of particle indices assigned to this worker.</span>
+<span class="sd">        matcher_init_kwargs (dict): Args to initialize ProjectionMatcher.</span>
+<span class="sd">        run_kwargs (dict): Args for dataset loading.</span>
+<span class="sd">        shared_results (dict): Shared memory arrays for results.</span>
+<span class="sd">        device (str or None): Torch device string (&quot;cuda:X&quot; or None).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">global</span> <span class="n">_MATCHER</span>
+    <span class="k">if</span> <span class="n">_MATCHER</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">_MATCHER</span> <span class="o">=</span> <span class="n">ProjectionMatcher</span><span class="p">(</span><span class="o">**</span><span class="n">matcher_init_kwargs</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">device</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">_MATCHER</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+
+    <span class="n">verbose</span> <span class="o">=</span> <span class="n">matcher_init_kwargs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;verbose&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
+    <span class="n">mainLogger</span> <span class="o">=</span> <span class="n">getWorkerLogger</span><span class="p">(</span><span class="n">verbose</span><span class="p">)</span>
+    <span class="n">mainLogger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Worker </span><span class="si">{</span><span class="n">worker_id</span><span class="si">}</span><span class="s2"> started&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Shared tensors</span>
+    <span class="n">results_corr_matrix</span> <span class="o">=</span> <span class="n">_tensor_from_shared</span><span class="p">(</span><span class="n">shared_results</span><span class="p">[</span><span class="s2">&quot;corr&quot;</span><span class="p">][</span><span class="mi">0</span><span class="p">],</span>
+                                              <span class="n">shared_results</span><span class="p">[</span><span class="s2">&quot;corr&quot;</span><span class="p">][</span><span class="mi">1</span><span class="p">],</span> <span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+    <span class="n">results_shiftsAngs_matrix</span> <span class="o">=</span> <span class="n">_tensor_from_shared</span><span class="p">(</span><span class="n">shared_results</span><span class="p">[</span><span class="s2">&quot;shifts&quot;</span><span class="p">][</span><span class="mi">0</span><span class="p">],</span>
+                                                    <span class="n">shared_results</span><span class="p">[</span><span class="s2">&quot;shifts&quot;</span><span class="p">][</span><span class="mi">1</span><span class="p">],</span> <span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+    <span class="n">results_eulerDegs_matrix</span> <span class="o">=</span> <span class="n">_tensor_from_shared</span><span class="p">(</span><span class="n">shared_results</span><span class="p">[</span><span class="s2">&quot;eulers&quot;</span><span class="p">][</span><span class="mi">0</span><span class="p">],</span>
+                                                   <span class="n">shared_results</span><span class="p">[</span><span class="s2">&quot;eulers&quot;</span><span class="p">][</span><span class="mi">1</span><span class="p">],</span> <span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+    <span class="n">stats_corr_matrix</span> <span class="o">=</span> <span class="n">_tensor_from_shared</span><span class="p">(</span><span class="n">shared_results</span><span class="p">[</span><span class="s2">&quot;stats&quot;</span><span class="p">][</span><span class="mi">0</span><span class="p">],</span>
+                                            <span class="n">shared_results</span><span class="p">[</span><span class="s2">&quot;stats&quot;</span><span class="p">][</span><span class="mi">1</span><span class="p">],</span> <span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+    <span class="n">n_cpus</span> <span class="o">=</span> <span class="n">run_kwargs</span><span class="p">[</span><span class="s2">&quot;n_cpus&quot;</span><span class="p">]</span>
+    <span class="n">dataset</span> <span class="o">=</span> <span class="n">_MATCHER</span><span class="o">.</span><span class="n">preprocess_particles</span><span class="p">(</span>
+        <span class="n">particles</span><span class="o">=</span><span class="n">run_kwargs</span><span class="p">[</span><span class="s2">&quot;particles_star_fname&quot;</span><span class="p">],</span>
+        <span class="n">data_rootdir</span><span class="o">=</span><span class="n">run_kwargs</span><span class="p">[</span><span class="s2">&quot;data_rootdir&quot;</span><span class="p">],</span>
+        <span class="n">batch_size</span><span class="o">=</span><span class="n">run_kwargs</span><span class="p">[</span><span class="s2">&quot;batch_size&quot;</span><span class="p">],</span>
+        <span class="n">n_cpus</span><span class="o">=</span><span class="n">run_kwargs</span><span class="p">[</span><span class="s2">&quot;n_cpus&quot;</span><span class="p">],</span>
+        <span class="n">halfset</span><span class="o">=</span><span class="n">run_kwargs</span><span class="p">[</span><span class="s2">&quot;halfset&quot;</span><span class="p">],</span>
+        <span class="n">subset_idxs</span><span class="o">=</span><span class="nb">list</span><span class="p">(</span><span class="n">particles_idxs</span><span class="p">)</span>
+    <span class="p">)</span>
+
+    <span class="n">using_cuda</span> <span class="o">=</span> <span class="n">device</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="nb">str</span><span class="p">(</span><span class="n">device</span><span class="p">)</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;cuda&quot;</span><span class="p">)</span>
+    <span class="n">dl</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">utils</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">DataLoader</span><span class="p">(</span>
+        <span class="n">dataset</span><span class="p">,</span>
+        <span class="n">batch_size</span><span class="o">=</span><span class="n">run_kwargs</span><span class="p">[</span><span class="s2">&quot;batch_size&quot;</span><span class="p">],</span>
+        <span class="n">num_workers</span><span class="o">=</span><span class="n">n_cpus</span><span class="p">,</span>
+        <span class="n">shuffle</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+        <span class="n">pin_memory</span><span class="o">=</span><span class="n">using_cuda</span><span class="p">,</span>
+        <span class="n">multiprocessing_context</span><span class="o">=</span><span class="s1">&#39;spawn&#39;</span> <span class="k">if</span> <span class="n">n_cpus</span><span class="o">&gt;</span><span class="mi">0</span> <span class="k">else</span> <span class="kc">None</span>
+    <span class="p">)</span>
+
+    <span class="k">with</span> <span class="n">SharedMemoryProgressBarWorker</span><span class="p">(</span><span class="n">worker_id</span><span class="p">,</span> <span class="n">pbar_fname</span><span class="p">)</span> <span class="k">as</span> <span class="n">pbar</span><span class="p">:</span>
+        <span class="n">pbar</span><span class="o">.</span><span class="n">set_total_steps</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">dataset</span><span class="p">))</span>
+        <span class="n">_partIdx</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="n">non_blocking</span> <span class="o">=</span> <span class="nb">bool</span><span class="p">(</span><span class="n">using_cuda</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">batch</span> <span class="ow">in</span> <span class="n">dl</span><span class="p">:</span>
+            <span class="n">n_items</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">batch</span><span class="p">[</span><span class="n">BATCH_ORI_IMAGE_NAME</span><span class="p">])</span>
+            <span class="n">partIdx</span> <span class="o">=</span> <span class="n">particles_idxs</span><span class="p">[</span><span class="n">_partIdx</span><span class="p">:</span><span class="n">_partIdx</span> <span class="o">+</span> <span class="n">n_items</span><span class="p">]</span>
+            <span class="n">_partIdx</span> <span class="o">+=</span> <span class="n">n_items</span>
+
+            <span class="n">rotmats</span> <span class="o">=</span> <span class="n">batch</span><span class="p">[</span><span class="n">BATCH_POSE_NAME</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">,</span> <span class="n">non_blocking</span><span class="o">=</span><span class="n">non_blocking</span><span class="p">)</span> \
+                <span class="k">if</span> <span class="n">using_cuda</span> <span class="k">else</span> <span class="n">batch</span><span class="p">[</span><span class="n">BATCH_POSE_NAME</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">parts</span> <span class="o">=</span> <span class="n">batch</span><span class="p">[</span><span class="n">BATCH_ORI_IMAGE_NAME</span><span class="p">]</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">,</span> <span class="n">non_blocking</span><span class="o">=</span><span class="n">non_blocking</span><span class="p">)</span> \
+                <span class="k">if</span> <span class="n">using_cuda</span> <span class="k">else</span> <span class="n">batch</span><span class="p">[</span><span class="n">BATCH_ORI_IMAGE_NAME</span><span class="p">]</span>
+            <span class="n">ctfs</span> <span class="o">=</span> <span class="n">batch</span><span class="p">[</span><span class="n">BATCH_ORI_CTF_NAME</span><span class="p">]</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">,</span> <span class="n">non_blocking</span><span class="o">=</span><span class="n">non_blocking</span><span class="p">)</span> \
+                <span class="k">if</span> <span class="n">using_cuda</span> <span class="k">else</span> <span class="n">batch</span><span class="p">[</span><span class="n">BATCH_ORI_CTF_NAME</span><span class="p">]</span>
+
+            <span class="n">rotmats</span> <span class="o">=</span> <span class="n">rotmats</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span> <span class="c1">#We expect K poses per particle</span>
+            <span class="n">maxCorrs</span><span class="p">,</span> <span class="n">predRotMats</span><span class="p">,</span> <span class="n">predShiftsAngsXY</span><span class="p">,</span> <span class="n">comparedWeight</span> <span class="o">=</span> <span class="n">_MATCHER</span><span class="o">.</span><span class="n">forward</span><span class="p">(</span><span class="n">parts</span><span class="p">,</span> <span class="n">ctfs</span><span class="p">,</span> <span class="n">rotmats</span><span class="p">)</span>
+
+            <span class="n">results_corr_matrix</span><span class="p">[</span><span class="n">partIdx</span><span class="p">,</span> <span class="p">:]</span> <span class="o">=</span> <span class="n">maxCorrs</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span>
+            <span class="n">results_shiftsAngs_matrix</span><span class="p">[</span><span class="n">partIdx</span><span class="p">,</span> <span class="p">:]</span> <span class="o">=</span> <span class="n">predShiftsAngsXY</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span>
+            <span class="n">results_eulerDegs_matrix</span><span class="p">[</span><span class="n">partIdx</span><span class="p">,</span> <span class="p">:]</span> <span class="o">=</span> <span class="n">get_eulers</span><span class="p">(</span><span class="n">predRotMats</span><span class="p">)</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span>
+            <span class="n">stats_corr_matrix</span><span class="p">[</span><span class="n">partIdx</span><span class="p">,</span> <span class="p">:]</span> <span class="o">=</span> <span class="n">comparedWeight</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span>
+
+            <span class="n">pbar</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">n_items</span><span class="p">)</span>
+    <span class="n">mainLogger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Worker </span><span class="si">{</span><span class="n">worker_id</span><span class="si">}</span><span class="s2"> finished&quot;</span><span class="p">)</span>
+
+
+<span class="c1"># --------------------------</span>
+<span class="c1"># Main entry</span>
+<span class="c1"># --------------------------</span>
+<div class="viewcode-block" id="projmatching_starfile">
+<a class="viewcode-back" href="../../../api/projection_matching.html#cryoPARES.projmatching.projmatching.projmatching_starfile">[docs]</a>
+<span class="nd">@inject_docs_from_config_params</span>
+<span class="nd">@inject_defaults_from_config</span><span class="p">(</span><span class="n">main_config</span><span class="o">.</span><span class="n">projmatching</span><span class="p">,</span> <span class="n">update_config_with_args</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">projmatching_starfile</span><span class="p">(</span>
+        <span class="n">reference_vol</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+        <span class="n">particles_star_fname</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+        <span class="n">out_fname</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+        <span class="n">particles_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+        <span class="n">mask_radius_angs</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">grid_distance_degs</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">CONFIG_PARAM</span><span class="p">(),</span>
+        <span class="n">grid_step_degs</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">CONFIG_PARAM</span><span class="p">(),</span>
+        <span class="n">return_top_k_poses</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span>
+        <span class="n">filter_resolution_angst</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">n_jobs</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span>
+        <span class="n">num_dataworkers</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span>
+        <span class="n">batch_size</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1024</span><span class="p">,</span>
+        <span class="n">use_cuda</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+        <span class="n">verbose</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+        <span class="n">float32_matmul_precision</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;highest&quot;</span><span class="p">,</span> <span class="s2">&quot;high&quot;</span><span class="p">,</span> <span class="s2">&quot;medium&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;high&quot;</span><span class="p">,</span>
+        <span class="n">gpu_id</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">n_first_particles</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">correct_ctf</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+        <span class="n">halfmap_subset</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;1&quot;</span><span class="p">,</span> <span class="s2">&quot;2&quot;</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Aligns particles from a STAR file to a reference volume using projection matching.</span>
+
+<span class="sd">    This function can run in a single-process mode or be distributed across multiple</span>
+<span class="sd">    jobs for parallel processing.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        reference_vol: {reference_vol}</span>
+<span class="sd">        particles_star_fname: {particles_star_fname}</span>
+<span class="sd">        out_fname: {out_fname}</span>
+<span class="sd">        particles_dir: {particles_dir}</span>
+<span class="sd">        mask_radius_angs: {mask_radius_angs}</span>
+<span class="sd">        grid_distance_degs: {grid_distance_degs}</span>
+<span class="sd">        grid_step_degs: {grid_step_degs}</span>
+<span class="sd">        return_top_k_poses: {return_top_k_poses}</span>
+<span class="sd">        filter_resolution_angst: {filter_resolution_angst}</span>
+<span class="sd">        n_jobs: {n_jobs}</span>
+<span class="sd">        num_dataworkers: {num_dataworkers}</span>
+<span class="sd">        batch_size: {batch_size}</span>
+<span class="sd">        use_cuda: {use_cuda}</span>
+<span class="sd">        verbose: {verbose}</span>
+<span class="sd">        float32_matmul_precision: {float32_matmul_precision}</span>
+<span class="sd">        gpu_id: {gpu_id}</span>
+<span class="sd">        n_first_particles: {n_first_particles}</span>
+<span class="sd">        correct_ctf: {correct_ctf}</span>
+<span class="sd">        halfmap_subset: {halfmap_subset}</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">if</span> <span class="n">out_fname</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">assert</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span>
+            <span class="n">out_fname</span>
+        <span class="p">),</span> <span class="sa">f</span><span class="s2">&quot;Error, the starFnameOut </span><span class="si">{</span><span class="n">out_fname</span><span class="si">}</span><span class="s2"> already exists&quot;</span>
+
+    <span class="n">ctx</span> <span class="o">=</span> <span class="n">multiprocessing</span><span class="o">.</span><span class="n">get_context</span><span class="p">(</span><span class="s1">&#39;spawn&#39;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">n_jobs</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="n">single_job_align_star</span><span class="p">(</span>
+            <span class="n">reference_vol</span><span class="o">=</span><span class="n">reference_vol</span><span class="p">,</span>
+            <span class="n">particles_star_fname</span><span class="o">=</span><span class="n">particles_star_fname</span><span class="p">,</span>
+            <span class="n">out_fname</span><span class="o">=</span><span class="n">out_fname</span><span class="p">,</span>
+            <span class="n">particles_dir</span><span class="o">=</span><span class="n">particles_dir</span><span class="p">,</span>
+            <span class="n">mask_radius_angs</span><span class="o">=</span><span class="n">mask_radius_angs</span><span class="p">,</span>
+            <span class="n">grid_distance_degs</span><span class="o">=</span><span class="n">grid_distance_degs</span><span class="p">,</span>
+            <span class="n">grid_step_degs</span><span class="o">=</span><span class="n">grid_step_degs</span><span class="p">,</span>
+            <span class="n">return_top_k_poses</span><span class="o">=</span><span class="n">return_top_k_poses</span><span class="p">,</span>
+            <span class="n">filter_resolution_angst</span><span class="o">=</span><span class="n">filter_resolution_angst</span><span class="p">,</span>
+            <span class="n">num_dataworkers</span><span class="o">=</span><span class="n">num_dataworkers</span><span class="p">,</span>
+            <span class="n">batch_size</span><span class="o">=</span><span class="n">batch_size</span><span class="p">,</span>
+            <span class="n">use_cuda</span><span class="o">=</span><span class="n">use_cuda</span><span class="p">,</span>
+            <span class="n">verbose</span><span class="o">=</span><span class="n">verbose</span><span class="p">,</span>
+            <span class="n">float32_matmul_precision</span><span class="o">=</span><span class="n">float32_matmul_precision</span><span class="p">,</span>
+            <span class="n">gpu_id</span><span class="o">=</span><span class="n">gpu_id</span><span class="p">,</span>
+            <span class="n">n_first_particles</span><span class="o">=</span><span class="n">n_first_particles</span><span class="p">,</span>
+            <span class="n">correct_ctf</span><span class="o">=</span><span class="n">correct_ctf</span><span class="p">,</span>
+            <span class="n">halfmap_subset</span><span class="o">=</span><span class="n">halfmap_subset</span>
+        <span class="p">)</span>
+        <span class="k">return</span>
+
+    <span class="n">torch</span><span class="o">.</span><span class="n">set_float32_matmul_precision</span><span class="p">(</span><span class="n">float32_matmul_precision</span><span class="p">)</span>
+
+    <span class="n">mainLogger</span> <span class="o">=</span> <span class="n">getWorkerLogger</span><span class="p">(</span><span class="n">verbose</span><span class="p">)</span>
+
+    <span class="k">with</span> <span class="n">tempfile</span><span class="o">.</span><span class="n">TemporaryDirectory</span><span class="p">()</span> <span class="k">as</span> <span class="n">tmpdir</span><span class="p">:</span>
+        <span class="c1"># Particle subsampling</span>
+        <span class="k">if</span> <span class="n">n_first_particles</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">star_data</span> <span class="o">=</span> <span class="n">starfile</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="n">particles_star_fname</span><span class="p">)</span>
+            <span class="n">particles_df</span> <span class="o">=</span> <span class="n">star_data</span><span class="p">[</span><span class="s2">&quot;particles&quot;</span><span class="p">][:</span><span class="n">n_first_particles</span><span class="p">]</span>
+            <span class="n">optics_df</span> <span class="o">=</span> <span class="n">star_data</span><span class="p">[</span><span class="s2">&quot;optics&quot;</span><span class="p">]</span>
+            <span class="n">star_in_limited</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">tmpdir</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;input_particles_</span><span class="si">{</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">particles_star_fname</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="n">starfile</span><span class="o">.</span><span class="n">write</span><span class="p">({</span><span class="s2">&quot;optics&quot;</span><span class="p">:</span> <span class="n">optics_df</span><span class="p">,</span> <span class="s2">&quot;particles&quot;</span><span class="p">:</span> <span class="n">particles_df</span><span class="p">},</span> <span class="n">star_in_limited</span><span class="p">)</span>
+            <span class="n">particles_star_fname</span> <span class="o">=</span> <span class="n">star_in_limited</span>
+
+
+        <span class="n">matcher_init_kwargs</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span>
+            <span class="n">reference_vol</span><span class="o">=</span><span class="n">reference_vol</span><span class="p">,</span>
+            <span class="n">grid_distance_degs</span><span class="o">=</span><span class="n">grid_distance_degs</span><span class="p">,</span>
+            <span class="n">grid_step_degs</span><span class="o">=</span><span class="n">grid_step_degs</span><span class="p">,</span>
+            <span class="n">top_k_poses_localref</span><span class="o">=</span><span class="n">return_top_k_poses</span><span class="p">,</span>
+            <span class="n">max_resolution_A</span><span class="o">=</span><span class="n">filter_resolution_angst</span><span class="p">,</span>
+            <span class="n">verbose</span><span class="o">=</span><span class="n">verbose</span><span class="p">,</span>
+            <span class="n">correct_ctf</span><span class="o">=</span><span class="n">correct_ctf</span><span class="p">,</span>
+            <span class="n">mask_radius_angs</span><span class="o">=</span><span class="n">mask_radius_angs</span>
+        <span class="p">)</span>
+        <span class="n">run_kwargs</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span>
+            <span class="n">particles_star_fname</span><span class="o">=</span><span class="n">particles_star_fname</span><span class="p">,</span>
+            <span class="n">data_rootdir</span><span class="o">=</span><span class="n">particles_dir</span><span class="p">,</span>
+            <span class="n">batch_size</span><span class="o">=</span><span class="n">batch_size</span><span class="p">,</span>
+            <span class="n">n_cpus</span><span class="o">=</span><span class="n">num_dataworkers</span><span class="p">,</span>
+            <span class="n">halfset</span><span class="o">=</span><span class="n">halfmap_subset</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Init matcher to infer dataset sizes</span>
+        <span class="n">matcher</span> <span class="o">=</span> <span class="n">ProjectionMatcher</span><span class="p">(</span><span class="o">**</span><span class="n">matcher_init_kwargs</span><span class="p">)</span>
+        <span class="n">dataset</span> <span class="o">=</span> <span class="n">matcher</span><span class="o">.</span><span class="n">preprocess_particles</span><span class="p">(</span>
+            <span class="n">particles</span><span class="o">=</span><span class="n">particles_star_fname</span><span class="p">,</span>
+            <span class="n">data_rootdir</span><span class="o">=</span><span class="n">particles_dir</span><span class="p">,</span>
+            <span class="n">batch_size</span><span class="o">=</span><span class="n">batch_size</span><span class="p">,</span>
+            <span class="n">n_cpus</span><span class="o">=</span><span class="n">num_dataworkers</span><span class="p">,</span>
+            <span class="n">halfset</span><span class="o">=</span><span class="n">halfmap_subset</span>
+        <span class="p">)</span>
+        <span class="n">n_particles</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">dataset</span><span class="p">)</span>
+        <span class="n">particlesStar</span> <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">datasets</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">particles</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">confidence</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span>
+                <span class="n">particlesStar</span><span class="o">.</span><span class="n">particles_md</span><span class="o">.</span><span class="n">loc</span><span class="p">[:,</span> <span class="n">RELION_PRED_POSE_CONFIDENCE_NAME</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="p">,</span>
+                <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span>
+            <span class="p">)</span>
+        <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+            <span class="n">confidence</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">particlesStar</span><span class="o">.</span><span class="n">particles_md</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+
+        <span class="c1"># Allocate shared arrays</span>
+        <span class="n">corr_shape</span> <span class="o">=</span> <span class="p">(</span><span class="n">n_particles</span><span class="p">,</span> <span class="n">return_top_k_poses</span><span class="p">)</span>
+        <span class="n">shifts_shape</span> <span class="o">=</span> <span class="p">(</span><span class="n">n_particles</span><span class="p">,</span> <span class="n">return_top_k_poses</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+        <span class="n">eulers_shape</span> <span class="o">=</span> <span class="p">(</span><span class="n">n_particles</span><span class="p">,</span> <span class="n">return_top_k_poses</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+        <span class="n">stats_shape</span> <span class="o">=</span> <span class="p">(</span><span class="n">n_particles</span><span class="p">,</span> <span class="n">return_top_k_poses</span><span class="p">)</span>
+
+        <span class="n">shared_corr</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">create_shared_tensor</span><span class="p">(</span><span class="n">corr_shape</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">ctx</span><span class="o">=</span><span class="n">ctx</span><span class="p">,</span> <span class="n">lock</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="n">shared_shifts</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">create_shared_tensor</span><span class="p">(</span><span class="n">shifts_shape</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">ctx</span><span class="o">=</span><span class="n">ctx</span><span class="p">,</span> <span class="n">lock</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="n">shared_eulers</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">create_shared_tensor</span><span class="p">(</span><span class="n">eulers_shape</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">ctx</span><span class="o">=</span><span class="n">ctx</span><span class="p">,</span> <span class="n">lock</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="n">shared_stats</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">create_shared_tensor</span><span class="p">(</span><span class="n">stats_shape</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">ctx</span><span class="o">=</span><span class="n">ctx</span><span class="p">,</span> <span class="n">lock</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+        <span class="n">shared_results</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;corr&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">shared_corr</span><span class="p">,</span> <span class="n">corr_shape</span><span class="p">),</span>
+                          <span class="s2">&quot;shifts&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">shared_shifts</span><span class="p">,</span> <span class="n">shifts_shape</span><span class="p">),</span>
+                          <span class="s2">&quot;eulers&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">shared_eulers</span><span class="p">,</span> <span class="n">eulers_shape</span><span class="p">),</span>
+                          <span class="s2">&quot;stats&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">shared_stats</span><span class="p">,</span> <span class="n">stats_shape</span><span class="p">)}</span>
+
+        <span class="c1"># CUDA handling</span>
+        <span class="n">n_cuda_devices</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">device_count</span><span class="p">()</span> <span class="k">if</span> <span class="n">use_cuda</span> <span class="k">else</span> <span class="mi">0</span>
+        <span class="k">if</span> <span class="n">use_cuda</span><span class="p">:</span>
+            <span class="n">mainLogger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Using </span><span class="si">{</span><span class="n">n_cuda_devices</span><span class="si">}</span><span class="s2"> CUDA devices&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Launch workers</span>
+        <span class="k">with</span> <span class="n">SharedMemoryProgressBar</span><span class="p">(</span><span class="n">n_jobs</span><span class="p">)</span> <span class="k">as</span> <span class="n">pbar</span><span class="p">:</span>
+            <span class="n">pbar_fname</span> <span class="o">=</span> <span class="n">pbar</span><span class="o">.</span><span class="n">shm_name</span>
+            <span class="n">processes</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="n">particle_splits</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array_split</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">n_particles</span><span class="p">),</span> <span class="n">n_jobs</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">worker_id</span><span class="p">,</span> <span class="n">particles_idxs</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">particle_splits</span><span class="p">):</span>
+                <span class="n">worker_device</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;cuda:</span><span class="si">{</span><span class="n">worker_id</span><span class="w"> </span><span class="o">%</span><span class="w"> </span><span class="n">n_cuda_devices</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">if</span> <span class="n">n_cuda_devices</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="kc">None</span>
+                <span class="n">p</span> <span class="o">=</span> <span class="n">ctx</span><span class="o">.</span><span class="n">Process</span><span class="p">(</span>
+                    <span class="n">target</span><span class="o">=</span><span class="n">worker</span><span class="p">,</span>
+                    <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">worker_id</span><span class="p">,</span> <span class="n">pbar_fname</span><span class="p">,</span> <span class="n">particles_idxs</span><span class="p">,</span> <span class="n">matcher_init_kwargs</span><span class="p">,</span> <span class="n">run_kwargs</span><span class="p">,</span>
+                          <span class="n">shared_results</span><span class="p">,</span> <span class="n">worker_device</span><span class="p">)</span>
+                <span class="p">)</span>
+                <span class="n">p</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+                <span class="n">processes</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">p</span><span class="p">)</span>
+
+            <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">processes</span><span class="p">:</span>
+                <span class="n">p</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
+                <span class="k">if</span> <span class="n">p</span><span class="o">.</span><span class="n">exitcode</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="n">mainLogger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Worker </span><span class="si">{</span><span class="n">p</span><span class="o">.</span><span class="n">pid</span><span class="si">}</span><span class="s2"> exited with code </span><span class="si">{</span><span class="n">p</span><span class="o">.</span><span class="n">exitcode</span><span class="si">}</span><span class="s2">. Terminating.&quot;</span><span class="p">)</span>
+                    <span class="k">for</span> <span class="n">q</span> <span class="ow">in</span> <span class="n">processes</span><span class="p">:</span>
+                        <span class="k">if</span> <span class="n">q</span><span class="o">.</span><span class="n">is_alive</span><span class="p">():</span>
+                            <span class="n">q</span><span class="o">.</span><span class="n">terminate</span><span class="p">()</span>
+                    <span class="n">sys</span><span class="o">.</span><span class="n">exit</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+
+        <span class="n">mainLogger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;All workers finished. Consolidating results.&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Read results</span>
+        <span class="n">predEulerDegs</span> <span class="o">=</span> <span class="n">_tensor_from_shared</span><span class="p">(</span><span class="n">shared_eulers</span><span class="p">,</span> <span class="n">eulers_shape</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+        <span class="n">predShiftsAngs</span> <span class="o">=</span> <span class="n">_tensor_from_shared</span><span class="p">(</span><span class="n">shared_shifts</span><span class="p">,</span> <span class="n">shifts_shape</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+        <span class="n">prob_x_y</span> <span class="o">=</span> <span class="n">_tensor_from_shared</span><span class="p">(</span><span class="n">shared_stats</span><span class="p">,</span> <span class="n">stats_shape</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+
+        <span class="c1"># Finalize STAR file</span>
+        <span class="n">finalParticlesStar</span> <span class="o">=</span> <span class="n">particlesStar</span>
+        <span class="n">particles_md</span> <span class="o">=</span> <span class="n">finalParticlesStar</span><span class="o">.</span><span class="n">particles_md</span>
+        <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">return_top_k_poses</span><span class="p">):</span>
+            <span class="n">suffix</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span> <span class="k">if</span> <span class="n">k</span> <span class="o">==</span> <span class="mi">0</span> <span class="k">else</span> <span class="sa">f</span><span class="s2">&quot;_top</span><span class="si">{</span><span class="n">k</span><span class="si">}</span><span class="s2">&quot;</span>
+            <span class="n">angles_names</span> <span class="o">=</span> <span class="p">[</span><span class="n">x</span> <span class="o">+</span> <span class="n">suffix</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">RELION_ANGLES_NAMES</span><span class="p">]</span>
+            <span class="n">shifts_names</span> <span class="o">=</span> <span class="p">[</span><span class="n">x</span> <span class="o">+</span> <span class="n">suffix</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">RELION_SHIFTS_NAMES</span><span class="p">]</span>
+            <span class="n">confide_name</span> <span class="o">=</span> <span class="n">RELION_PRED_POSE_CONFIDENCE_NAME</span> <span class="o">+</span> <span class="n">suffix</span>
+            <span class="k">for</span> <span class="n">col</span> <span class="ow">in</span> <span class="n">angles_names</span> <span class="o">+</span> <span class="n">shifts_names</span> <span class="o">+</span> <span class="p">[</span><span class="n">confide_name</span><span class="p">]:</span>
+                <span class="k">if</span> <span class="n">col</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">particles_md</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+                    <span class="n">particles_md</span><span class="p">[</span><span class="n">col</span><span class="p">]</span> <span class="o">=</span> <span class="mf">0.0</span>
+
+            <span class="n">particles_md</span><span class="p">[</span><span class="n">angles_names</span><span class="p">]</span> <span class="o">=</span> <span class="n">predEulerDegs</span><span class="p">[:,</span> <span class="n">k</span><span class="p">,</span> <span class="p">:]</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>
+            <span class="n">particles_md</span><span class="p">[</span><span class="n">shifts_names</span><span class="p">]</span> <span class="o">=</span> <span class="n">predShiftsAngs</span><span class="p">[:,</span> <span class="n">k</span><span class="p">,</span> <span class="p">:]</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>
+            <span class="n">particles_md</span><span class="p">[</span><span class="n">confide_name</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">confidence</span> <span class="o">*</span> <span class="n">prob_x_y</span><span class="p">[:,</span> <span class="n">k</span><span class="p">])</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>
+
+        <span class="k">if</span> <span class="n">out_fname</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">finalParticlesStar</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">starFname</span><span class="o">=</span><span class="n">out_fname</span><span class="p">)</span>
+            <span class="n">mainLogger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Particles were saved at </span><span class="si">{</span><span class="n">out_fname</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="n">gc</span><span class="o">.</span><span class="n">collect</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">use_cuda</span><span class="p">:</span>
+            <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">empty_cache</span><span class="p">()</span></div>
+
+
+
+<div class="viewcode-block" id="main">
+<a class="viewcode-back" href="../../../api/projection_matching.html#cryoPARES.projmatching.projmatching.main">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Main entry point: parse CLI args from docstrings and run projmatching_starfile().&quot;&quot;&quot;</span>
+    <span class="c1"># Increase file descriptor limit to avoid &quot;too many open files&quot; errors</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">cryoPARES.utils.systemUtils</span><span class="w"> </span><span class="kn">import</span> <span class="n">increase_file_descriptor_limit</span>
+    <span class="n">increase_file_descriptor_limit</span><span class="p">()</span>
+
+    <span class="kn">from</span><span class="w"> </span><span class="nn">argParseFromDoc</span><span class="w"> </span><span class="kn">import</span> <span class="n">parse_function_and_call</span>
+    <span class="n">parse_function_and_call</span><span class="p">(</span><span class="n">projmatching_starfile</span><span class="p">)</span></div>
+
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Ruben Sanchez-Garcia.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

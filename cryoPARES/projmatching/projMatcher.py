@@ -285,7 +285,10 @@ class ProjectionMatcher(nn.Module):
         return ds
 
     def forward(self, imgs, ctfs, rotmats):
-
+        assert imgs.shape[1:] == self.rmask.shape, (f"Error, particle images and reference maps must have "
+                                                    f"same shape ({imgs.shape[1:], self.rmask.shape}). Make sure that "
+                                                    f"you are using the same box size and sampling rate for the particles"
+                                                    f"and the reference volume.")
         fparts = _real_to_fourier_2d(imgs * self.rmask,
                                      view_complex_as_two_float32=USE_TWO_FLOAT32_FOR_COMPLEX)
 
@@ -295,15 +298,10 @@ class ProjectionMatcher(nn.Module):
         bsize = expanded_eulerDegs.size(0)
         n_input_angles = expanded_eulerDegs.size(2)
         expanded_eulerDegs = expanded_eulerDegs.reshape(bsize, -1, 3)  # unrolling all the input angles into one dim
-        # TODO: Remove duplicate angles if n_input_angles > 1. Duplicates may happen if several topK poses were provided as input
+        # TODO: Remove duplicate angles if n_input_angles > 1. Duplicates may happen if several topK poses were provided as input. Affects speed
         # Also, for large batches, there could be redundant angles (to a certain precision)
         projs = self._compute_projections_from_euleres(expanded_eulerDegs.reshape(-1, 3))[0]
 
-        #TODO: I need another way of generating the rotmats grid to avoid singularities
-        # expanded_rotmats = (rotmats.unsqueeze(1) @ self._get_so3_delta(rotmats.device, as_rotmats=True).unsqueeze(0))
-        # bsize = expanded_rotmats.size(0)
-        # expanded_rotmats = expanded_rotmats.reshape(bsize, -1, 3, 3)  # unrolling all the input angles into one
-        # projs = self._compute_projections_from_rotmats(expanded_rotmats.reshape(-1, 3, 3))
 
         if self.correct_ctf:
             ctfs = ctfs.unsqueeze(1)

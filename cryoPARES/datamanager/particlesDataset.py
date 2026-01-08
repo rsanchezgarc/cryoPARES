@@ -141,11 +141,11 @@ class ParticlesDataset(Dataset, ABC):
             self._particles = self._particles.createSubset(idxs=idxs)
 
 
-
         if self.min_maxProb is not None:
-            maxprob = self._particles.particles_md[RELION_ORI_POSE_CONFIDENCE_NAME]
-            idxs = np.where(maxprob >= self.min_maxProb)[0]
-            self._particles = self.particles.createSubset(idxs=idxs)
+            maxprob = self._particles.particles_md.get(RELION_ORI_POSE_CONFIDENCE_NAME)
+            if maxprob is not None:
+                idxs = np.where(maxprob >= self.min_maxProb)[0]
+                self._particles = self.particles.createSubset(idxs=idxs)
 
         return self._particles
 

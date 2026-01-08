@@ -9,6 +9,20 @@ from cryoPARES.constants import DEFAULT_DTYPE_PROJMATCHING, RELION_EULER_CONVENT
 from cryoPARES.geometry.convert_angles import euler_angles_to_matrix
 from cryoPARES.utils.paths import MAP_AS_ARRAY_OR_FNAME_TYPE, FNAME_TYPE
 
+def get_mrc_metadata(mrc_fname: str) -> Tuple[Tuple[int, int, int], float]:
+    """
+    Read MRC file metadata without loading the full volume data.
+
+    :param mrc_fname: Path to the MRC file
+    :return: Tuple of (shape, sampling_rate) where shape is (nx, ny, nz) and sampling_rate is in Angstroms/pixel
+    :raises FileNotFoundError: If the file does not exist
+    :raises ValueError: If the file is not a valid MRC file
+    """
+    with mrcfile.open(mrc_fname, permissive=True) as f:
+        shape = (f.header.nx.item(), f.header.ny.item(), f.header.nz.item())
+        sampling_rate = float(f.voxel_size.x)
+    return shape, sampling_rate
+
 #TODO: This code is used in other places, so move to a common place
 def get_vol(vol: MAP_AS_ARRAY_OR_FNAME_TYPE, pixel_size: float | None,
             device: torch.device|str="cpu") -> Tuple[torch.Tensor, float]:

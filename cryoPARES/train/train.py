@@ -403,7 +403,8 @@ class Trainer:
         :param config_args: The command line arguments provided to modify the config
         :return:
         """
-        from cryoPARES.train.runTrainOnePartition import execute_trainOnePartition, check_if_training_partion_done
+        from cryoPARES.train.runTrainOnePartition import (execute_trainOnePartition, check_if_training_partition_done,
+                                                          check_if_junk_inference_done)
         torch.set_float32_matmul_precision(main_config.train.float32_matmul_precision)
 
         if self.finetune_checkpoint_dir is not None:
@@ -422,128 +423,140 @@ class Trainer:
 
         with tempfile.TemporaryDirectory(dir=main_config.train.simulation_tmp_dir) as tmpdir:
             for partition in partitions:
-                if check_if_training_partion_done(self.experiment_root, partition):
-                    continue
-                if self.map_fname_for_simulated_pretraining:
-                    sim_star_fnames = []
-                    sim_dirs = []
-                    for sim_idx, fname in enumerate(self.map_fname_for_simulated_pretraining):
-                        simulation_dir = os.path.join(tmpdir, "simulation%d" % sim_idx)
-                        os.makedirs(simulation_dir, exist_ok=True)
 
-                        # Determine GPU configuration for simulation
-                        n_gpus = main_config.train.n_gpus_for_simulation
-                        if not main_config.train.use_cuda or not torch.cuda.is_available():
-                            n_gpus = 0
-                        elif n_gpus == -1:
-                            # Use all available GPUs
-                            n_gpus = torch.cuda.device_count()
+                if not check_if_training_partition_done(self.experiment_root, partition):
+                    if self.map_fname_for_simulated_pretraining:
+                        sim_star_fnames = []
+                        sim_dirs = []
+                        for sim_idx, fname in enumerate(self.map_fname_for_simulated_pretraining):
+                            simulation_dir = os.path.join(tmpdir, "simulation%d" % sim_idx)
+                            os.makedirs(simulation_dir, exist_ok=True)
 
-                        simulation_kwargs = dict(
-                            volume=self.map_fname_for_simulated_pretraining[sim_idx],
-                            in_star=self.particles_star_fname[sim_idx],
-                            output_dir=simulation_dir,
-                            basename="projections",
-                            images_per_file=5000,
-                            batch_size=self.batch_size,
-                            num_dataworkers=self.num_dataworkers,
-                            n_gpus_for_simulation=n_gpus,
-                            apply_ctf=True,
-                            simulation_mode="central_slice",
-                            snr_for_simulation=main_config.train.snr_for_simulation,
-                            n_first_particles=None if self.overfit_batches in [1, None] else
-                                                    self.overfit_batches*self.batch_size
+                            # Determine GPU configuration for simulation
+                            n_gpus = main_config.train.n_gpus_for_simulation
+                            if not main_config.train.use_cuda or not torch.cuda.is_available():
+                                n_gpus = 0
+                            elif n_gpus == -1:
+                                # Use all available GPUs
+                                n_gpus = torch.cuda.device_count()
+
+                            simulation_kwargs = dict(
+                                volume=self.map_fname_for_simulated_pretraining[sim_idx],
+                                in_star=self.particles_star_fname[sim_idx],
+                                output_dir=simulation_dir,
+                                basename="projections",
+                                images_per_file=5000,
+                                batch_size=self.batch_size,
+                                num_dataworkers=self.num_dataworkers,
+                                n_gpus_for_simulation=n_gpus,
+                                apply_ctf=True,
+                                simulation_mode="central_slice",
+                                snr_for_simulation=main_config.train.snr_for_simulation,
+                                n_first_particles=None if self.overfit_batches in [1, None] else
+                                                        self.overfit_batches*self.batch_size
+                            )
+                            # Import the CLI function to generate command
+                            from cryoPARES.simulation.simulateParticles import simulate_particles_cli
+
+                            cmd = generate_command_for_argparseFromDoc(
+                                "cryoPARES.simulation.simulateParticles",
+                                fun=simulate_particles_cli,
+                                use_module=True,
+                                python_executable=sys.executable,
+                                **simulation_kwargs
+                            )
+                            # Propagate config args to simulation subprocess, but filter out
+                            # datamanager configs that don't apply to simulation
+                            if config_args:
+                                # Filter out datamanager.particlesdataset configs that are training-specific
+                                filtered_config = [arg for arg in config_args
+                                                 if not arg.startswith('datamanager.particlesdataset.')]
+                                if filtered_config:
+                                    cmd += " --config " + " ".join(filtered_config)
+                            print(cmd)
+                            run_subprocess_with_error_summary(
+                                cmd.split(),
+                                cwd=os.path.abspath(os.path.join(__file__, "..", "..", "..")),
+                                description="Simulating particles for pre-training"
+                            )
+                            print(f"simulated data was generated at {simulation_dir}")
+                            sim_star_fnames.append(os.path.join(simulation_dir, "projections.star"))
+                            sim_dirs.append(simulation_dir)
+                        simulation_train_dir = os.path.join(tmpdir, "simulation_train")
+                        # Create a temporary config file for simulation with patched n_epochs
+                        sim_config_path = create_simulation_config(
+                            config_args,
+                            tmpdir,
+                            main_config.train.n_epochs_simulation
                         )
-                        # Import the CLI function to generate command
-                        from cryoPARES.simulation.simulateParticles import simulate_particles_cli
+                        sim_config_args = [sim_config_path]
 
-                        cmd = generate_command_for_argparseFromDoc(
-                            "cryoPARES.simulation.simulateParticles",
-                            fun=simulate_particles_cli,
-                            use_module=True,
-                            python_executable=sys.executable,
-                            **simulation_kwargs
+                        execute_trainOnePartition(
+                            symmetry=self.symmetry,
+                            particles_star_fname=sim_star_fnames,
+                            train_save_dir=simulation_train_dir,
+                            particles_dir=sim_dirs,
+                            n_epochs=main_config.train.n_epochs_simulation,
+                            partition=partition,
+                            compile_model=self.compile_model,
+                            val_check_interval=self.val_check_interval,
+                            overfit_batches=self.overfit_batches,
+                            config_args=sim_config_args
                         )
-                        # Propagate config args to simulation subprocess, but filter out
-                        # datamanager configs that don't apply to simulation
-                        if config_args:
-                            # Filter out datamanager.particlesdataset configs that are training-specific
-                            filtered_config = [arg for arg in config_args
-                                             if not arg.startswith('datamanager.particlesdataset.')]
-                            if filtered_config:
-                                cmd += " --config " + " ".join(filtered_config)
-                        print(cmd)
-                        run_subprocess_with_error_summary(
-                            cmd.split(),
-                            cwd=os.path.abspath(os.path.join(__file__, "..", "..", "..")),
-                            description="Simulating particles for pre-training"
-                        )
-                        print(f"simulated data was generated at {simulation_dir}")
-                        sim_star_fnames.append(os.path.join(simulation_dir, "projections.star"))
-                        sim_dirs.append(simulation_dir)
-                    simulation_train_dir = os.path.join(tmpdir, "simulation_train")
-                    # Create a temporary config file for simulation with patched n_epochs
-                    sim_config_path = create_simulation_config(
-                        config_args,
-                        tmpdir,
-                        main_config.train.n_epochs_simulation
-                    )
-                    sim_config_args = [sim_config_path]
-
+                        self.finetune_checkpoint_dir = simulation_train_dir
+                        config_fname = get_most_recent_file(self.experiment_root, "configs_*.yml")
+                        shutil.copy(config_fname, simulation_train_dir)
+                    print(f"\nExecuting training for partition {partition}")
                     execute_trainOnePartition(
                         symmetry=self.symmetry,
-                        particles_star_fname=sim_star_fnames,
-                        train_save_dir=simulation_train_dir,
-                        particles_dir=sim_dirs,
-                        n_epochs=main_config.train.n_epochs_simulation,
+                        particles_star_fname=self.particles_star_fname,
+                        train_save_dir=self.experiment_root,
+                        particles_dir=self.particles_dir,
+                        n_epochs=self.n_epochs,
                         partition=partition,
+                        continue_checkpoint_fname=self.get_continue_checkpoint_fname(partition),
+                        finetune_checkpoint_fname=self.get_finetune_checkpoint_fname(partition),
                         compile_model=self.compile_model,
                         val_check_interval=self.val_check_interval,
                         overfit_batches=self.overfit_batches,
-                        config_args=sim_config_args
+                        config_args=config_args
                     )
-                    self.finetune_checkpoint_dir = simulation_train_dir
-                    config_fname = get_most_recent_file(self.experiment_root, "configs_*.yml")
-                    shutil.copy(config_fname, simulation_train_dir)
-                print(f"\nExecuting training for partition {partition}")
-                execute_trainOnePartition(
-                    symmetry=self.symmetry,
-                    particles_star_fname=self.particles_star_fname,
-                    train_save_dir=self.experiment_root,
-                    particles_dir=self.particles_dir,
-                    n_epochs=self.n_epochs,
-                    partition=partition,
-                    continue_checkpoint_fname=self.get_continue_checkpoint_fname(partition),
-                    finetune_checkpoint_fname=self.get_finetune_checkpoint_fname(partition),
-                    compile_model=self.compile_model,
-                    val_check_interval=self.val_check_interval,
-                    overfit_batches=self.overfit_batches,
-                    config_args=config_args
-                )
-                print(f"\nFinished training for partition {partition}.")
+                    print(f"\nFinished training for partition {partition}.")
+                else:
+                    print(f"Partition {partition} already trained")
+
+                #TODO: This needs to be checked independently of if train partion done
                 if self.junk_particles_star_fname:
-                    junk_stars = self._infer_particles(self.junk_particles_star_fname, self.junk_particles_dir,
-                                                  partition, outdirbasename="junk", config_args=config_args)
+                    if not check_if_junk_inference_done(self.experiment_root, partition):
+                        junk_stars = self._infer_particles(self.junk_particles_star_fname, self.junk_particles_dir,
+                                                      partition, outdirbasename="junk", config_args=config_args)
 
-                    if self.particles_dir is None:
-                        particles_dir = [os.path.dirname(x) for x in self.particles_star_fname]
+                        if self.particles_dir is None:
+                            particles_dir = [os.path.dirname(x) for x in self.particles_star_fname]
+                        else:
+                            particles_dir = self.particles_dir
+
+                        val_stars = glob.glob(osp.join(self.experiment_root, partition, DATA_SPLITS_BASENAME, "val",
+                                                       "*-particles*.star"))
+                        assert val_stars, (f"Error, no validation data found at "
+                                           f"{os.path.join(self.experiment_root, partition, DATA_SPLITS_BASENAME, 'val')}.")
+                        val_stars = self._infer_particles(val_stars,
+                                                          particles_dir,
+                                                          partition, outdirbasename="val",
+                                                          config_args=config_args)
+                        assert val_stars, (f"Error, no validation predictions found")
+                        assert junk_stars, (f"Error, no junk_stars predictions found")
+                        #TODO: compare_prob_hists breaks when multiple gpus are used
+                        compare_prob_hists(fname_good=val_stars, fname_bad=junk_stars, show_plots=False,
+                                           plot_fname=osp.join(self.experiment_root, partition,"directional_threshold.png"),
+                                           symmetry=self.symmetry, compute_gmm=True)
+                        from cryoPARES.train.runTrainOnePartition import get_junk_done_fname
+                        junk_done_fname = get_junk_done_fname(self.experiment_root, partition)
+                        with open(junk_done_fname, "w") as f:
+                            f.write("Inference computed for junk particles")
                     else:
-                        particles_dir = self.particles_dir
+                        print(f"Partition {partition} already inferred")
 
-                    val_stars = glob.glob(osp.join(self.experiment_root, partition, DATA_SPLITS_BASENAME, "val",
-                                                   "*-particles*.star"))
-                    assert val_stars, (f"Error, no validation data found at "
-                                       f"{os.path.join(self.experiment_root, partition, DATA_SPLITS_BASENAME, 'val')}.")
-                    val_stars = self._infer_particles(val_stars,
-                                                      particles_dir,
-                                                      partition, outdirbasename="val",
-                                                      config_args=config_args)
-                    assert val_stars, (f"Error, no validation predictions found")
-                    assert junk_stars, (f"Error, no junk_stars predictions found")
-                    #TODO: compare_prob_hists breaks when multiple gpus are used
-                    compare_prob_hists(fname_good=val_stars, fname_bad=junk_stars, show_plots=False,
-                                       plot_fname=osp.join(self.experiment_root, partition,"directional_threshold.png"),
-                                       symmetry=self.symmetry, compute_gmm=True)
         print("Training complete!")
 
     def _save_finetune_checkpoint_info(self):

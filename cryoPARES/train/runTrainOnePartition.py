@@ -19,7 +19,7 @@ from lightning_fabric.utilities.seed import seed_everything
 
 from cryoPARES import constants
 from autoCLI_config import inject_defaults_from_config, inject_docs_from_config_params, CONFIG_PARAM
-from cryoPARES.constants import DATA_SPLITS_BASENAME, TRAINING_DONE_TEMPLATE
+from cryoPARES.constants import DATA_SPLITS_BASENAME, TRAINING_DONE_TEMPLATE, JUNK_DONE_TEMPLATE
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.reconstruction.reconstructor import reconstruct_starfile
 from cryoPARES.utils.paths import get_most_recent_file
@@ -284,7 +284,7 @@ class TrainerPartition:
         if dirname is None:
             return
 
-        done_name = get_done_fname(self.train_save_dir, self.partition)
+        done_name = get_training_done_fname(self.train_save_dir, self.partition)
         best_model_basename = osp.basename(checkpointer.best_model_path)
 
         cwd = os.getcwd()
@@ -308,7 +308,7 @@ class TrainerPartition:
         print("Training done!")
 
 
-def get_done_fname(dirname: str, partition: str) -> str:
+def get_training_done_fname(dirname: str, partition: str) -> str:
     """Get path to the DONE_TRAINING.txt file for a partition.
 
     Args:
@@ -317,23 +317,40 @@ def get_done_fname(dirname: str, partition: str) -> str:
     """
     return osp.join(dirname, partition, "checkpoints", TRAINING_DONE_TEMPLATE)
 
+def get_junk_done_fname(dirname: str, partition: str) -> str:
+    """Get path to the DONE_JUNK.txt file for a partition.
+
+    Args:
+        dirname: Root directory of the experiment
+        partition: Partition name (half1, half2, or allParticles)
+    """
+    return osp.join(dirname, partition, "inference", JUNK_DONE_TEMPLATE)
+
 
 def get_reconstructions_dir(dirname: str, partition: str):
     return osp.join(dirname, partition, "reconstructions")
 
-def check_if_training_partion_done(dirname: str, partition: str):
+def check_if_training_partition_done(dirname: str, partition: str):
     """Check if training for given partition is complete by looking for DONE_TRAINING.txt
 
     Args:
         dirname: Root directory of the experiment (generally xxxx_v1, xxxx_v2...)
         partition: Partition name (half1, half2, or allParticles)
     """
-    return osp.isfile(get_done_fname(dirname, partition))
+    return osp.isfile(get_training_done_fname(dirname, partition))
 
+def check_if_junk_inference_done(dirname: str, partition: str):
+    """Check if training for given partition is complete by looking for DONE_TRAINING.txt
+
+    Args:
+        dirname: Root directory of the experiment (generally xxxx_v1, xxxx_v2...)
+        partition: Partition name (half1, half2, or allParticles)
+    """
+    return osp.isfile(get_junk_done_fname(dirname, partition))
 
 def execute_trainOnePartition(**kwargs):
 
-    if check_if_training_partion_done(kwargs['train_save_dir'], kwargs['partition']):
+    if check_if_training_partition_done(kwargs['train_save_dir'], kwargs['partition']):
         print(f"Training for partition {kwargs['partition']} already completed")
         return
 

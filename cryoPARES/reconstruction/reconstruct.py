@@ -97,11 +97,14 @@ def reconstruct_starfile(particles_star_fname: str,
                          use_cuda: bool = True,
                          correct_ctf: bool = CONFIG_PARAM(),
                          eps: float = CONFIG_PARAM(),
-                         min_denominator_value: Optional[float] = None,
+                         min_denominator_value: float = CONFIG_PARAM(),
                          use_only_n_first_batches: Optional[int] = None,
                          float32_matmul_precision: Optional[str] = CONFIG_PARAM(),
                          weight_with_confidence: bool = CONFIG_PARAM(),
-                         halfmap_subset: Optional[Literal["1", "2"]] = None
+                         halfmap_subset: Optional[Literal["1", "2"]] = None,
+                         apply_soft_mask: bool = CONFIG_PARAM(),
+                         mask_radius_pix: float = CONFIG_PARAM(),
+                         mask_edge_width: int = CONFIG_PARAM()
                          ):
     """
     Reconstruct a 3D volume from particle images with known poses.
@@ -121,6 +124,9 @@ def reconstruct_starfile(particles_star_fname: str,
     :param float32_matmul_precision: {float32_matmul_precision}
     :param weight_with_confidence: {weight_with_confidence}
     :param halfmap_subset: {halfmap_subset}
+    :param apply_soft_mask: {apply_soft_mask}
+    :param mask_radius_pix: {mask_radius_pix}
+    :param mask_edge_width: {mask_edge_width}
     """
 
     if n_jobs == 1:
@@ -132,7 +138,10 @@ def reconstruct_starfile(particles_star_fname: str,
                                         use_only_n_first_batches=use_only_n_first_batches,
                                         float32_matmul_precision=float32_matmul_precision,
                                         weight_with_confidence=weight_with_confidence,
-                                        halfmap_subset=halfmap_subset)
+                                        halfmap_subset=halfmap_subset,
+                                        apply_soft_mask=apply_soft_mask,
+                                        mask_radius_pix=mask_radius_pix,
+                                        mask_edge_width=mask_edge_width)
         return 0
     elif n_jobs <1:
         raise RuntimeError("Error, n_jobs>=1 required")
@@ -239,7 +248,12 @@ def reconstruct_starfile(particles_star_fname: str,
     reconstructor.weights = final_weights
     reconstructor.ctfsq = final_ctfsq
 
-    reconstructor.generate_volume(output_fname)
+    reconstructor.generate_volume(
+        output_fname,
+        apply_soft_mask=apply_soft_mask,
+        mask_radius_pix=mask_radius_pix,
+        mask_edge_width=mask_edge_width
+    )
     print(f"Volume saved at {output_fname}")
 
 

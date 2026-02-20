@@ -34,7 +34,7 @@ class Reconstructor(nn.Module):
         symmetry: str,
         correct_ctf: bool = CONFIG_PARAM(),
         eps: float = CONFIG_PARAM(),
-        min_denominator_value: Optional[float] = None,
+        min_denominator_value: float = CONFIG_PARAM(),
         weight_with_confidence: bool = CONFIG_PARAM(),
         *args,
         **kwargs,
@@ -47,10 +47,8 @@ class Reconstructor(nn.Module):
         self.symmetry = symmetry.upper()
         self.has_symmetry = self.symmetry != "C1"
         self.correct_ctf = correct_ctf
-        self.eps = eps  # The Tikhonov constant. Should be ~1/SNR; could be estimated per frequency.
-        if min_denominator_value is None:
-            min_denominator_value = eps * 0.1
-        self.min_denominator_value = min_denominator_value
+        self.eps = eps  # Sign: mode selection. Magnitude: scale factor (Tikhonov constant or radial avg divisor)
+        self.min_denominator_value = min_denominator_value  # Numerical stability floor (independent of eps)
         self.weight_with_confidence = weight_with_confidence
 
         self.register_buffer("dummy_buffer", torch.ones(1))
@@ -360,7 +358,7 @@ class Reconstructor(nn.Module):
                 image_rfft=stacked,
                 volume_shape=(self.box_size,) * 3,
                 rotation_matrices=rotMats,
-                fftfreq_max=None,
+                fftfreq_max=0.5,  # Nyquist sphere cutoff (matches RELION's r_max check)
                 zyx_matrices=zyx_matrices,
             )
 
@@ -391,7 +389,7 @@ class Reconstructor(nn.Module):
                 image_rfft=stacked,
                 volume_shape=(self.box_size,) * 3,
                 rotation_matrices=rotMats,
-                fftfreq_max=None,
+                fftfreq_max=0.5,  # Nyquist sphere cutoff (matches RELION's r_max check)
                 zyx_matrices=zyx_matrices,
             )
 
@@ -429,17 +427,157 @@ class Reconstructor(nn.Module):
         S = sz[:, None, None] * sy[None, :, None] * sx[None, None, :]  # (D,H,W)
         return S.clamp_min(eps)
 
+    @staticmethod
+    @lru_cache(maxsize=1)
+    def get_soft_mask(shape, device, radius_pix=-1.0, edge_width=3):
+        """
+        Create a soft spherical mask with cosine falloff, matching RELION behavior.
+
+        Implements RELION's softMaskOutsideMap logic:
+        - If radius_pix < 0: automatically set to box_size/2 (RELION default)
+        - Raised cosine falloff with width=edge_width pixels
+
+        Args:
+            shape: (D, H, W) volume shape
+            device: torch device
+            radius_pix: mask radius in pixels. If negative, defaults to box_size/2 (RELION: -1)
+            edge_width: width of cosine falloff edge in pixels (RELION default: 3)
+
+        Returns:
+            mask: (D, H, W) soft mask with values in [0, 1]
+        """
+        import numpy as np
+
+        D, H, W = shape
+        center = torch.tensor([D/2, H/2, W/2], device=device)
+
+        # Auto-set radius if negative (RELION behavior)
+        if radius_pix < 0:
+            radius_pix = min(D, H, W) / 2.0  # box_size / 2
+
+        # Create coordinate grids
+        z = torch.arange(D, device=device).float()
+        y = torch.arange(H, device=device).float()
+        x = torch.arange(W, device=device).float()
+        zz, yy, xx = torch.meshgrid(z, y, x, indexing='ij')
+
+        # Distance from center
+        r = torch.sqrt((zz - center[0])**2 + (yy - center[1])**2 + (xx - center[2])**2)
+
+        # Raised cosine falloff (matching RELION formula)
+        mask = torch.ones_like(r)
+        transition = (r > radius_pix) & (r < radius_pix + edge_width)
+        beyond = r >= radius_pix + edge_width
+
+        # raisedcos = 0.5 + 0.5 * cos(π * (r - radius_pix) / edge_width)
+        mask[transition] = 0.5 + 0.5 * torch.cos(
+            np.pi * (r[transition] - radius_pix) / edge_width
+        )
+        mask[beyond] = 0.0
+
+        return mask
+
+    @staticmethod
+    def compute_radial_average(weights_3d, device):
+        """
+        Compute radial average of weights in 3D rfft Fourier space.
+
+        Matches RELION's approach for frequency-adaptive regularization:
+        - Bins weights by radial distance (frequency shell)
+        - Computes average weight per shell
+        - Returns a 3D array where each voxel contains its shell's average
+
+        This is used for division-by-zero protection without dampening
+        well-sampled regions (unlike constant eps).
+
+        Args:
+            weights_3d: (D, H, W_rfft) weight tensor in rfft format
+            device: torch device
+
+        Returns:
+            radial_avg: (D, H, W_rfft) tensor where each voxel = average of its frequency shell
+        """
+        D, H, W_rfft = weights_3d.shape
+
+        # Create coordinate grids in pixel space (not frequency space)
+        # For rfft format: z and y are centered, x is half (0 to N/2)
+        z = torch.arange(D, device=device, dtype=torch.float32)
+        y = torch.arange(H, device=device, dtype=torch.float32)
+        x = torch.arange(W_rfft, device=device, dtype=torch.float32)
+
+        # Center z and y coordinates
+        z = z - D // 2
+        y = y - H // 2
+        # x is already in rfft order (0 to N/2)
+
+        zz, yy, xx = torch.meshgrid(z, y, x, indexing='ij')
+
+        # Radial distance in pixel space
+        r = torch.sqrt(zz**2 + yy**2 + xx**2)
+
+        # Convert to integer bins (shell indices)
+        max_r = r.max().item()
+        max_shell = int(np.ceil(max_r)) + 1
+
+        # Bin index for each voxel
+        shell_idx = r.long()
+        shell_idx = torch.clamp(shell_idx, 0, max_shell - 1)
+
+        # Compute sum and count per shell using bincount (more efficient)
+        # Flatten indices and weights
+        shell_idx_flat = shell_idx.flatten()
+        weights_flat = weights_3d.flatten()
+
+        # Use bincount for accumulation (faster than scatter_add for this use case)
+        # Create a tensor to accumulate sums
+        shell_sum = torch.zeros(max_shell, device=device, dtype=weights_3d.dtype)
+        shell_count = torch.zeros(max_shell, device=device, dtype=torch.float32)
+
+        # Accumulate using scatter_add
+        shell_sum.scatter_add_(0, shell_idx_flat, weights_flat)
+        shell_count.scatter_add_(0, shell_idx_flat, torch.ones_like(weights_flat))
+
+        # Compute average per shell (avoid division by zero)
+        shell_count_safe = torch.where(shell_count > 0, shell_count, torch.ones_like(shell_count))
+        shell_avg = shell_sum / shell_count_safe
+
+        # Map each voxel to its shell's average
+        radial_avg = shell_avg[shell_idx]
+
+        return radial_avg
+
     def generate_volume(
         self,
         fname: Optional[FNAME_TYPE] = None,
         overwrite_fname: bool = True,
         device: Optional[str] = "cpu",
+        apply_soft_mask: bool = True,
+        mask_radius_pix: float = -1.0,  # Negative = auto (box_size/2)
+        mask_edge_width: int = 3,  # RELION default
     ):
         dft = torch.zeros_like(self.numerator)
 
         mask = self.weights > self.min_denominator_value
         if self.correct_ctf:
-            denominator = self.ctfsq[mask] + self.eps * self.weights[mask]
+            # Choose regularization strategy based on eps value
+            if self.eps < 0:
+                # RELION-style radial averaging regularization (frequency-adaptive)
+                # Compute radial average of CTF²-weighted weights (matching RELION's Fweight)
+                # RELION uses the CTF²*w_tri weights for the radial average, not geometric w_tri
+                radial_avg_ctfsq = self.compute_radial_average(self.ctfsq, self.ctfsq.device)
+
+                # RELION uses: max(ctfsq, radial_avg / abs(eps))
+                # abs(eps) is the scale factor (RELION default: 1000)
+                # This provides frequency-adaptive protection without dampening well-sampled regions
+                denominator = torch.maximum(
+                    self.ctfsq[mask],
+                    radial_avg_ctfsq[mask] / abs(self.eps)
+                )
+            else:
+                # Standard constant regularization (Tikhonov)
+                denominator = self.ctfsq[mask] + self.eps * self.weights[mask]
+
+            # Safety check for numerical stability
             denominator[denominator.abs() < self.min_denominator_value] = self.min_denominator_value
             dft[:, mask] = self.numerator[:, mask] / denominator[None, ...]
         else:
@@ -451,6 +589,20 @@ class Reconstructor(nn.Module):
         dft = torch.fft.ifftshift(dft, dim=(-3, -2, -1))
         sincsq = self.get_sincsq(dft.shape, device, self.eps)
         vol = dft.to(device) / sincsq
+
+        # Apply soft masking with background subtraction (matching RELION's softMaskOutsideMap)
+        if apply_soft_mask:
+            soft_mask = self.get_soft_mask(
+                vol.shape, device, mask_radius_pix, mask_edge_width
+            )
+            # RELION subtracts the mean of the border region (transition zone) from all voxels
+            # This removes any DC offset / background level before masking
+            border = (soft_mask > 0.0) & (soft_mask < 1.0)
+            if border.any():
+                bg_mean = vol[border].mean()
+            else:
+                bg_mean = 0.0
+            vol = (vol - bg_mean) * soft_mask
 
         if fname is not None:
             write_vol(vol.detach().cpu(), fname, self.sampling_rate, overwrite=overwrite_fname)
@@ -575,7 +727,10 @@ def reconstruct_starfile(
     use_only_n_first_batches: Optional[int] = None,
     float32_matmul_precision: Optional[str] = CONFIG_PARAM(),
     weight_with_confidence: bool = CONFIG_PARAM(),
-    halfmap_subset: Optional[Literal["1", "2"]] = None
+    halfmap_subset: Optional[Literal["1", "2"]] = None,
+    apply_soft_mask: bool = CONFIG_PARAM(),
+    mask_radius_pix: float = CONFIG_PARAM(),
+    mask_edge_width: int = CONFIG_PARAM()
 ):
     """
     :param particles_star_fname: The particles to reconstruct
@@ -593,6 +748,9 @@ def reconstruct_starfile(
     :param weight_with_confidence: If True, read and apply per-particle confidence. If False (default),
                            do NOT fetch/pass confidence (zero overhead).
     :param halfmap_subset: The random subset of particles to use
+    :param apply_soft_mask: Apply soft spherical masking after reconstruction to reduce edge artifacts (RELION-style)
+    :param mask_radius_pix: Radius for soft mask in pixels. If negative, defaults to box_size/2 (RELION default: -1)
+    :param mask_edge_width: Width of cosine falloff edge in pixels (RELION default: 3)
     """
     if float32_matmul_precision is not None:
         torch.set_float32_matmul_precision(float32_matmul_precision)
@@ -613,7 +771,12 @@ def reconstruct_starfile(
         halfmap_subset=halfmap_subset
     )
     print(f"Saving map at {output_fname}")
-    reconstructor.generate_volume(output_fname)
+    reconstructor.generate_volume(
+        output_fname,
+        apply_soft_mask=apply_soft_mask,
+        mask_radius_pix=mask_radius_pix,
+        mask_edge_width=mask_edge_width
+    )
 
 
 if __name__ == "__main__":

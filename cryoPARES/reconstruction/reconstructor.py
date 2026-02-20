@@ -562,15 +562,16 @@ class Reconstructor(nn.Module):
             # Choose regularization strategy based on eps value
             if self.eps < 0:
                 # RELION-style radial averaging regularization (frequency-adaptive)
-                # Compute radial average of weights for each frequency shell
-                radial_avg_weights = self.compute_radial_average(self.weights, self.weights.device)
+                # Compute radial average of CTF²-weighted weights (matching RELION's Fweight)
+                # RELION uses the CTF²*w_tri weights for the radial average, not geometric w_tri
+                radial_avg_ctfsq = self.compute_radial_average(self.ctfsq, self.ctfsq.device)
 
                 # RELION uses: max(ctfsq, radial_avg / abs(eps))
                 # abs(eps) is the scale factor (RELION default: 1000)
                 # This provides frequency-adaptive protection without dampening well-sampled regions
                 denominator = torch.maximum(
                     self.ctfsq[mask],
-                    radial_avg_weights[mask] / abs(self.eps)
+                    radial_avg_ctfsq[mask] / abs(self.eps)
                 )
             else:
                 # Standard constant regularization (Tikhonov)
@@ -589,12 +590,19 @@ class Reconstructor(nn.Module):
         sincsq = self.get_sincsq(dft.shape, device, self.eps)
         vol = dft.to(device) / sincsq
 
-        # Apply soft masking (matching RELION pipeline)
+        # Apply soft masking with background subtraction (matching RELION's softMaskOutsideMap)
         if apply_soft_mask:
             soft_mask = self.get_soft_mask(
                 vol.shape, device, mask_radius_pix, mask_edge_width
             )
-            vol = vol * soft_mask
+            # RELION subtracts the mean of the border region (transition zone) from all voxels
+            # This removes any DC offset / background level before masking
+            border = (soft_mask > 0.0) & (soft_mask < 1.0)
+            if border.any():
+                bg_mean = vol[border].mean()
+            else:
+                bg_mean = 0.0
+            vol = (vol - bg_mean) * soft_mask
 
         if fname is not None:
             write_vol(vol.detach().cpu(), fname, self.sampling_rate, overwrite=overwrite_fname)

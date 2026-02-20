@@ -358,7 +358,7 @@ class Reconstructor(nn.Module):
                 image_rfft=stacked,
                 volume_shape=(self.box_size,) * 3,
                 rotation_matrices=rotMats,
-                fftfreq_max=None,
+                fftfreq_max=0.5,  # Nyquist sphere cutoff (matches RELION's r_max check)
                 zyx_matrices=zyx_matrices,
             )
 
@@ -389,7 +389,7 @@ class Reconstructor(nn.Module):
                 image_rfft=stacked,
                 volume_shape=(self.box_size,) * 3,
                 rotation_matrices=rotMats,
-                fftfreq_max=None,
+                fftfreq_max=0.5,  # Nyquist sphere cutoff (matches RELION's r_max check)
                 zyx_matrices=zyx_matrices,
             )
 

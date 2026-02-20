@@ -280,7 +280,11 @@ def insert_into_image_3d(
     # Validity mask per corner (B, 8) — keep shape, no compression
     dims = torch.tensor([D, H, W], device=dev, dtype=dtype)
     valid = ((corner >= 0) & (corner < dims)).all(dim=-1)     # (B, 8)
-    valid_f = valid.to(dtype)                                 # (B, 8), float
+    # All 8 corners must be in-bounds for the pixel to contribute (matches RELION behavior).
+    # Partial insertions (some corners out-of-bounds) use a truncated kernel that the
+    # sinc² gridding correction cannot properly compensate, adding high-frequency noise.
+    pixel_valid = valid.all(dim=-1, keepdim=True)             # (B, 1)
+    valid_f = pixel_valid.expand_as(valid).to(dtype)          # (B, 8), float
 
     # Clamp to bounds so indices are always valid
     corner_clamped = torch.minimum(

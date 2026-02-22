@@ -8,6 +8,7 @@ particle ≈ a*(CTF*projection) + noise, then subtract a*(CTF*projection).
 import math
 import os
 import threading
+import traceback
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
@@ -242,6 +243,9 @@ class BufferPool:
         self.buffer_ready = threading.Condition(self.lock)  # Signal to writer thread
         self.buffer_available = threading.Condition(self.lock)  # Signal to GPU thread
 
+        # Set by writer thread on failure; checked by producer to fail fast
+        self.fatal_error: Optional[Exception] = None
+
     def submit_batch(self, batch_gpu: torch.Tensor) -> None:
         """
         Submit a batch from GPU to CPU buffer (non-blocking).
@@ -252,6 +256,10 @@ class BufferPool:
         batch_size = batch_gpu.shape[0]
 
         with self.lock:
+            # Fail fast if the writer thread has crashed
+            if self.fatal_error is not None:
+                raise RuntimeError("AsyncMRCWriter failed") from self.fatal_error
+
             # Wait until we have space in a buffer that we can safely use
             # This ensures we never try to swap to a non-empty buffer
             while True:
@@ -270,6 +278,9 @@ class BufferPool:
                     # A buffer is currently being written - we must wait for it to be consumed
                     # (Can't swap if both buffers are full)
                     self.buffer_available.wait(timeout=0.1)
+                    # Re-check for writer failure after waking
+                    if self.fatal_error is not None:
+                        raise RuntimeError("AsyncMRCWriter failed") from self.fatal_error
                     continue  # Re-check after wait
 
                 # Active buffer is full AND no buffer is being written - we can proceed and swap
@@ -304,12 +315,16 @@ class BufferPool:
 
         # Update counter and check for buffer swap
         with self.lock:
+            if self.fatal_error is not None:
+                raise RuntimeError("AsyncMRCWriter failed") from self.fatal_error
             if self.active == 'a':
                 self.count_a += to_copy
                 if self.count_a >= self.images_per_file:
                     # Before swapping, wait if the other buffer isn't empty yet
                     while self.ready is not None:
                         self.buffer_available.wait(timeout=0.1)
+                        if self.fatal_error is not None:
+                            raise RuntimeError("AsyncMRCWriter failed") from self.fatal_error
                     self._swap_buffers()
             else:
                 self.count_b += to_copy
@@ -317,6 +332,8 @@ class BufferPool:
                     # Before swapping, wait if the other buffer isn't empty yet
                     while self.ready is not None:
                         self.buffer_available.wait(timeout=0.1)
+                        if self.fatal_error is not None:
+                            raise RuntimeError("AsyncMRCWriter failed") from self.fatal_error
                     self._swap_buffers()
 
         # If we couldn't fit the entire batch, recursively submit the rest
@@ -325,6 +342,10 @@ class BufferPool:
 
     def _swap_buffers(self) -> None:
         """Swap active and ready buffers (must be called under lock)."""
+        # Propagate writer failure before touching buffer state
+        if self.fatal_error is not None:
+            raise RuntimeError("AsyncMRCWriter failed") from self.fatal_error
+
         # Switch to the other buffer
         next_buffer = 'b' if self.active == 'a' else 'a'
 
@@ -346,6 +367,11 @@ class BufferPool:
             # First, wait for any existing ready buffer to be consumed
             while self.ready is not None:
                 self.buffer_available.wait(timeout=0.1)
+                if self.fatal_error is not None:
+                    raise RuntimeError("AsyncMRCWriter failed") from self.fatal_error
+
+            if self.fatal_error is not None:
+                raise RuntimeError("AsyncMRCWriter failed") from self.fatal_error
 
             # Now mark the active buffer as ready if it has data
             if self.active == 'a' and self.count_a > 0:
@@ -446,11 +472,16 @@ class AsyncMRCWriter:
 
         except Exception as e:
             self.error = e
-            # CRITICAL: Clean up buffer state to unblock GPU thread
-            # If we don't do this, the GPU thread will wait forever
+            # Print the real traceback so the root cause is visible immediately
+            traceback.print_exc()
+            # CRITICAL: Store fatal error and wake both waiting threads so they can
+            # detect the failure and raise immediately.  Do NOT touch ready or counts
+            # here — corrupting those fields is what causes the misleading
+            # "swap to non-empty buffer" error that hides this exception.
             with self.buffer_pool.lock:
-                self.buffer_pool.ready = None
+                self.buffer_pool.fatal_error = e
                 self.buffer_pool.buffer_available.notify_all()
+                self.buffer_pool.buffer_ready.notify_all()
             # Stop the writer loop
             self.stop_event.set()
 
@@ -501,8 +532,11 @@ class AsyncMRCWriter:
 
     def check_error(self) -> None:
         """Check if writer thread has encountered an error and raise it if so."""
-        if self.error:
-            raise RuntimeError(f"Writer thread failed: {self.error}") from self.error
+        # fatal_error is set atomically under the lock; reading it without the
+        # lock here is a benign unsynchronized read used only for fast-fail polling.
+        err = self.buffer_pool.fatal_error or self.error
+        if err:
+            raise RuntimeError("AsyncMRCWriter failed") from err
 
 # ---------------------
 # Main simulator

@@ -33,6 +33,7 @@ cryopares_train = "cryoPARES.train.train:main"
 cryopares_infer = "cryoPARES.inference.infer:main"
 cryopares_reconstruct = "cryoPARES.reconstruction.reconstruct:main"
 cryopares_projmatching = "cryoPARES.projmatching.projmatching:main"
+cryopares_postprocess = "cryoPARES.postprocessing.postprocess:main"
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}

@@ -38,12 +38,20 @@ def first_crossing_with_bounce_check(
     if cand.size == 0:
         return np.nan, None
 
+    def _interpolate(i):
+        """Linearly interpolate between shells i-1 (above) and i (below)."""
+        denom = float(f[i - 1]) - float(f[i])
+        if denom > 1e-10:
+            t = (float(f[i - 1]) - th) / denom
+            return float(resolution_A[i - 1]) + t * (float(resolution_A[i]) - float(resolution_A[i - 1]))
+        return float(resolution_A[i])
+
     for i in cand:
         res_i = float(resolution_A[i])
 
         # Already at/better than cutoff? accept immediately
         if res_i <= cutoff_res_A:
-            return res_i, int(i)
+            return _interpolate(i), int(i)
 
         # Otherwise, apply bounce check in the noisy (worse-than-cutoff) region
         end = min(i + rebound_window, len(f))
@@ -55,7 +63,7 @@ def first_crossing_with_bounce_check(
         rebounds_soon = (rebound_idxs.size > 0) and (rebound_idxs[0] < persistence)
 
         if has_persistence and not rebounds_soon:
-            return res_i, int(i)
+            return _interpolate(i), int(i)
         # else: ignore and continue
 
     return np.nan, None

@@ -12,7 +12,6 @@ The key idea is to train a neural network on a high-quality reference reconstruc
    training_guide
    configuration_guide
    cli
-   scripts_guide
    troubleshooting
 
 .. toctree::

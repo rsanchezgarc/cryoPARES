@@ -128,7 +128,7 @@ ValueError: could not convert string to float
 
 3. **Check parameter types:**
    ```bash
-   python -m cryopares_train --show-config | grep parameter_name
+   cryopares_train --show-config | grep parameter_name
    # Look for (int) or (float) annotation
    ```
 
@@ -366,7 +366,7 @@ grep "rlnAngle" /path/to/particles.star
 
 2. **Test overfitting capability:**
 ```bash
-python -m cryopares_train \
+cryopares_train \
     --symmetry C1 \
     --particles_star_fname data.star \
     --train_save_dir /tmp/overfit_test \
@@ -765,7 +765,7 @@ nvidia-smi
 CryoPARES uses PyTorch Lightning's automatic multi-GPU training. To force specific GPUs:
 
 ```bash
-CUDA_VISIBLE_DEVICES=0,1,2,3 python -m cryopares_train ...
+CUDA_VISIBLE_DEVICES=0,1,2,3 cryopares_train ...
 ```
 
 ### GPU slower than expected
@@ -848,7 +848,7 @@ mrcfile.write('volume_flipped.mrc', vol_flipped)
 For more verbose output:
 
 ```bash
-python -m cryopares_train \
+cryopares_train \
     --show_debug_stats \
     ... other args ...
 ```

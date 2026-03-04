@@ -19,8 +19,8 @@ from typing import Tuple, Sequence
 
 import torch
 import torch.nn.functional as F
-from torch_image_interpolation.grid_sample_utils import array_to_grid_sample
-from  torch_fourier_slice._grids import _central_slice_fftfreq_grid
+from cryoPARES.utils.torch_image_interpolation_compat import array_to_grid_sample
+from cryoPARES.utils.torch_fourier_slice_compat import _central_slice_fftfreq_grid
 
 from cryoPARES.configs.mainConfig import main_config
 

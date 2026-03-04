@@ -9,19 +9,25 @@ import starfile
 import mrcfile
 
 from cryoPARES.projmatching.projmatching import projmatching_starfile
+from cryoPARES.configs.mainConfig import main_config
 
 
 class TestProjMatching(unittest.TestCase):
 
     def setUp(self):
+        # Required config: image size and pixel size match the dummy STAR (rlnImageSize=64, rlnImagePixelSize=1.0)
+        main_config.datamanager.particlesdataset.image_size_px_for_nnet = 64
+        main_config.datamanager.particlesdataset.sampling_rate_angs_for_nnet = 1.0
+
         # temp workspace
         self.test_dir = tempfile.mkdtemp()
         self.particles_dir = os.path.join(self.test_dir, "particles")
         os.makedirs(self.particles_dir, exist_ok=True)
 
-        # dummy MRCS stack
+        # dummy MRCS stack — use random non-zero data so normalization (std>0) doesn't fail
+        rng = np.random.default_rng(42)
         self.mrcs_fname = os.path.join(self.particles_dir, "dummy_particles.mrcs")
-        data = np.zeros((10, 64, 64), dtype=np.float32)
+        data = rng.standard_normal((10, 64, 64)).astype(np.float32)
         with mrcfile.new(self.mrcs_fname, data=data) as mrc:
             mrc.voxel_size = (1.0, 1.0, 1.0)  # Å
 
@@ -78,6 +84,9 @@ class TestProjMatching(unittest.TestCase):
         self.output_distributed = os.path.join(self.test_dir, "projmatching_distributed.star")
 
     def tearDown(self):
+        # Restore config defaults to avoid cross-test contamination
+        main_config.datamanager.particlesdataset.image_size_px_for_nnet = None
+        main_config.datamanager.particlesdataset.sampling_rate_angs_for_nnet = 1.5
         shutil.rmtree(self.test_dir)
 
     def test_projmatching_consistency(self):

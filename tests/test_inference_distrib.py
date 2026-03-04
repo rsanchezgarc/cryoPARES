@@ -92,22 +92,22 @@ class TestDistributedInference(unittest.TestCase):
                          n_cpus_if_no_cuda=1,
                          compile_model=False,
                          top_k_poses_nnet=1,
+                         top_k_poses_localref=1,
+                         grid_distance_degs=8.0,
                          reference_map=None,
                          reference_mask=None,
                          directional_zscore_thr=None,
                          skip_localrefinement=True,
                          skip_reconstruction=True,
                          subset_idxs=None,
-                         show_debug_stats=False,
-                         float32_matmul_precision="high"):
+                         n_first_particles=None,
+                         show_debug_stats=False):
                 self.particles_star_fname = particles_star_fname
                 self.data_halfset = data_halfset
                 self.model_halfset = model_halfset
                 self.subset_idxs = subset_idxs
 
-            def run(self):
-                # Emulate structure expected by infer._flatten_inference_output:
-                # list_over_model_halfset [ list_over_datasets [ (particles_md_list, vol) ] ]
+            def _build_df(self):
                 star = starfile.read(star_path)
                 df = star["particles"] if isinstance(star, dict) else star
 
@@ -120,20 +120,43 @@ class TestDistributedInference(unittest.TestCase):
                 if self.subset_idxs is not None:
                     subset = [int(i) for i in self.subset_idxs]
                     subset = [i for i in subset if i in df.index]
-                    # preserve the given order
                     df = df.loc[subset].copy()
 
-                # add deterministic mock outputs
                 df = df.copy()
                 df["rlnAngleRot"] += 0.0
                 df["rlnAngleTilt"] += 0.0
                 df["rlnAnglePsi"] += 0.0
-                df["rlnPredPoseConfidence"] = 1.0  # pretend perfect confidence
+                df["rlnPredPoseConfidence"] = 1.0
                 df["__data_half__"] = self.data_halfset
                 df["__model_half__"] = self.model_halfset
+                return df
 
-                # Return ([[([df], None)]]) — matches infer._flatten_inference_output logic
-                return [[([df], None)]]
+            def _run(self, materialize_reconstruction=True):
+                # Returns (particles_md_list, optics_md_list, vol) — format expected by _worker
+                df = self._build_df()
+                return [df], None, None
+
+            def run(self):
+                # Returns list_over_model_halfset [ list_over_data_half [ (particles_md_list, optics_md_list) ] ]
+                # matching infer._flatten_inference_output expectations for the single-process path
+                particles_md_list, optics_md_list, _ = self._run()
+                return [[(particles_md_list, optics_md_list)]]
+
+            @staticmethod
+            def resolve_halfset_lists(data_halfset, model_halfset):
+                if data_halfset == "allParticles":
+                    data_list = ["half1", "half2"]
+                else:
+                    data_list = [data_halfset]
+                if model_halfset == "allCombinations":
+                    model_list = ["half1", "half2"]
+                elif model_halfset == "matchingHalf":
+                    model_list = [None]
+                elif model_halfset == "allParticles":
+                    model_list = ["allParticles"]
+                else:
+                    model_list = [model_halfset]
+                return data_list, model_list
 
         return FakeSingleInferencer
 
@@ -151,6 +174,9 @@ class TestDistributedInference(unittest.TestCase):
 
             def start(self):
                 self._alive = True
+                # Reset the module-level inferencer cache so each "process" starts fresh,
+                # matching real multiprocessing where each spawned process has _INFERENCER=None.
+                infer._INFERENCER = None
                 self._target(*self._args)
                 self._alive = False
 
@@ -200,7 +226,7 @@ class TestDistributedInference(unittest.TestCase):
         FakeSingleInferencer = self._make_fake_inferencer()
 
         # Patch the SingleInferencer used *inside* infer.distributed_inference and workers
-        with patch("cryoPARES.inference.infer.SingleInferencer", FakeSingleInferencer):
+        with patch("cryoPARES.inference.inferencer.SingleInferencer", FakeSingleInferencer):
             # -------- Single-process path (n_jobs=1) --------
             out_single = infer.distributed_inference(
                 particles_star_fname=self.particles_star_fname,
@@ -222,13 +248,14 @@ class TestDistributedInference(unittest.TestCase):
                 skip_localrefinement=True,
                 skip_reconstruction=True,
                 subset_idxs=None,
-                float32_matmul_precision="high",
+
             )
 
             # Flatten SingleInferencer output using infer helper
-            dfs_single = infer._flatten_inference_output(out_single)
-            self.assertTrue(len(dfs_single) >= 1)
-            df_single = pd.concat(dfs_single, axis=0)
+            # _flatten_inference_output returns (particles_df, optics_df) pairs
+            pairs_single = infer._flatten_inference_output(out_single)
+            self.assertTrue(len(pairs_single) >= 1)
+            df_single = pd.concat([p for p, _ in pairs_single], axis=0)
 
             # -------- “Multiprocess” path (n_jobs=2), but run inline via fake ctx --------
             fake_ctx = self._make_fake_ctx()
@@ -253,7 +280,7 @@ class TestDistributedInference(unittest.TestCase):
                     skip_localrefinement=True,
                     skip_reconstruction=True,    # avoid shared recon buffers
                     subset_idxs=None,
-                    float32_matmul_precision="high",
+    
                 )
 
             # out_distrib is a dict mapping "model_<h>__data_<h>" -> aggregated DataFrame

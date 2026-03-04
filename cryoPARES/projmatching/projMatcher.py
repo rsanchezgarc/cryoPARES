@@ -13,13 +13,13 @@ import starfile
 import torch
 from scipy.spatial.transform import Rotation
 from torch.utils.data import DataLoader
-from torch_grid_utils import circle
+from cryoPARES.utils.torch_grid_utils_compat import circle
 
 from autoCLI_config import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.constants import (RELION_EULER_CONVENTION, BATCH_POSE_NAME, RELION_PRED_POSE_CONFIDENCE_NAME,
                                  BATCH_ORI_IMAGE_NAME, BATCH_ORI_CTF_NAME, RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES,
                                  BATCH_IDS_NAME)
-from torch_fourier_slice.slice_extraction import extract_central_slices_rfft_3d
+from cryoPARES.utils.torch_fourier_slice_compat import extract_central_slices_rfft_3d
 from cryoPARES.utils.paths import MAP_AS_ARRAY_OR_FNAME_TYPE, FNAME_TYPE
 
 from cryoPARES.configs.mainConfig import main_config
@@ -204,8 +204,8 @@ class ProjectionMatcher(nn.Module):
 
         return extract_central_slices_rfft_3d(
             self.reference_vol,
-            image_shape=self.vol_shape,
             rotation_matrices=rotMats,
+            image_shape=self.vol_shape,
             fftfreq_max=self.fftfreq_max,
             zyx_matrices=False, )
 

@@ -10,7 +10,7 @@ import torch
 from progressBarDistributed import SharedMemoryProgressBar, SharedMemoryProgressBarWorker
 from torch import multiprocessing
 
-from autoCLI_config import inject_defaults_from_config, inject_docs_from_config_params, CONFIG_PARAM
+from autoCLI_config import inject_defaults_from_config, inject_docs_from_config_params, CONFIG_PARAM, ConfigOverrideSystem
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.constants import (
     BATCH_ORI_IMAGE_NAME,
@@ -113,7 +113,7 @@ def worker(worker_id, *args, **kwargs):
 
 
 def _worker(worker_id, pbar_fname, particles_idxs, matcher_init_kwargs,
-            run_kwargs, shared_results, device=None):
+            run_kwargs, shared_results, main_config_updated, device=None):
     """
     Worker process function for projection matching.
 
@@ -124,8 +124,10 @@ def _worker(worker_id, pbar_fname, particles_idxs, matcher_init_kwargs,
         matcher_init_kwargs (dict): Args to initialize ProjectionMatcher.
         run_kwargs (dict): Args for dataset loading.
         shared_results (dict): Shared memory arrays for results.
+        main_config_updated: Copy of main_config from the parent process (for config propagation).
         device (str or None): Torch device string ("cuda:X" or None).
     """
+    ConfigOverrideSystem.update_config_from_dataclass(main_config, main_config_updated, verbose=False)
     global _MATCHER
     if _MATCHER is None:
         _MATCHER = ProjectionMatcher(**matcher_init_kwargs)
@@ -360,7 +362,7 @@ def projmatching_starfile(
                 p = ctx.Process(
                     target=worker,
                     args=(worker_id, pbar_fname, particles_idxs, matcher_init_kwargs, run_kwargs,
-                          shared_results, worker_device)
+                          shared_results, main_config, worker_device)
                 )
                 p.start()
                 processes.append(p)

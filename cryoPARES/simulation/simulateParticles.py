@@ -6,9 +6,11 @@ automatically handles single-GPU/CPU or multi-GPU execution based on --num_gpus.
 """
 
 import os
+import warnings
 from typing import List, Optional
 
 import mrcfile
+import numpy as np
 import starfile
 import torch
 
@@ -17,11 +19,13 @@ from cryoPARES.configs.mainConfig import main_config
 
 # Use the APIs exposed by the helper you integrated earlier
 # (both single-run and multi-GPU sharded run)
+from cryoPARES.simulation.generateRandomStar import generate_random_particles_star
 from cryoPARES.simulation.simulateParticlesHelper import (
     ParticlesStarSet,
     run_simulation,
     run_simulation_sharded,
 )
+from cryoPARES.scripts.computeFsc import resample_to_voxel_size, fourier_pad_crop_to_shape
 
 
 def _write_output_star(
@@ -106,6 +110,11 @@ def simulate_particles_cli(
         random_seed: Optional[int] = None,
         disable_tqdm: bool = False,
         n_first_particles: Optional[int] = None,
+        n_particles: Optional[int] = None,
+        defocus_min: float = 5000.0,
+        defocus_max: float = 25000.0,
+        astigmatism_std: float = 200.0,
+        shift_range_A: float = 0.0,
 ):
     """
     Simulate cryo-EM particle projections from a 3D volume.
@@ -134,6 +143,11 @@ def simulate_particles_cli(
         random_seed: Random seed for reproducibility
         disable_tqdm: Disable progress bar
         n_first_particles: If set, only process the first N particles from the input STAR file.
+        n_particles: If set, generate N random particles from an optics-only STAR file with random SO(3) poses and CTF parameters.
+        defocus_min: Minimum defocus in Angstroms for random mode.
+        defocus_max: Maximum defocus in Angstroms for random mode.
+        astigmatism_std: Std of DefocusV offset from DefocusU in Angstroms for random mode.
+        shift_range_A: Half-range for random shifts in Angstroms for random mode (0 = no shifts).
     """
     # Validation
     if images_per_file <= 0:
@@ -152,11 +166,84 @@ def simulate_particles_cli(
 
     # Set random seed
     if random_seed is not None:
-        import numpy as np
         np.random.seed(random_seed)
         torch.manual_seed(random_seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(random_seed)
+
+    # --- Random particles mode: generate synthetic STAR from optics-only ---
+    if n_particles is not None:
+        if n_particles <= 0:
+            raise ValueError("n_particles must be > 0")
+        if defocus_min <= 0:
+            raise ValueError("defocus_min must be > 0")
+        if defocus_min >= defocus_max:
+            raise ValueError("defocus_min must be < defocus_max")
+
+        # Generate synthetic STAR file with random poses/CTF
+        generated_star, optics_df = generate_random_particles_star(
+            optics_star=in_star,
+            n_particles=n_particles,
+            output_dir=output_dir,
+            basename=basename,
+            defocus_min=defocus_min,
+            defocus_max=defocus_max,
+            astigmatism_std=astigmatism_std,
+            shift_range_A=shift_range_A,
+            random_seed=random_seed,
+        )
+        in_star = generated_star
+
+        # Read pixel size and image size from the optics table
+        star_px_A = float(optics_df["rlnImagePixelSize"].iloc[0])
+        star_box_size = int(optics_df["rlnImageSize"].iloc[0])
+
+        # Read volume header
+        with mrcfile.open(volume, header_only=True) as mrc:
+            vol_box_size = int(mrc.header.nx)
+            vol_px_A = float(mrc.voxel_size.x)
+
+        # Use STAR pixel size as the authoritative value
+        px_A = star_px_A
+
+        # Check volume pixel size vs STAR pixel size
+        need_resample = False
+        if vol_px_A <= 0:
+            warnings.warn(
+                "Volume MRC header has invalid pixel size, using STAR value "
+                f"({star_px_A:.4f} A/px)."
+            )
+        elif abs(vol_px_A - star_px_A) > 0.01:
+            warnings.warn(
+                f"Volume pixel size ({vol_px_A:.4f} A/px) differs from STAR "
+                f"({star_px_A:.4f} A/px). Resampling volume to match STAR."
+            )
+            need_resample = True
+
+        # Resample and/or crop/pad if needed
+        if need_resample or vol_box_size != star_box_size:
+            with mrcfile.open(volume) as mrc:
+                vol_data = mrc.data.copy().astype(np.float32)
+
+            if need_resample:
+                vol_data = resample_to_voxel_size(vol_data, voxel_size_from=vol_px_A, voxel_size_to=star_px_A)
+                vol_box_size = vol_data.shape[0]
+
+            if vol_box_size != star_box_size:
+                warnings.warn(
+                    f"Volume box size ({vol_box_size}) differs from STAR image "
+                    f"size ({star_box_size}). Fourier cropping/padding volume."
+                )
+                target_shape = (star_box_size, star_box_size, star_box_size)
+                vol_data = fourier_pad_crop_to_shape(vol_data, target_shape)
+
+            # Write adjusted volume
+            resampled_path = os.path.join(output_dir, "_volume_resampled.mrc")
+            with mrcfile.new(resampled_path, overwrite=True) as mrc:
+                mrc.set_data(vol_data.astype(np.float32))
+                mrc.voxel_size = (star_px_A, star_px_A, star_px_A)
+            volume = resampled_path
+            print(f"Adjusted volume written to: {resampled_path}")
 
     # Resolve GPU configuration
     num_gpus = n_gpus_for_simulation

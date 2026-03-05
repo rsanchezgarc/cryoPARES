@@ -301,7 +301,13 @@ class BufferPool:
 
         # Non-blocking GPU→CPU copy (outside lock for performance)
         if self.device.type == 'cuda':
+            # Ensure self.stream waits for all pending ops on the current (default) stream
+            # before reading batch_gpu — prevents race condition where the copy starts
+            # before e.g. noise addition has been written to the tensor.
+            compute_event = torch.cuda.Event()
+            compute_event.record()  # record in current (default) stream
             with torch.cuda.stream(self.stream):
+                self.stream.wait_event(compute_event)  # self.stream waits for default stream
                 # Async copy to pinned CPU memory
                 buf[count:count+to_copy].copy_(batch_gpu[:to_copy], non_blocking=True)
             # Record completion event in the stream
@@ -733,6 +739,7 @@ class CryoEMSimulator:
             if snr is not None and snr > 0:
                 # Compute variance per image (B, 1, 1)
                 sig_var = out_imgs.var(dim=(-2, -1), keepdim=True)
+
 
                 # Vectorized fallback: use 1.0 where variance is <= 0
                 # This replaces: noise_std = math.sqrt(sig_var / snr) if sig_var > 0 else 1.0

@@ -8,6 +8,7 @@ This document provides instructions for using the command-line tools included wi
 - [`cryopares_infer`](#cryopares_infer) - Run inference on new particles
 - [`cryopares_projmatching`](#cryopares_projmatching) - Align particles via projection matching
 - [`cryopares_reconstruct`](#cryopares_reconstruct) - Reconstruct 3D volume from aligned particles
+- [`cryopares_postprocess`](#cryopares_postprocess) - Post-process reconstructed volumes
 - [`compactify_checkpoint`](#compactify_checkpoint) - Package checkpoint for distribution
 - [Utility Scripts](#utility-scripts) - Analysis and visualization tools
 
@@ -76,7 +77,7 @@ Common configuration overrides:
 ### View All Config Options
 
 ```bash
-python -m cryopares_train --show-config
+cryopares_train --show-config
 ```
 
 ### Examples
@@ -264,7 +265,7 @@ cryopares_projmatching [OPTIONS]
 | `--reference_vol` | str | **Required** | Path to reference 3D volume (.mrc file) for generating projection templates |
 | `--particles_star_fname` | str | **Required** | Path to input STAR file with particle metadata |
 | `--out_fname` | str | **Required** | Path for output STAR file with aligned particle poses |
-| `--particles_dir` | Optional[str] | **Required** | Root directory for particle image paths. If provided, overrides paths in the .star file |
+| `--particles_dir` | Optional[str] | None | Root directory for particle image paths. If provided, overrides paths in the .star file |
 | `--mask_radius_angs` | Optional[float] | None | Radius of circular mask in Angstroms applied to particle images |
 | `--grid_distance_degs` | float | `6.0` | Maximum angular distance in degrees for local refinement search. Grid ranges from -grid_distance_degs to +grid_distance_degs around predicted pose |
 | `--grid_step_degs` | float | `2.0` | Angular step size in degrees for grid search during local refinement |
@@ -333,6 +334,83 @@ cryopares_reconstruct \
     --particles_star_fname /path/to/your/particles.star \
     --symmetry C1 \
     --output_fname /path/to/your/reconstruction.mrc
+```
+
+---
+
+## `cryopares_postprocess`
+
+Post-process reconstructed cryo-EM volumes (B-factor sharpening, FSC weighting, masking).
+
+### Usage
+
+```bash
+cryopares_postprocess <method> [OPTIONS]
+```
+
+Available methods:
+- **`bfactor`** — Standard B-factor sharpening + FSC weighting
+
+### `cryopares_postprocess bfactor`
+
+Standard B-factor post-processing of two cryo-EM half-maps: computes FSC, estimates B-factor from Guinier analysis, and produces a sharpened, FSC-weighted output map.
+
+#### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `--half1` | str | **Required** | Path to half-map 1 (.mrc) |
+| `--half2` | str | **Required** | Path to half-map 2 (.mrc) |
+| `--output_dir` | str | **Required** | Directory for all output files |
+| `--mask` | Optional[str] | None | Path to mask (.mrc). Use `--mask` or `--auto_mask` |
+| `--auto_mask` | bool | `False` | Auto-generate a soft mask from the average half-map |
+| `--auto_mask_threshold` | Optional[float] | None | Density threshold for auto-mask binarisation (default: Otsu) |
+| `--auto_mask_dilation_A` | float | `8.0` | Dilation radius in Å added around thresholded region |
+| `--auto_mask_edge_width` | int | `6` | Soft-edge width in pixels |
+| `--auto_mask_spherical` | bool | `False` | Use a spherical soft mask instead of a density-threshold mask |
+| `--px_A` | Optional[float] | None | Pixel size in Å — overrides the MRC header value if given |
+| `--adhoc_bfac` | Optional[float] | None | Manual B-factor in Å²; skips automatic Guinier estimation |
+| `--guinier_lo_A` | float | `10.0` | Lower resolution limit in Å for the Guinier linear fit |
+| `--lowpass_A` | Optional[float] | None | Apply a final low-pass filter at this resolution in Å (default: FSC=0.143 resolution) |
+| `--save_fsc_plot` | Optional[str] | None | Path to save FSC curve plot (default: `output_dir/fsc_plot.png`) |
+| `--save_guinier_plot` | Optional[str] | None | Path to save Guinier plot (default: `output_dir/guinier_plot.png`) |
+
+#### Outputs
+
+- `output_dir/sharpened.mrc` — B-factor-sharpened, FSC-weighted map
+- `output_dir/fsc_curve.txt` — Raw FSC data
+- `output_dir/fsc_plot.png` — FSC curve plot
+- `output_dir/guinier_data.txt` — Guinier fit data (unless `--adhoc_bfac` is set)
+- `output_dir/guinier_plot.png` — Guinier plot (unless `--adhoc_bfac` is set)
+
+#### Examples
+
+**With an existing mask:**
+```bash
+cryopares_postprocess bfactor \
+    --half1 /path/to/half1.mrc \
+    --half2 /path/to/half2.mrc \
+    --mask /path/to/mask.mrc \
+    --output_dir /path/to/postprocess_output
+```
+
+**With auto-generated mask:**
+```bash
+cryopares_postprocess bfactor \
+    --half1 /path/to/half1.mrc \
+    --half2 /path/to/half2.mrc \
+    --auto_mask \
+    --output_dir /path/to/postprocess_output
+```
+
+**With manual B-factor:**
+```bash
+cryopares_postprocess bfactor \
+    --half1 /path/to/half1.mrc \
+    --half2 /path/to/half2.mrc \
+    --mask /path/to/mask.mrc \
+    --adhoc_bfac -50.0 \
+    --output_dir /path/to/postprocess_output
 ```
 
 ---

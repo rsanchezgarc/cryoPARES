@@ -26,8 +26,8 @@ from cryoPARES.geometry.convert_angles import euler_angles_to_matrix
 from cryoPARES.projmatching.projmatchingUtils.fourierOperations import (
     compute_dft_3d, _fourier_proj_to_real_2d,
 )
-from torch_fourier_slice.slice_extraction import extract_central_slices_rfft_3d
-from torch_fourier_shift import fourier_shift_image_2d
+from cryoPARES.utils.torch_fourier_slice_compat import extract_central_slices_rfft_3d
+from cryoPARES.utils.torch_fourier_shift_compat import fourier_shift_image_2d
 from cryoPARES.datamanager.ctf.rfft_ctf import corrupt_with_ctf, compute_ctf_rfft
 from cryoPARES.constants import RELION_EULER_CONVENTION
 from starstack.particlesStar import ParticlesStarSet
@@ -575,8 +575,8 @@ class CryoEMSimulator:
         # Use library functions with correct parameters
         projs_rfft = extract_central_slices_rfft_3d(
             self.vol_rfft,
-            image_shape=self.base_image_shape,
             rotation_matrices=R,
+            image_shape=self.base_image_shape,
             fftfreq_max=None,
             zyx_matrices=False
         )
@@ -767,7 +767,7 @@ class CryoEMSimulator:
                 del out_imgs, projs_gt, projs_jit
             del euls_gt, angle_jit, shift_jit_px, shifts_gt_px
 
-            if torch.cuda.is_available():
+            if self.device.type == 'cuda':
                 torch.cuda.synchronize(device=self.device)
             pbar.update(B)
 

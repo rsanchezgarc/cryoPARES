@@ -24,7 +24,7 @@ def cryo_em_data(tmp_path_factory):
     except ImportError:
         pytest.skip("cesped package not found, skipping daemon test. Please install it with 'pip install cesped'")
     except Exception as e:
-        pytest.fail(f"Failed to download test data with cesped: {e}")
+        pytest.skip(f"Failed to download test data (network or cesped issue): {e}")
 
     # cesped downloads everything into a 'test' subdir
     data_path = os.path.join(data_dir, "TEST")

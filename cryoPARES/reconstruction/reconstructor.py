@@ -15,7 +15,7 @@ from cryoPARES.constants import (
 )
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
-from torch_fourier_shift import fourier_shift_dft_2d
+from cryoPARES.utils.torch_fourier_shift_compat import fourier_shift_dft_2d
 
 from autoCLI_config import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config

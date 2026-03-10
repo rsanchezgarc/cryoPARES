@@ -6,8 +6,7 @@ import torch.nn.functional as F
 import numpy as np
 from sympy.abc import alpha
 
-from torch_grid_utils import fftfreq_grid
-from torch_grid_utils.shapes_2d import circle
+from cryoPARES.utils.torch_grid_utils_compat import fftfreq_grid, circle
 
 from cryoPARES.configs.mainConfig import main_config
 

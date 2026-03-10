@@ -23,13 +23,9 @@ Welcome to the CryoPARES documentation! This directory contains comprehensive gu
   - Common configuration recipes
   - YAML config file usage
 
-- **[Scripts Guide](scripts_guide.md)** - Utility scripts for analysis and visualization
-  - GMM histogram analysis (auto-used in training)
-  - FSC computation (auto-used in inference)
-  - Pose comparison and validation
-  - Learning curve visualization
-  - STAR file inspection tools
-  - Checkpoint packaging
+- **[CLI Reference](cli.md)** - Command-line interface documentation and utility scripts
+  - `cryopares_train`, `cryopares_infer`, `cryopares_reconstruct`, `cryopares_projmatching`, `cryopares_postprocess`
+  - FSC computation, pose comparison, learning curve visualization, STAR file inspection
 
 - **[Troubleshooting Guide](troubleshooting.md)** - Solutions to common issues
   - Installation problems
@@ -57,7 +53,7 @@ Welcome to the CryoPARES documentation! This directory contains comprehensive gu
   - `cryopares_projmatching` - Projection matching
   - `compactify_checkpoint` - Package checkpoints
 
-- **[Scripts Guide](scripts_guide.md)** - Utility scripts reference
+- **[CLI Reference](cli.md)** - Command-line interface and utility scripts reference
   - Analysis and visualization tools
   - Automatic vs manual usage
   - Integration with main pipeline
@@ -68,7 +64,7 @@ Welcome to the CryoPARES documentation! This directory contains comprehensive gu
 → Start with [Training Guide](training_guide.md) and refer to [Configuration Guide](configuration_guide.md) for parameters
 
 ### I want to run inference
-→ See the Inference section in [Main README](../README.md) and [API Reference](api_reference.md)
+→ See the Inference section in [Main README](../README.md) and [API Reference](https://rsanchezgarc.github.io/cryoPARES/api/)
 
 ### I'm getting an error
 → Check [Troubleshooting Guide](troubleshooting.md)
@@ -86,10 +82,10 @@ Welcome to the CryoPARES documentation! This directory contains comprehensive gu
 → See "Performance Issues" in [Troubleshooting Guide](troubleshooting.md) and "Advanced Training Options" in [Training Guide](training_guide.md)
 
 ### I want to analyze my results
-→ See [Scripts Guide](scripts_guide.md) for pose comparison, histogram analysis, and learning curve visualization
+→ See [CLI Reference](cli.md) for pose comparison, histogram analysis, and learning curve visualization
 
 ### I want to inspect STAR file metadata
-→ Use `hists_from_starfile` - see [Scripts Guide](scripts_guide.md)
+→ Use `hists_from_starfile` - see [CLI Reference](cli.md)
 
 ## Document Overview
 

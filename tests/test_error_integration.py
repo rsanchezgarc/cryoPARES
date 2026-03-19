@@ -95,10 +95,11 @@ if __name__ == '__main__':
 
             exc = cm.exception
             self.assertIsNotNone(exc.traceback_info)
-            # Should capture the first traceback (which is the root cause)
+            # extract_traceback_from_text intentionally takes the LAST traceback in the output.
+            # With "raise ValueError(...) from RuntimeError", Python prints RuntimeError first,
+            # then ValueError last — so the parser returns ValueError.
             exception_type, _, _ = exc.traceback_info
-            # The parser finds the first/root exception (RuntimeError)
-            self.assertEqual(exception_type, "RuntimeError")
+            self.assertEqual(exception_type, "ValueError")
 
         finally:
             os.unlink(script_path)

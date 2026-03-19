@@ -34,6 +34,7 @@ For a detailed explanation of the method, please refer to our paper:
     - [Daemon Mode (On-the-fly)](#daemon-mode-on-the-fly)
   - [Utility Tools](#utility-tools)
     - [Projection Matching](#projection-matching)
+    - [Post-processing](#post-processing)
     - [Reconstruction](#reconstruction)
   - [Checkpoint Compactification](#checkpoint-compactification)
 - [Documentation](#documentation)
@@ -430,6 +431,21 @@ cryopares_projmatching [ARGUMENTS] [--config [CONFIG_OVERRIDES]] [--show-config]
 <!-- AUTO_GENERATED:projmatching_parameters:END -->
 
 For additional details, see the [Command-Line Interface documentation](./docs/cli.md).
+
+#### Post-processing
+
+The post-processing utility sharpens reconstructed volumes using B-factor estimation (Guinier analysis) and FSC weighting. Run it after reconstruction to improve map interpretability.
+
+**Usage:**
+```bash
+cryopares_postprocess bfactor \
+    --half1 /path/to/half1.mrc \
+    --half2 /path/to/half2.mrc \
+    --mask /path/to/mask.mrc \      # or --auto_mask
+    --output_dir /path/to/postprocess_output
+```
+
+For all options, see the [CLI Reference](./docs/cli.md#cryopares_postprocess).
 
 #### Reconstruction
 

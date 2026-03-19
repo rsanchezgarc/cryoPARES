@@ -32,7 +32,7 @@ CryoPARES uses a hierarchical, dataclass-based configuration system that allows 
 Config overrides use dot notation to specify nested parameters:
 
 ```bash
-python -m cryopares_train \
+cryopares_train \
     --symmetry C1 \
     --particles_star_fname data.star \
     --train_save_dir output/ \
@@ -79,7 +79,7 @@ datamanager:
 Use it:
 
 ```bash
-python -m cryopares_train \
+cryopares_train \
     --symmetry C1 \
     --particles_star_fname data.star \
     --train_save_dir output/ \
@@ -93,7 +93,7 @@ python -m cryopares_train \
 To see all available configuration options and their current values:
 
 ```bash
-python -m cryopares_train --show-config
+cryopares_train --show-config
 ```
 
 This command displays configuration in two sections:
@@ -163,12 +163,12 @@ All configuration parameters are defined in Python dataclass files located in `c
 | **Training** | `cryoPARES/configs/train_config/train_config.py` |
 | **Inference** | `cryoPARES/configs/inference_config/inference_config.py` |
 | **Data Manager** | `cryoPARES/configs/datamanager_config/datamanager_config.py` |
-| **Particle Dataset** | `cryoPARES/configs/datamanager_config/particles_dataset_config.py` |
-| **Augmentation** | `cryoPARES/configs/datamanager_config/augmenter_config.py` |
-| **Image2Sphere Model** | `cryoPARES/configs/models_config/image2sphere_config.py` |
-| **Image Encoder** | `cryoPARES/configs/models_config/imageencoder_config.py` |
+| **Particle Dataset** | `cryoPARES/configs/datamanager_config/particlesDataset_config.py` |
+| **Augmentation** | `cryoPARES/configs/datamanager_config/augmentations_config.py` |
+| **Image2Sphere Model** | `cryoPARES/configs/models_config/image2sphere_config/image2sphere_config.py` |
+| **Image Encoder** | `cryoPARES/configs/models_config/image2sphere_config/imageEncoder_config/imageEncoder_config.py` |
 | **Projection Matching** | `cryoPARES/configs/projmatching_config/projmatching_config.py` |
-| **Reconstruction** | `cryoPARES/configs/reconstruction_config/reconstruct_config.py` |
+| **Reconstruction** | `cryoPARES/configs/reconstruct_config/reconstruct_config.py` |
 
 ### How to Read Configuration Files
 
@@ -220,17 +220,17 @@ class Train_config:
 
 For deeply nested parameters like `models.image2sphere.imageencoder.resnet.resnetName`:
 
-1. **Start at**: `cryoPARES/configs/models_config/image2sphere_config.py`
+1. **Start at**: `cryoPARES/configs/models_config/image2sphere_config/image2sphere_config.py`
 2. **Find nested config**:
    ```python
    imageencoder: Imageencoder_config = Imageencoder_config()
    ```
-3. **Open**: `cryoPARES/configs/models_config/imageencoder_config.py`
+3. **Open**: `cryoPARES/configs/models_config/image2sphere_config/imageEncoder_config/imageEncoder_config.py`
 4. **Find ResNet config**:
    ```python
    resnet: Resnet_config = Resnet_config()
    ```
-5. **Check**: `cryoPARES/configs/models_config/imageencoder_config.py` for `resnetName` parameter
+5. **Check**: `cryoPARES/configs/models_config/image2sphere_config/imageEncoder_config/resNet_config.py` for `resnetName` parameter
 
 ---
 
@@ -238,13 +238,13 @@ For deeply nested parameters like `models.image2sphere.imageencoder.resnet.resne
 
 For the most commonly used parameters, see:
 - **Training basics**: `cryoPARES/configs/train_config/train_config.py` → `PARAM_DOCS`
-- **Data preprocessing**: `cryoPARES/configs/datamanager_config/particles_dataset_config.py` → `PARAM_DOCS`
-- **Model architecture**: `cryoPARES/configs/models_config/image2sphere_config.py` → `PARAM_DOCS`
+- **Data preprocessing**: `cryoPARES/configs/datamanager_config/particlesDataset_config.py` → `PARAM_DOCS`
+- **Model architecture**: `cryoPARES/configs/models_config/image2sphere_config/image2sphere_config.py` → `PARAM_DOCS`
 - **Local refinement**: `cryoPARES/configs/projmatching_config/projmatching_config.py` → `PARAM_DOCS`
 
 **Remember:** The easiest way to discover parameters is:
 ```bash
-python -m cryopares_train --show-config
+cryopares_train --show-config
 ```
 This shows all parameters with their current values and descriptions, ready to copy-paste
 
@@ -262,7 +262,7 @@ train_save_dir/version_0/configs_0.yml
 ### Reusing a Configuration
 
 ```bash
-python -m cryopares_train \
+cryopares_train \
     --symmetry C1 \
     --particles_star_fname new_data.star \
     --train_save_dir new_output/ \
@@ -274,7 +274,7 @@ python -m cryopares_train \
 You can load a config file and override specific values:
 
 ```bash
-python -m cryopares_train \
+cryopares_train \
     --symmetry C1 \
     --particles_star_fname new_data.star \
     --train_save_dir new_output/ \

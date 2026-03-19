@@ -18,13 +18,8 @@ from enum import Enum
 import pytest
 import yaml
 
-from cryoPARES.configManager.configParser import (
-    ConfigOverrideSystem,
-    ConfigArgumentParser,
-    merge_dicts,
-    dataclass_to_dict,
-    export_config_to_yaml
-)
+from autoCLI_config import ConfigOverrideSystem, ConfigArgumentParser
+from autoCLI_config.utils import merge_dicts, dataclass_to_dict, export_config_to_yaml
 
 
 # Test dataclasses (renamed to avoid pytest collection warnings)

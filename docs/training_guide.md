@@ -26,7 +26,7 @@ trained model directly determines the accuracy of pose predictions on new data.
 Basic training command:
 
 ```bash
-python -m cryopares_train \
+cryopares_train \
     --symmetry C1 \
     --particles_star_fname /path/to/aligned_particles.star \
     --particles_dir /path/to/particles \
@@ -317,7 +317,7 @@ junk or misaligned particles. Consider improving the training set via:
 
 ```bash
 # Start training
-python -m cryopares_train \
+cryopares_train \
     --symmetry C1 \
     --particles_star_fname data/particles.star \
     --train_save_dir experiments/run_001 \
@@ -362,7 +362,7 @@ Overfitting occurs when the model learns to memorize training data instead of ge
 4. **Increase data augmentation:**
    Data augmentation is enabled by default. Check current settings:
    ```bash
-   python -m cryopares_train --show-config | grep augmentation
+   cryopares_train --show-config | grep augmentation
    ```
 
 ### What is Underfitting?
@@ -451,7 +451,7 @@ CTF correction is applied automatically during training:
 Resume from a previous checkpoint:
 
 ```bash
-python -m cryopares_train \
+cryopares_train \
     --continue_checkpoint_dir /path/to/train_save_dir/version_0 \
     --n_epochs 30  # Train for 30 total epochs
 ```
@@ -461,7 +461,7 @@ python -m cryopares_train \
 Start from a pre-trained model and adapt to new data:
 
 ```bash
-python -m cryopares_train \
+cryopares_train \
     --symmetry C1 \
     --particles_star_fname /path/to/new_particles.star \
     --train_save_dir /path/to/finetuned_model \
@@ -492,7 +492,7 @@ To train on all data (single model):
 Pre-train on simulated data before training on real particles:
 
 ```bash
-python -m cryopares_train \
+cryopares_train \
     --symmetry C1 \
     --particles_star_fname /path/to/real_particles.star \
     --train_save_dir /path/to/output \
@@ -518,7 +518,7 @@ Speed up training with PyTorch compilation (requires PyTorch 2.0+):
 Test your setup quickly by overfitting on a few batches:
 
 ```bash
-python -m cryopares_train \
+cryopares_train \
     --symmetry C1 \
     --particles_star_fname /path/to/particles.star \
     --train_save_dir /tmp/overfit_test \

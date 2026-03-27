@@ -22,7 +22,7 @@ collection and analysis.
 For a detailed explanation of the method, please refer to our paper:
 [Supervised Deep Learning for Efficient Cryo-EM Image Alignment in Drug Discovery](https://www.biorxiv.org/content/10.1101/2025.03.04.641536)
 
-> 📚 **Documentation:** See the [full documentation](https://rsanchezgarc.github.io/cryoPARES) for detailed instructions on training, configuration, CLI reference, troubleshooting, and API reference.
+> **Documentation:** See the [full documentation](https://rsanchezgarc.github.io/cryoPARES) for detailed instructions on training, configuration, CLI reference, troubleshooting, and API reference.
 
 ## Table of Contents
 
@@ -275,88 +275,144 @@ In daemon mode, the inference script runs continuously and watches for new parti
 
 The daemon workflow consists of three main components:
 
-1.  **Queue Manager:** A central server that manages a queue of jobs.
-2.  **Spooling Filler:** A script that monitors a directory for new `.star` files and adds them to the queue. You could implement other filler protocols using this module as an example.
-3.  **Daemon Inferencer:** One or more worker processes that take jobs from the queue and perform inference.
+1.  **Queue Manager:** A central server that hosts one or more **named queues** on a single port.
+2.  **Spooling Filler:** A script that monitors a directory for new `.star` files and adds them to a queue. You could implement other filler protocols using this module as an example.
+3.  **Daemon Inferencer:** One or more worker processes that consume jobs from a queue and perform inference.
+
+All three components communicate over the network. The Spooling Filler and Daemon Inferencer must be
+configured with `ip`/`port`/`authkey`/`queue_name` values that match the Queue Manager.
+The Queue Manager does not take a `queue_name` argument — it hosts all named queues, creating them
+on demand when a client first requests a given name.
 
 **Workflow:**
 
 1.  **Start the Queue Manager:**
 
-    This script creates the central queue. It should be run once and kept running in the background.
+    This script creates the central queue server. It should be run once and kept running in the background.
+    A single server instance can host **multiple independent named queues** on the same port — useful
+    when running several independent inference pipelines simultaneously.
 
     ```bash
+    python -m cryoPARES.inference.daemon.queueManager [--ip IP] [--port PORT] [--authkey KEY] [--queue_maxsize N]
+    ```
+
+    | Argument | Default | Description |
+    |---|---|---|
+    | `--ip` | `localhost` | IP address to bind to. Use `0.0.0.0` to accept remote connections. |
+    | `--port` | `50000` | TCP port to listen on. |
+    | `--authkey` | `shared_queue_key` | Authentication passphrase shared by all clients. |
+    | `--queue_maxsize` | unlimited | Max pending jobs per queue (`None` = no limit). |
+
+    ```bash
+    # Default settings
     python -m cryoPARES.inference.daemon.queueManager
+
+    # Remote server, custom port/key, bounded queues
+    python -m cryoPARES.inference.daemon.queueManager \
+        --ip 0.0.0.0 --port 51000 --authkey mysecret --queue_maxsize 100
     ```
 
 2.  **Start the Spooling Filler:**
 
-    This script watches a directory for new `.star` files and adds them to the queue.
+    This script watches a directory for new `.star` files and adds them to a named queue.
 
     ```bash
+    python -m cryoPARES.inference.daemon.spoolingFiller --directory DIR \
+        [--ip IP] [--port PORT] [--authkey KEY] [--queue_name NAME] \
+        [--pattern GLOB] [--check_interval SECS]
+    ```
+
+    | Argument | Default | Description |
+    |---|---|---|
+    | `--directory` | *(required)* | Directory to monitor for new `.star` files. |
+    | `--ip` | `localhost` | IP address of the queue manager server. |
+    | `--port` | `50000` | Port of the queue manager server. |
+    | `--authkey` | `shared_queue_key` | Authentication key (must match the server). |
+    | `--queue_name` | `default` | Name of the queue to submit jobs to. |
+    | `--pattern` | `*.star` | Glob pattern for files to watch. |
+    | `--check_interval` | `10` | Seconds between directory scans. |
+
+    ```bash
+    # Default queue, local server
     python -m cryoPARES.inference.daemon.spoolingFiller --directory /path/to/watch
+
+    # Named queue on a remote server
+    python -m cryoPARES.inference.daemon.spoolingFiller \
+        --directory /path/to/watch \
+        --ip 192.168.1.10 --port 51000 --authkey mysecret \
+        --queue_name my_pipeline
     ```
 
 **Alternative: Manually Submit Jobs**
 
-You can also use other mechanisms to add jobs to the queue programmatically. The key is to use the
-`cryoPARES.inference.daemon.queueManager.queue_connection` context manager to connect to the queue
-and the `put()` method to add new `.star` files to be processed.
-
-**Example Python script to submit jobs:**
+You can also submit jobs programmatically using `queue_connection`.
 
 ```python
 from cryoPARES.inference.daemon.queueManager import queue_connection
 
-# Submit a single .star file
+# Submit a single .star file (default queue, default ip/port/authkey)
 with queue_connection(ip="localhost", port=50000, authkey="shared_queue_key") as queue:
     queue.put("/path/to/particles.star")
-    print("Job submitted!")
 
-# Submit multiple .star files
-with queue_connection() as queue:  # Uses default connection settings
-    star_files = [
-        "/path/to/particles1.star",
-        "/path/to/particles2.star",
-        "/path/to/particles3.star"
-    ]
-    for star_file in star_files:
+# Submit to a named queue on a remote server
+with queue_connection(ip="192.168.1.10", port=51000, authkey="mysecret",
+                      queue_name="my_pipeline") as queue:
+    for star_file in ["/path/to/particles1.star", "/path/to/particles2.star"]:
         queue.put(star_file)
-    print(f"Submitted {len(star_files)} jobs")
 
-# Submit a .star file with a specific particle subset (advanced)
-import pandas as pd
-particles_subset = pd.read_csv("/path/to/particles.star", comment='#', delimiter=r'\s+')
-# Filter to specific particles, e.g., particles_subset = particles_subset[particles_subset['rlnImageName'].str.contains('mic001')]
-
+# Submit particles already loaded in memory (no disk I/O on the worker side)
+import starfile
+star = starfile.read("/path/to/particles.star")
+# Optionally filter star["particles"] here before submitting
 with queue_connection() as queue:
-    queue.put(("/path/to/particles.star", particles_subset))  # Tuple: (star_file, DataFrame)
-    print("Submitted job with particle subset")
+    queue.put((star["optics"], star["particles"]))  # (optics_df, particles_df)
 
-# Send poison pill to terminate workers gracefully
-with queue_connection() as queue:
-    queue.put(None)  # None acts as a poison pill
-    print("Sent termination signal to workers")
+# Send poison pill to terminate workers of a specific queue gracefully
+with queue_connection(queue_name="my_pipeline") as queue:
+    queue.put(None)
 ```
 
-**Input formats:**
-- **String:** Path to a `.star` file (all particles will be processed)
-- **Tuple:** `(star_file_path, pd.DataFrame)` where the DataFrame contains a subset of particles to process
-- **None:** Poison pill to signal workers to terminate gracefully
+**Input formats accepted by the Daemon Inferencer:**
+- **String:** Path to a `.star` file
+- **Tuple `(optics_df, particles_df)`:** pandas DataFrames already loaded or filtered in memory; no disk I/O required by the worker
+- **`None`:** Poison pill — signals workers to terminate gracefully
 
 
 3.  **Start the Daemon Inferencer(s):**
 
-    You can start as many inference workers as you want. Each worker will take jobs from the queue and process them in parallel. **Important:** Each worker must have its own results directory.
+    You can start as many inference workers as you want. Each worker will take jobs from the queue and
+    process them. **Important:** each worker must have its own `--results_dir`.
+    The inference arguments are the same as for `cryopares_infer`, plus the network arguments below.
 
     ```bash
-    # Worker 1
-    python -m cryoPARES.inference.daemon.daemonInference --checkpoint_dir /path/to/checkpoint --results_dir /path/to/results_worker1 --particles_dir /path/to/particles
-
-    # Worker 2
-    python -m cryoPARES.inference.daemon.daemonInference --checkpoint_dir /path/to/checkpoint --results_dir /path/to/results_worker2 --particles_dir /path/to/particles
+    python -m cryoPARES.inference.daemon.daemonInference \
+        --checkpoint_dir DIR --results_dir DIR \
+        [--net_address IP] [--net_port PORT] [--net_authkey KEY] [--net_queue_name NAME] \
+        [inference options…]
     ```
-The arguments accepted by `daemonInference` are mostly the same that the ones accepted by `cryopares_infer`
+
+    | Argument | Default | Description |
+    |---|---|---|
+    | `--net_address` | `localhost` | IP address of the queue manager server. |
+    | `--net_port` | `50000` | Port of the queue manager server. |
+    | `--net_authkey` | `shared_queue_key` | Authentication key (must match the server). |
+    | `--net_queue_name` | `default` | Name of the queue to consume jobs from. |
+
+    ```bash
+    # Two workers on the default queue
+    python -m cryoPARES.inference.daemon.daemonInference \
+        --checkpoint_dir /path/to/checkpoint --results_dir /path/to/results_worker1 \
+        --particles_dir /path/to/particles
+    python -m cryoPARES.inference.daemon.daemonInference \
+        --checkpoint_dir /path/to/checkpoint --results_dir /path/to/results_worker2 \
+        --particles_dir /path/to/particles
+
+    # Worker on a named queue from a remote server
+    python -m cryoPARES.inference.daemon.daemonInference \
+        --checkpoint_dir /path/to/checkpoint --results_dir /path/to/results_pipe2 \
+        --net_address 192.168.1.10 --net_port 51000 --net_authkey mysecret \
+        --net_queue_name my_pipeline
+    ```
 
 4.  **Materialize the Volume:**
 
@@ -364,8 +420,9 @@ The arguments accepted by `daemonInference` are mostly the same that the ones ac
     The script will combine all the available partial results.
 
     ```bash
-    python -m cryoPARES.inference.daemon.materializePartialResults --partial_outputs_dirs /path/to/results_worker1/ /path/to/results_worker2 \
-     --output_mrc /path/to/final_map.mrc --output_star /path/to/final_particles.star
+    python -m cryoPARES.inference.daemon.materializePartialResults \
+        --partial_outputs_dirs /path/to/results_worker1/ /path/to/results_worker2 \
+        --output_mrc /path/to/final_map.mrc --output_star /path/to/final_particles.star
     ```
 
 ### Utility Tools

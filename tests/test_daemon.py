@@ -4,6 +4,7 @@ import subprocess
 import sys
 import time
 import pytest
+import pandas as pd
 from pathlib import Path
 import signal
 import torch
@@ -84,12 +85,13 @@ def dummy_checkpoint(tmp_path_factory):
             "skip_reconstruction": False,
             "update_progressbar_n_batches": 1,
         },
-                    "datamanager": {
-                        "num_dataworkers": 0,
-                        "pin_memory": False,
-                        "particlesDataset": {                "sampling_rate_angs_for_nnet": 4.0,
+        "datamanager": {
+            "num_dataworkers": 0,
+            "pin_memory": False,
+            "particlesdataset": {
+                "sampling_rate_angs_for_nnet": 4.0,
                 "image_size_px_for_nnet": 64,
-            }
+            },
         },
         "models": {
             "image2sphere": {
@@ -252,7 +254,8 @@ def test_daemon_mode(cryo_em_data, dummy_checkpoint, reference_map, tmp_path):
         print("Adding poison pill to queue after input file...")
         try:
             from cryoPARES.inference.daemon.queueManager import connect_to_queue
-            q, m = connect_to_queue(ip="localhost", port=test_port, authkey="test_key")
+            q, m = connect_to_queue(ip="localhost", port=test_port, authkey="test_key",
+                                    queue_name="default")
             q.put(None)
             print("✓ Poison pill added - worker should exit after processing")
         except Exception as e:
@@ -319,7 +322,8 @@ def test_daemon_mode(cryo_em_data, dummy_checkpoint, reference_map, tmp_path):
             print("  Sending another poison pill...")
             try:
                 from cryoPARES.inference.daemon.queueManager import connect_to_queue
-                q, m = connect_to_queue(ip="localhost", port=test_port, authkey="test_key")
+                q, m = connect_to_queue(ip="localhost", port=test_port, authkey="test_key",
+                                        queue_name="default")
                 q.put(None)
             except Exception as e:
                 print(f"  Could not send poison pill: {e}")
@@ -412,3 +416,214 @@ def test_daemon_mode(cryo_em_data, dummy_checkpoint, reference_map, tmp_path):
         print("✓ Cleanup complete")
         print("=== Test function exiting normally ===")
         # If you see "Killed" after this, it's from pytest's own cleanup, not this test
+
+
+# ---------------------------------------------------------------------------
+# Unit test: resolve_data covers all three queue message formats
+# ---------------------------------------------------------------------------
+
+def test_resolve_data_formats():
+    """resolve_data must handle str, (optics_df, particles_df) tuple, and POISON_PILL (None)."""
+    from cryoPARES.inference.daemon.daemonInference import DaemonInferencer
+    from cryoPARES.inference.daemon.spoolingFiller import POISON_PILL
+
+    # Build a bare instance without triggering __init__ (no checkpoint needed)
+    inferencer = object.__new__(DaemonInferencer)
+    inferencer.particles_star_fname_list = []
+
+    # --- Format 1: string path ---
+    result = inferencer.resolve_data("/path/to/particles.star")
+    assert result is False
+    assert inferencer.particles_star_fname_list == ["/path/to/particles.star"]
+
+    # --- Format 2: (optics_df, particles_df) tuple → must become dict ---
+    optics_df = pd.DataFrame({"rlnVoltage": [300.0], "rlnOpticsGroup": [1]})
+    particles_df = pd.DataFrame({"rlnImageName": ["001@particles.mrcs"]})
+    inferencer.particles_star_fname_list = []
+    result = inferencer.resolve_data((optics_df, particles_df))
+    assert result is False
+    assert len(inferencer.particles_star_fname_list) == 1
+    item = inferencer.particles_star_fname_list[0]
+    assert isinstance(item, dict), "Tuple input must be converted to a dict"
+    assert set(item.keys()) == {"optics", "particles"}
+    pd.testing.assert_frame_equal(item["optics"], optics_df)
+    pd.testing.assert_frame_equal(item["particles"], particles_df)
+
+    # --- Format 3: POISON_PILL (None) → signals termination ---
+    result = inferencer.resolve_data(POISON_PILL)
+    assert result is True
+    # Poison pill must NOT be appended to the list
+    assert len(inferencer.particles_star_fname_list) == 1
+
+
+# ---------------------------------------------------------------------------
+# Integration test: worker processes an (optics_df, particles_df) tuple
+# ---------------------------------------------------------------------------
+
+def test_daemon_mode_in_memory_tuple(cryo_em_data, dummy_checkpoint, reference_map, tmp_path):
+    """Worker must correctly process an (optics_df, particles_df) tuple submitted to the queue."""
+    import starfile
+
+    results_dir = tmp_path / "daemon_tuple_results"
+    results_dir.mkdir()
+
+    test_port = find_free_port(start_port=50010)
+    cleanup_port(test_port)
+
+    queue_process = None
+    worker_process = None
+
+    try:
+        # 1. Start Queue Manager
+        queue_process = subprocess.Popen(
+            [sys.executable, "-m", "cryoPARES.inference.daemon.queueManager",
+             "--ip", "localhost", "--port", str(test_port), "--authkey", "test_key"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1,
+        )
+        time.sleep(2)
+        if queue_process.poll() is not None:
+            stdout, stderr = queue_process.communicate()
+            pytest.fail(f"Queue manager failed to start:\nstdout: {stdout}\nstderr: {stderr}")
+
+        # 2. Start Worker
+        worker_cmd = [
+            sys.executable, "-m", "cryoPARES.inference.daemon.daemonInference",
+            "--checkpoint_dir", str(dummy_checkpoint),
+            "--results_dir", str(results_dir),
+            "--reference_map", str(reference_map),
+            "--net_address", "localhost",
+            "--net_port", str(test_port),
+            "--net_authkey", "test_key",
+            "--model_halfset", "half1",
+            "--batch_size", "2",
+            "--num_dataworkers", "0",
+            "--secs_between_partial_results_written", "2",
+            "--NOT_use_cuda",
+            "--particles_dir", str(cryo_em_data),  # needed to resolve relative .mrcs paths in the in-memory df
+            "--config", "inference.skip_localrefinement=True", "inference.skip_reconstruction=True",
+        ]
+        worker_process = subprocess.Popen(
+            worker_cmd,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1,
+        )
+        time.sleep(5)
+        if worker_process.poll() is not None:
+            stdout, stderr = worker_process.communicate()
+            pytest.fail(f"Worker failed to start:\nstdout: {stdout}\nstderr: {stderr}")
+
+        # 3. Load star file and submit as (optics_df, particles_df) tuple
+        star_files = list(Path(cryo_em_data).glob("*.star"))
+        assert star_files, "No star files found in test data"
+        star_data = starfile.read(star_files[0])
+        if isinstance(star_data, dict):
+            optics_df = star_data.get("optics")
+            particles_df = star_data.get("particles", next(iter(star_data.values())))
+        else:
+            optics_df = None
+            particles_df = star_data
+
+        from cryoPARES.inference.daemon.queueManager import connect_to_queue
+        q, m = connect_to_queue(ip="localhost", port=test_port, authkey="test_key")
+        assert q is not None, "Could not connect to queue manager"
+        q.put((optics_df, particles_df))
+        print("Submitted (optics_df, particles_df) tuple to queue")
+
+        # 4. Send poison pill
+        q.put(None)
+        print("Poison pill submitted")
+
+        # 5. Wait for worker to exit
+        max_wait = 60
+        start = time.time()
+        while time.time() - start < max_wait:
+            time.sleep(1)
+            if worker_process.poll() is not None:
+                print(f"Worker exited (code: {worker_process.returncode})")
+                break
+        else:
+            pytest.fail("Worker did not exit within timeout — possible hang")
+
+        if worker_process.returncode != 0:
+            worker_stdout, worker_stderr = worker_process.communicate()
+            pytest.fail(
+                f"Worker exited with code {worker_process.returncode}\n"
+                f"stdout:\n{worker_stdout}\nstderr:\n{worker_stderr}"
+            )
+
+        # 6. Verify output
+        result_stars = list(results_dir.glob("*.star"))
+        all_files = list(results_dir.glob("*"))
+        assert result_stars, (
+            f"No result .star file produced. Files present: {[f.name for f in all_files]}"
+        )
+        for sf in result_stars:
+            assert sf.stat().st_size > 0, f"Result star file {sf.name} is empty"
+        print(f"✓ Worker produced {len(result_stars)} result star file(s) from in-memory tuple")
+
+    finally:
+        for proc, name in [(worker_process, "worker"), (queue_process, "queue")]:
+            if proc and proc.poll() is None:
+                print(f"Killing {name} (PID {proc.pid})...")
+                proc.kill()
+                proc.wait(timeout=5)
+        cleanup_port(test_port)
+
+
+# ---------------------------------------------------------------------------
+# Unit test: multiple named queues on the same server
+# ---------------------------------------------------------------------------
+
+def test_named_queues():
+    """A single queue manager server must serve independent named queues on the same port."""
+    from cryoPARES.inference.daemon.queueManager import (
+        queue_manager_server, connect_to_queue, DEFAULT_AUTHKEY
+    )
+
+    test_port = find_free_port(start_port=50020)
+    cleanup_port(test_port)
+
+    # Run the server in-process (no subprocess needed for a unit test)
+    import threading
+
+    server_ready = threading.Event()
+    server_obj = {}
+
+    def run_server():
+        import contextlib
+        with queue_manager_server("localhost", test_port, DEFAULT_AUTHKEY, None) as (srv, store):
+            server_obj["store"] = store
+            server_ready.set()
+            srv.serve_forever()
+
+    thread = threading.Thread(target=run_server, daemon=True)
+    thread.start()
+    assert server_ready.wait(timeout=5), "Server did not start in time"
+
+    try:
+        # Connect to two different named queues
+        qa, ma = connect_to_queue("localhost", test_port, DEFAULT_AUTHKEY, queue_name="alpha")
+        qb, mb = connect_to_queue("localhost", test_port, DEFAULT_AUTHKEY, queue_name="beta")
+        assert qa is not None and qb is not None, "Failed to connect to named queues"
+
+        # Items put into "alpha" must not appear in "beta" and vice-versa
+        qa.put("item_for_alpha")
+        qb.put("item_for_beta")
+
+        assert qa.get(timeout=2) == "item_for_alpha"
+        assert qb.get(timeout=2) == "item_for_beta"
+
+        # Each queue must be empty after consuming its item
+        assert qa.empty()
+        assert qb.empty()
+
+        print("✓ Named queues are independent")
+
+        # Reconnecting with the same name returns the same queue (not a fresh one)
+        qc, mc = connect_to_queue("localhost", test_port, DEFAULT_AUTHKEY, queue_name="alpha")
+        qc.put("second_item")
+        assert qa.get(timeout=2) == "second_item", "Same-name reconnect must reach the same queue"
+
+        print("✓ Reconnecting to the same queue name is stable")
+
+    finally:
+        cleanup_port(test_port)

@@ -2,6 +2,10 @@
 """
 manager_server.py - Creates and manages the shared queue server.
 This script must be run first to establish the Manager server.
+
+A single server instance can host **multiple independent queues** distinguished
+by name.  Queues are created on demand the first time a client requests a given
+name, so the server does not need to know queue names in advance.
 """
 
 import multiprocessing as mp
@@ -18,39 +22,88 @@ from typing import Optional
 DEFAULT_IP = "localhost"
 DEFAULT_PORT = 50000
 DEFAULT_AUTHKEY = 'shared_queue_key'
+DEFAULT_QUEUE_NAME = "default"
+
+# Methods exposed on the proxy returned by get_queue().
+# Must be declared explicitly so BaseProxy.__getattr__ allows them.
+_QUEUE_EXPOSED = ('put', 'get', 'get_nowait', 'put_nowait', 'empty', 'qsize', 'task_done', 'join')
 
 
 class QueueManager(BaseManager):
-    """Custom Manager class to handle our shared queue."""
+    """Custom Manager class to handle our shared queues."""
     pass
 
 
-def create_shared_queue(maxsize):
-    """Factory function to create the shared queue."""
-    if maxsize is None:
-        kwargs = {}
-    else:
-        kwargs = dict(maxsize=maxsize)
-    return Queue(**kwargs)
+def _make_queue_getter(maxsize: Optional[int]):
+    """
+    Return a ``(get_queue, store)`` pair.
+
+    ``get_queue(name)`` is the server-side callable registered with
+    :class:`QueueManager`.  It lazily creates a new :class:`queue.Queue` the
+    first time a given *name* is requested and returns the same instance on
+    subsequent calls.  ``store`` is the underlying ``{name: Queue}`` dict,
+    exposed so the server context manager can drain queues on shutdown.
+
+    :param maxsize: Maximum size for each queue (``None`` = unlimited).
+    :return: Tuple of ``(get_queue callable, queue store dict)``.
+    """
+    store: dict = {}
+
+    def get_queue(name: str = DEFAULT_QUEUE_NAME) -> Queue:
+        if name not in store:
+            kwargs = {} if maxsize is None else {"maxsize": maxsize}
+            store[name] = Queue(**kwargs)
+            print(f"Created new queue '{name}'")
+        return store[name]
+
+    return get_queue, store
 
 
-def connect_to_queue(ip=DEFAULT_IP, port=DEFAULT_PORT, authkey=DEFAULT_AUTHKEY):
-    """Connect to the shared queue managed by the server."""
+def _register_get_queue(callable_=None):
+    """
+    Register (or re-register) ``get_queue`` on :class:`QueueManager`.
+
+    ``exposed`` is always set explicitly so that the returned proxy reliably
+    exposes ``put``, ``get``, etc. regardless of Python version heuristics.
+
+    Client-side calls (``callable_=None``) skip re-registration when
+    ``get_queue`` is already registered — this prevents in-process tests
+    from accidentally overwriting the server's callable with ``None``.
+
+    :param callable_: Server-side callable (``None`` for client-only registration).
+    """
+    if callable_ is not None or 'get_queue' not in QueueManager._registry:
+        QueueManager.register(
+            'get_queue',
+            callable=callable_,
+            exposed=_QUEUE_EXPOSED,
+        )
+
+
+def connect_to_queue(ip=DEFAULT_IP, port=DEFAULT_PORT, authkey=DEFAULT_AUTHKEY,
+                     queue_name: str = DEFAULT_QUEUE_NAME):
+    """
+    Connect to a named queue on the shared queue server.
+
+    :param ip: IP address of the queue manager server.
+    :param port: Port of the queue manager server.
+    :param authkey: Authentication key for the queue manager server.
+    :param queue_name: Name of the queue to connect to.  The server creates the
+        queue on demand if it does not yet exist.
+    :return: Tuple of ``(queue proxy, manager)`` or ``(None, None)`` on failure.
+    """
     if isinstance(authkey, str):
         authkey = authkey.encode()
     try:
-        # Register the queue getter (no callable needed for client)
-        QueueManager.register('get_queue')
+        _register_get_queue()   # client-side: no callable needed
 
-        print(f"Connecting to queue {ip}:{port}")
+        print(f"Connecting to queue '{queue_name}' at {ip}:{port}")
 
-        # Connect to the manager server
         manager = QueueManager(address=(ip, port), authkey=authkey)
         manager.connect()
 
-        # Get the shared queue
-        queue = manager.get_queue()
-        return queue, manager
+        q = manager.get_queue(queue_name)
+        return q, manager
 
     except Exception as e:
         print(f"Failed to connect to manager server: {e}")
@@ -60,18 +113,27 @@ def connect_to_queue(ip=DEFAULT_IP, port=DEFAULT_PORT, authkey=DEFAULT_AUTHKEY):
 
 @contextmanager
 def queue_manager_server(ip, port, authkey, queue_maxsize):
-    """Context manager for the QueueManager server."""
+    """
+    Context manager that starts a :class:`QueueManager` server.
+
+    The server hosts multiple independent named queues.  Queues are created
+    lazily on the first client request for a given name.
+
+    Yields ``(server, queue_store)`` where *queue_store* is the live
+    ``{name: Queue}`` dict (useful for introspection in tests).
+
+    :param ip: IP address to bind the server to.
+    :param port: Port to bind the server to.
+    :param authkey: Authentication key for the server.
+    :param queue_maxsize: Maximum size for each queue (``None`` = unlimited).
+    """
     print(f"Manager Server starting (PID: {os.getpid()})")
 
-    # 1. Create the single, shared queue instance first.
-    shared_queue_instance = create_shared_queue(queue_maxsize)
-
-    # 2. Register a callable that ALWAYS returns the exact same queue instance.
-    QueueManager.register('get_queue', callable=lambda: shared_queue_instance)
+    get_queue_fn, queue_store = _make_queue_getter(queue_maxsize)
+    _register_get_queue(callable_=get_queue_fn)  # server-side: callable required
 
     if isinstance(authkey, str):
         authkey = authkey.encode()
-    # Create the manager
     manager = QueueManager(address=(ip, port), authkey=authkey)
     server = manager.get_server()
 
@@ -81,23 +143,21 @@ def queue_manager_server(ip, port, authkey, queue_maxsize):
         print(f"Queue maxsize: {queue_maxsize}")
         print("\nWaiting for client connections...")
         print("Press Ctrl+C to stop the server\n")
-        yield server, shared_queue_instance  # Yield the actual shared queue
+        yield server, queue_store
     finally:
         print("Initiating server cleanup...")
         try:
-            # Drain the queue (optional)
-            while not shared_queue_instance.empty():
-                try:
-                    shared_queue_instance.get_nowait()
-                    print("Removed an item from the queue")
-                except queue.Empty:
-                    break
-            print("Queue cleared")
-
-            # The manager server is shut down by the signal handler
-            # and the serve_forever() method's finally block.
-            # manager.shutdown() is only for managers started with
-            # manager.start() and is not needed here.
+            for name, q in queue_store.items():
+                drained = 0
+                while not q.empty():
+                    try:
+                        q.get_nowait()
+                        drained += 1
+                    except queue.Empty:
+                        break
+                if drained:
+                    print(f"Removed {drained} item(s) from queue '{name}'")
+            print("All queues cleared")
             print("Manager server shut down")
         except Exception as e:
             print(f"Error during server cleanup: {e}")
@@ -106,26 +166,31 @@ def queue_manager_server(ip, port, authkey, queue_maxsize):
 def signal_handler(signum, frame):
     """Handle Ctrl+C or SIGTERM gracefully."""
     print("\nReceived signal, shutting down via context manager...")
-    # Let the context manager handle cleanup by exiting
     sys.exit(0)
 
 
 @contextmanager
-def queue_connection(ip=DEFAULT_IP, port=DEFAULT_PORT, authkey=DEFAULT_AUTHKEY):
-    """Context manager for connecting to the shared queue."""
+def queue_connection(ip=DEFAULT_IP, port=DEFAULT_PORT, authkey=DEFAULT_AUTHKEY,
+                     queue_name: str = DEFAULT_QUEUE_NAME):
+    """
+    Context manager for connecting to a named queue on the shared server.
 
-    q, m = connect_to_queue(ip, port, authkey)
+    :param ip: IP address of the queue manager server.
+    :param port: Port of the queue manager server.
+    :param authkey: Authentication key for the queue manager server.
+    :param queue_name: Name of the queue to connect to.  The server creates the
+        queue on demand if it does not yet exist.
+    """
+    q, m = connect_to_queue(ip, port, authkey, queue_name)
     if q is None or m is None:
-        print("Failed to connect to queue. Exiting.")
         raise RuntimeError("Queue connection failed")
 
     try:
         yield q
     finally:
         try:
-            # No explicit shutdown or close needed; rely on garbage collection
             q._manager = None  # Break reference to manager
-            del m  # Dereference manager to allow cleanup
+            del m
             print("Client manager connection cleanup complete")
         except Exception as e:
             print(f"Error during client cleanup: {e}")
@@ -147,35 +212,34 @@ def get_all_available_items(q: mp.Queue):
             items.append(q.get_nowait())
             time.sleep(0.001)
     except queue.Empty:
-        # The queue is now empty, return the collected items.
         return items
     return items
 
 
-def main(ip:str=DEFAULT_IP, port:int=DEFAULT_PORT, authkey:str=DEFAULT_AUTHKEY,
-         queue_maxsize: Optional[int]=None):
+def main(ip: str = DEFAULT_IP, port: int = DEFAULT_PORT, authkey: str = DEFAULT_AUTHKEY,
+         queue_maxsize: Optional[int] = None):
     """
+    Start the queue manager server.
 
-    :param ip:
-    :param port:
-    :param authkey: a password to use the queue
-    :param queue_maxsize:
-    :return:
+    A single server can host multiple independent named queues on the same port.
+    Queues are created on demand when first requested by a client.
+
+    :param ip: IP address to bind the server to.
+    :param port: Port to bind the server to.
+    :param authkey: Authentication key (password) for the server.
+    :param queue_maxsize: Maximum number of items per queue (``None`` = unlimited).
     """
     try:
-        # Set up signal handlers to allow context manager cleanup
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
 
-        # Use the context manager to run the server
-        with queue_manager_server(ip, port, authkey, queue_maxsize) as (server, queue):
+        with queue_manager_server(ip, port, authkey, queue_maxsize) as (server, _queue_store):
             server.serve_forever()
     except Exception as e:
         print(f"Error starting manager server: {e}")
         return 1
 
     return 0
-
 
 
 if __name__ == "__main__":

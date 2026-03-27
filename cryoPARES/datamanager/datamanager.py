@@ -6,7 +6,7 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader, BatchSampler, Sampler, RandomSampler, ConcatDataset, DistributedSampler, \
     SequentialSampler
-from typing import Union, Literal, Optional, Tuple, Iterable, List
+from typing import Union, Literal, Optional, Tuple, Iterable, List, Dict
 
 import pytorch_lightning as pl
 from autoCLI_config import inject_defaults_from_config, CONFIG_PARAM
@@ -54,7 +54,7 @@ class DataManager(pl.LightningDataModule):
     DataManager: A LightningDataModule that wraps a ParticlesDataset
     """
     @inject_defaults_from_config(main_config.datamanager, update_config_with_args=False)
-    def __init__(self, star_fnames: List[FNAME_TYPE] | FNAME_TYPE | List[Tuple[pd.DataFrame, pd.DataFrame]],
+    def __init__(self, star_fnames: List[FNAME_TYPE] | FNAME_TYPE | List[Dict[str, pd.DataFrame]],
                  symmetry:str,
                  particles_dir: Optional[List[FNAME_TYPE]] | FNAME_TYPE,
                  halfset: Optional[Literal[1, 2]],

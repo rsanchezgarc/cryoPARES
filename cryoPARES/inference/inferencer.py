@@ -691,7 +691,7 @@ class SingleInferencer:
             particles_md_list.append(particles_md)
             optics_md_list.append(optics_md)
             if self.results_dir is not None and save_to_file:
-                if particlesSet.starFname is not None:
+                if isinstance(particlesSet.starFname, (str, os.PathLike)):
                     basename = os.path.basename(particlesSet.starFname).removesuffix(".star")
                 else:
                     basename = "particles%d" % self._last_dataset_processed

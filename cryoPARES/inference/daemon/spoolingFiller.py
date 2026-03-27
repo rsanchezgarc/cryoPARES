@@ -9,7 +9,7 @@ import glob
 from queue import Empty
 from contextlib import contextmanager
 from multiprocessing.managers import BaseManager
-from cryoPARES.inference.daemon.queueManager import DEFAULT_IP, DEFAULT_PORT, DEFAULT_AUTHKEY, queue_connection
+from cryoPARES.inference.daemon.queueManager import DEFAULT_IP, DEFAULT_PORT, DEFAULT_AUTHKEY, DEFAULT_QUEUE_NAME, queue_connection
 
 
 POISON_PILL = None
@@ -41,6 +41,7 @@ def main(
         ip: str = DEFAULT_IP,
         port: int = DEFAULT_PORT,
         authkey: str = DEFAULT_AUTHKEY,
+        queue_name: str = DEFAULT_QUEUE_NAME,
         pattern: str = "*.star",
         check_interval: int = 10
 ):
@@ -51,12 +52,13 @@ def main(
     :param ip: Queue manager IP address
     :param port: Queue manager port
     :param authkey: Queue manager authentication key
+    :param queue_name: Name of the queue to submit jobs to
     :param pattern: File pattern to match
     :param check_interval: Seconds between directory checks
     """
 
     try:
-        with queue_connection(ip=ip, port=port, authkey=authkey) as queue:
+        with queue_connection(ip=ip, port=port, authkey=authkey, queue_name=queue_name) as queue:
             print(f"Spooler started, monitoring {directory} for {pattern} files...")
 
             for star_file in monitor_directory(directory, pattern, check_interval):

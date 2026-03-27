@@ -7,14 +7,16 @@ from pathlib import Path
 import torch
 import yaml
 from lightning import seed_everything
-from typing import Optional, List, Literal
+from typing import Optional, List, Literal, Tuple, Union, Dict
+
+import pandas as pd
 
 from cryoPARES import constants
 from autoCLI_config import ConfigOverrideSystem
 from autoCLI_config import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.inference.daemon.queueManager import queue_connection, get_all_available_items, DEFAULT_IP, \
-    DEFAULT_PORT, DEFAULT_AUTHKEY
+    DEFAULT_PORT, DEFAULT_AUTHKEY, DEFAULT_QUEUE_NAME
 from cryoPARES.inference.daemon.spoolingFiller import POISON_PILL
 from cryoPARES.inference.inferencer import SingleInferencer
 from cryoPARES.utils.paths import get_most_recent_file
@@ -28,6 +30,7 @@ class DaemonInferencer(SingleInferencer):
                  net_address:str = DEFAULT_IP,
                  net_port: int = DEFAULT_PORT,
                  net_authkey: Optional[str] = DEFAULT_AUTHKEY,
+                 net_queue_name: str = DEFAULT_QUEUE_NAME,
                  model_halfset: Literal["half1", "half2"] = "half1",
                  particles_dir: Optional[str] = None,
                  batch_size: int = CONFIG_PARAM(),
@@ -37,6 +40,7 @@ class DaemonInferencer(SingleInferencer):
                  compile_model: bool = False,
                  top_k_poses_nnet: int = CONFIG_PARAM(),
                  top_k_poses_localref: int = CONFIG_PARAM(config=main_config.projmatching),
+                 grid_distance_degs: float = CONFIG_PARAM(config=main_config.projmatching),
                  reference_map: Optional[str] = None,
                  reference_mask: Optional[str] = None,
                  directional_zscore_thr: Optional[float] = CONFIG_PARAM(),
@@ -54,6 +58,7 @@ class DaemonInferencer(SingleInferencer):
         :param net_address: Network address of the queue manager.
         :param net_port: Network port of the queue manager.
         :param net_authkey: Network authentication key for the queue manager.
+        :param net_queue_name: Name of the queue to consume from. Allows multiple independent queues on the same server/port.
         :param model_halfset: Specifies which half-set of the model to use ("half1", "half2").
         :param particles_dir: Directory where the particle images are located. If None, paths in the STAR file are assumed to be absolute.
         :param batch_size: The number of particles to process in each batch.
@@ -63,6 +68,7 @@ class DaemonInferencer(SingleInferencer):
         :param compile_model: Whether to compile the model using `torch.compile` for potential speed-up.
         :param top_k_poses_nnet: The number of top predictions to predict with the nn for each particle.
         :param top_k_poses_localref: The number of top predictions to return after local refinement.
+        :param grid_distance_degs: The size of the local refinement grid in degrees. Grid will go from -grid_distance_degs to +grid_distance_degs
         :param reference_map: Path to the reference map for local refinement. If not provided, it will be loaded from the checkpoint.
         :param reference_mask: Path to the mask of the reference map. Used only for FSC calculation.
         :param directional_zscore_thr: The threshold for the directional Z-score to filter particles.
@@ -70,7 +76,7 @@ class DaemonInferencer(SingleInferencer):
         :param skip_reconstruction: Whether to skip 3D reconstruction from the inferred poses.
         :param show_debug_stats: Whether to print debug statistics, such as rotation errors if ground truth in the starfile.
         :param secs_between_partial_results_written: Partial results are saved from RAM to disk every few seconds
-        :param resubmit_poison_pill: If True, posion pills are re-submitted, to ensure that all workers will die
+        :param resubmit_poison_pill: If True, poison pills are re-submitted, to ensure that all workers will die
         """
 
         super().__init__(particles_star_fname=None,
@@ -86,6 +92,7 @@ class DaemonInferencer(SingleInferencer):
                          compile_model=compile_model,
                          top_k_poses_nnet=top_k_poses_nnet,
                          top_k_poses_localref=top_k_poses_localref,
+                         grid_distance_degs=grid_distance_degs,
                          reference_map=reference_map,
                          reference_mask=reference_mask,
                          directional_zscore_thr=directional_zscore_thr,
@@ -98,6 +105,7 @@ class DaemonInferencer(SingleInferencer):
         self.net_address = net_address
         self.net_port = net_port
         self.net_authkey = net_authkey
+        self.net_queue_name = net_queue_name
         self.secs_between_partial_results_written = secs_between_partial_results_written
         self.resubmit_poison_pill = resubmit_poison_pill
         self.particles_star_fname_list = []
@@ -112,10 +120,26 @@ class DaemonInferencer(SingleInferencer):
     def run(self):
         self._run()
 
-    def resolve_data(self, starfname:Optional[str]):
-        if starfname is POISON_PILL:
+    def resolve_data(self, data: Union[str, Tuple[pd.DataFrame, pd.DataFrame], None]) -> bool:
+        """
+        Processes a single item received from the queue.
+
+        Accepted formats:
+        - ``None`` (POISON_PILL): signals termination; returns ``True``.
+        - ``str``: path to a RELION ``.star`` file; appended to the pending list.
+        - ``Tuple[pd.DataFrame, pd.DataFrame]``: ``(optics_df, particles_df)`` pair already
+          loaded in memory.  Converted to ``{"optics": optics_df, "particles": particles_df}``
+          so it can be consumed directly by ``ParticlesStarSet`` without disk I/O.
+
+        :param data: Item dequeued from the shared job queue.
+        :return: ``True`` if the worker should terminate, ``False`` otherwise.
+        """
+        if data is POISON_PILL:
             return True
-        self.particles_star_fname_list.append(starfname)
+        if isinstance(data, tuple):
+            optics_df, particles_df = data
+            data = {"optics": optics_df, "particles": particles_df}
+        self.particles_star_fname_list.append(data)
         return False
 
     def _setup_dataloader(self, rank: Optional[int] = None):
@@ -131,7 +155,8 @@ class DaemonInferencer(SingleInferencer):
         datasets = []
         particles_md_list = []
 
-        with queue_connection(ip=self.net_address, port=self.net_port, authkey=self.net_authkey) as q:
+        with queue_connection(ip=self.net_address, port=self.net_port, authkey=self.net_authkey,
+                              queue_name=self.net_queue_name) as q:
             # The first batch needs to be treated differently to set up the reconstructor
             data = q.get()
             print("First data item arrived")
@@ -148,7 +173,8 @@ class DaemonInferencer(SingleInferencer):
                 # 1) If we already have files pending, process them first
                 if self.particles_star_fname_list:
                     print("processing:")
-                    print("\n".join(self.particles_star_fname_list))
+                    print("\n".join(str(item) if not isinstance(item, dict) else "<in-memory particles table>"
+                                    for item in self.particles_star_fname_list))
                     dataloader = self._setup_dataloader()
                     if dataloader:
                         all_results_list.append(

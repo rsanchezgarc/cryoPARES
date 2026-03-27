@@ -207,11 +207,13 @@ class SingleInferencer:
             normalizer_path = f"{actual_halfset}/checkpoints/{BEST_DIRECTIONAL_NORMALIZER}"
             percentilemodel = self._checkpoint_reader.load_torch(normalizer_path, weights_only=False)
         except FileNotFoundError:
-            assert self.directional_zscore_thr is None, ("Error, if no percentilemodel available, you cannot set a "
-                                                         "directional_zscore_thr")
-            warnings.warn(f"No percentilemodel found at {normalizer_path}. Directional normalized z-scores"
-                          f" won't be computed!!!")
-            percentilemodel = None
+            raise RuntimeError(
+                f"Directional normalizer not found at '{normalizer_path}'. "
+                f"This file is created at the end of training (on_train_end). "
+                f"Your checkpoint was likely trained with an older version of cryoPARES that did not "
+                f"produce this file. Please re-train the model to generate the normalizer, "
+                f"or use a checkpoint that already includes '{BEST_DIRECTIONAL_NORMALIZER}'."
+            )
 
         # Get reference map
         if self.reference_map is None:
@@ -687,6 +689,18 @@ class SingleInferencer:
                 particles_md.loc[ids_to_update_in_df, angles_names] = eulerdegs
                 particles_md.loc[ids_to_update_in_df, shiftsXYangs_names] = shiftsXYangs
                 particles_md.loc[ids_to_update_in_df, confide_name] = result_arrays["score"][result_indices, k].numpy()
+
+            # Remove particles that were not processed (failed the directional_zscore_thr filter).
+            # Without this, the output STAR contains all input particles but the low-confidence
+            # ones have <NA> for rlnDirectionalZscore and unchanged (input) angles, which is
+            # confusing.  Keeping only processed particles matches the documented behaviour:
+            # "Particles with scores below this are discarded as low-confidence".
+            if len(ids_to_update_in_df) < len(particles_md):
+                n_discarded = len(particles_md) - len(ids_to_update_in_df)
+                print(f"Discarding {n_discarded} particles that did not pass the "
+                      f"directional_zscore_thr={self.directional_zscore_thr} filter.")
+                particlesSet.particles_md = particles_md.loc[ids_to_update_in_df]
+                particles_md = particlesSet.particles_md
 
             particles_md_list.append(particles_md)
             optics_md_list.append(optics_md)

@@ -208,7 +208,7 @@ class Trainer:
                  # image_size_px_for_nnet is REQUIRED, but can be provided via --config or CLI.
                  # Uses is_required_arg_for_cli_fun to check sys.argv and determine if it
                  # should be marked as required for argparse.
-                 image_size_px_for_nnet: Optional[int] = CONFIG_PRARAM(
+                 image_size_px_for_nnet: Optional[int] = CONFIG_PARAM(
                      config=main_config.datamanager.particlesdataset,
                      is_required_arg_for_cli_fun=lambda: not _check_if_in_config_args('datamanager.particlesdataset.image_size_px_for_nnet')
                  ),

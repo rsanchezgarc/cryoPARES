@@ -186,7 +186,7 @@ def distributed_inference(
                 particles_star_fname, d_half, subset_idxs=subset_idxs
             )
             n_particles_total = len(all_indices)
-            print(f"Total particles to process for data {d_half}: {n_particles_total}")
+            print(f"Total particles to process in {os.path.basename(particles_star_fname)}: {n_particles_total}")
 
             # Shared reconstructor buffers (optional)
             shared_numerator = shared_weights = shared_ctfsq = None

@@ -215,6 +215,10 @@ def compute_fsc(
             raise ValueError( "Input maps must have the same shape. Use the --resize_maps flag to enable automatic resizing.")
         assert vol1.shape == vol2.shape, "Map resizing failed. Shapes still do not match."
 
+    # --- Ensure volumes are cubic ---
+    if not (vol1.shape[0] == vol1.shape[1] == vol1.shape[2]):
+        raise ValueError(f"Input volumes must be cubic. Current shape: {vol1.shape}")
+
     if mask is not None:
         assert vol1.shape == mask.shape, "Mask must have the same shape as the maps."
         vol1 = np.multiply(vol1, mask)

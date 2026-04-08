@@ -47,7 +47,8 @@ class ParticlesDataset(Dataset, ABC):
                                          "concat_phase_flip", "concat_ctf_multiply"] = CONFIG_PARAM(),
                  reduce_symmetry_in_label:bool = CONFIG_PARAM(),
                  return_ori_imagen: bool = False,
-                 subset_idxs: Optional[List[int]] = None
+                 subset_idxs: Optional[List[int]] = None,
+                 require_angles: bool = False
                  ):
 
         super().__init__()
@@ -69,7 +70,8 @@ class ParticlesDataset(Dataset, ABC):
         self.min_maxProb = min_maxProb
         self.reduce_symmetry_in_label = reduce_symmetry_in_label
         self.return_ori_imagen = return_ori_imagen
-        
+        self.require_angles = require_angles
+
         self.symmetry = symmetry.upper()
         self.halfset = halfset
         self.subset_idxs = subset_idxs
@@ -122,6 +124,14 @@ class ParticlesDataset(Dataset, ABC):
         part_set = self.load_ParticlesStarSet()
         self._particles = part_set
         assert len(part_set) > 0, "Error, no particles were found in the star file"
+
+        if self.require_angles:
+            missing = [name for name in RELION_ANGLES_NAMES if name not in part_set.particles_md.columns]
+            if missing:
+                raise ValueError(
+                    f"Error, the star file is missing angle columns required for training: {missing}. "
+                    f"Training requires pre-aligned particles with poses (rlnAngleRot, rlnAngleTilt, rlnAnglePsi)."
+                )
 
         if self.subset_idxs is not None:
             self._particles = self._particles.createSubset(idxs=self.subset_idxs)

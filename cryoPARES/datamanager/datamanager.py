@@ -124,7 +124,8 @@ class DataManager(pl.LightningDataModule):
                                                      symmetry=self.symmetry, halfset=self.halfset,
                                                      store_data_in_memory=store_data_in_memory,
                                                      return_ori_imagen=self.return_ori_imagen,
-                                                     subset_idxs=self._subset_idxs)
+                                                     subset_idxs=self._subset_idxs,
+                                                     require_angles=partitionName in ["train", "val"])
 
             if self.is_global_zero and self.save_train_val_partition_dir is not None:
                 dirname = osp.join(self.save_train_val_partition_dir, partitionName

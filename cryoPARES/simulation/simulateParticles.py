@@ -57,18 +57,16 @@ def _write_output_star(
         parts_df = parts_df.head(n_first_particles)
     optics_df = pset.optics_md if hasattr(pset, "optics_md") else None
 
-    # Generate image names for all stacks
-    # Optimization: avoid opening files - we know the count from images_per_file
-    total_particles = len(parts_df)
+    # Generate image names for all stacks.
+    # Read the actual image count from each file header — this is necessary for
+    # multi-GPU runs where every shard's last file may have fewer than
+    # images_per_file images (not just the overall last file).
     image_names_all: List[str] = []
-    particles_remaining = total_particles
-
     for p in stack_paths:
-        # All files except potentially the last have images_per_file images
-        n_in_file = min(images_per_file, particles_remaining)
+        with mrcfile.open(p, header_only=True, permissive=True) as mrc:
+            n_in_file = int(mrc.header.nz)
         base = os.path.basename(p)
         image_names_all.extend([f"{k + 1}@{base}" for k in range(n_in_file)])
-        particles_remaining -= n_in_file
 
     # Update particle dataframe with new image names
     out_star = os.path.join(output_dir, f"{basename}.star")

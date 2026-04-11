@@ -171,6 +171,13 @@ class ParticlesDataset(Dataset, ABC):
     @property
     def sampling_rate(self) -> float:
         """The particle image sampling rate in A/pixels"""
+        # TODO: This returns sampling_rate_angs_for_nnet (the NN target rate) rather than the
+        #  original particle pixel size. For projmatching, which uses the original full-size images
+        #  (BATCH_ORI_IMAGE_NAME), this forces sampling_rate_angs_for_nnet to be set to match the
+        #  reference voxel size even though the NN size is irrelevant. As a workaround,
+        #  ProjectionMatcher.preprocess_particles() auto-sets these values from the reference volume.
+        #  Long-term, a simpler ParticlesDataset variant for standalone projmatching (without
+        #  NN-specific parameters) would be cleaner — see TODO in projMatcher.py::preprocess_particles.
         if self.image_size_px_for_nnet is None:
             return self.particles.sampling_rate
         else:

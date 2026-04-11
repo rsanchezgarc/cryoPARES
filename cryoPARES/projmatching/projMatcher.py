@@ -31,7 +31,10 @@ from cryoPARES.projmatching.projmatchingUtils.loggers import getWorkerLogger
 from cryoPARES.projmatching.projmatchingUtils.myProgressBar import myTqdm as tqdm
 
 from cryoPARES.projmatching.projmatchingUtils.filterToResolution import low_pass_filter_fname
-from cryoPARES.projmatching.projmatchingUtils.fourierOperations import correlate_dft_2d, compute_dft_3d, _real_to_fourier_2d
+from cryoPARES.projmatching.projmatchingUtils.fourierOperations import (
+    correlate_dft_2d, compute_dft_3d, _real_to_fourier_2d, _build_whitening_map_2d,
+    _mask_for_dft_2d,
+)
 
 REPORT_ALIGNMENT_DISPLACEMENT = True
 USE_TWO_FLOAT32_FOR_COMPLEX = True
@@ -80,10 +83,42 @@ class ProjectionMatcher(nn.Module):
         self.max_shift_fraction = main_config.projmatching.max_shift_fraction
         self.mask_radius_angs = mask_radius_angs
 
+        self.use_subpixel_shifts = main_config.projmatching.use_subpixel_shifts
+        self.zero_dc = main_config.projmatching.zero_dc
+        self.spectral_whitening = main_config.projmatching.spectral_whitening
+        self.fftfreq_min = main_config.projmatching.fftfreq_min
+        self.whitening_warmup_batches = main_config.projmatching.whitening_warmup_batches
+        self.rotation_composition = main_config.projmatching.rotation_composition
+        self.use_fibo_grid = main_config.projmatching.use_fibo_grid
+        assert self.rotation_composition in ("euler_add", "pre_multiply", "post_multiply"), \
+            f"Unknown rotation_composition: {self.rotation_composition!r}"
+        if self.use_fibo_grid and self.rotation_composition == "euler_add":
+            # Fibonacci grid lives in SO(3) rotation-matrix space; euler_add is incompatible.
+            print("[projmatching] use_fibo_grid=True requires rotation matrix composition; "
+                  "switching rotation_composition from 'euler_add' to 'pre_multiply'.")
+            self.rotation_composition = "pre_multiply"
+        # Whitening is estimated from the first N batches of particles (lazy, warm-up averaged).
+        # Averaging over multiple batches smooths out per-defocus CTF oscillations (analogous to
+        # RELION's per-optics-group noise model, but here we use a single global profile and let
+        # the averaging across different-defocus particles cancel oscillations).
+        # TODO: Future improvement — split by optics group (CTF similarity) and build per-group
+        #   profiles, then blend by defocus proximity, matching RELION's noise model more closely.
+        # Reset at the start of each align_star() call so each dataset gets its own estimate.
+        self._whitening_amp_sum: torch.Tensor | None = None
+        self._whitening_batches_seen: int = 0
+
         self._store_reference_vol(reference_vol, pixel_size)
         self.verbose = verbose
         self.correct_ctf = correct_ctf
         self.mainLogger = getWorkerLogger(self.verbose)
+
+        if main_config.projmatching.disable_inductor_shape_padding:
+            try:
+                import torch._inductor.config as _inductor_cfg
+                _inductor_cfg.shape_padding = False
+            except Exception:
+                pass
+
         if USE_TWO_FLOAT32_FOR_COMPLEX:
             if main_config.projmatching.disable_compile_projectVol:
                 from cryoPARES.projmatching.projmatchingUtils.extract_central_slices_as_real import \
@@ -118,6 +153,33 @@ class ProjectionMatcher(nn.Module):
     @property
     def device(self):
         return self.reference_vol.device
+
+    def _get_so3_delta_rotmats(self, device: torch.device) -> torch.Tensor:
+        """Return the delta search grid as rotation matrices (nDelta, 3, 3).
+
+        Uses the Fibonacci ω-ball grid when `use_fibo_grid=True`, otherwise converts
+        the Cartesian Euler grid to rotation matrices. Result is cached on `self`.
+        """
+        if (not hasattr(self, "_so3_delta_rotmats_cache") or
+                self._so3_delta_rotmats_cache.device != device):
+            if self.use_fibo_grid:
+                from cryoPARES.geometry.grids import so3_grid_near_identity_fibo
+                rotmats, _ = so3_grid_near_identity_fibo(
+                    distance_deg=self.grid_distance_degs,
+                    spacing_deg=self.grid_step_degs,
+                    use_small_aprox=True,
+                    output="matrix",
+                )
+                rotmats = rotmats.to(device, dtype=torch.float32)
+                # The ω-ball shell centres start at > 0 rad, so identity is not sampled.
+                # Prepend it explicitly: without identity, Scenario A (GT input) always shifts
+                # by at least one shell radius, causing a guaranteed angular regression.
+                identity = torch.eye(3, device=device, dtype=torch.float32).unsqueeze(0)
+                self._so3_delta_rotmats_cache = torch.cat([identity, rotmats], dim=0)
+            else:
+                euler_grid = self._get_so3_delta(device)  # (nDelta, 3)  in degrees
+                self._so3_delta_rotmats_cache = get_rotmat(euler_grid, device=device)
+        return self._so3_delta_rotmats_cache
 
     def _get_so3_delta(self, device: torch.device, as_rotmats=False):
         """
@@ -187,6 +249,19 @@ class ProjectionMatcher(nn.Module):
         assert self.image_shape[-2] % 2 == 0, "Only even boxsizes are allowed"
         self.half_particle_size = 0.5 * self.image_shape[-2]
 
+        # --- Compute 2D whitening map (always built, used only when spectral_whitening=True) ---
+        # Compute fftfreq_max inline (same formula as used later in _store_reference_vol)
+        _fftfreq_max = (
+            min(pixel_size / self.max_resolution_A, 0.5) if self.max_resolution_A is not None else 0.5
+        )
+        # Use the complex reference_vol (before view_as_real storage) for amplitude spectrum
+        _vol_complex = reference_vol if reference_vol.is_complex() else torch.view_as_complex(
+            reference_vol.permute([1, 2, 3, 0]).contiguous()
+        )
+        whitening_map_2d = _build_whitening_map_2d(_vol_complex, img_size=vol_shape[-1],
+                                                   fftfreq_max=_fftfreq_max)
+        self.register_buffer("whitening_map", whitening_map_2d)  # (1, H, W//2+1) complex-safe float
+
         # Prepare mask
         radius_px = self.image_shape[-2] // 2
         if self.mask_radius_angs is not None:
@@ -199,6 +274,22 @@ class ProjectionMatcher(nn.Module):
             self.fftfreq_max = min(self.vol_voxel_size / self.max_resolution_A, 0.5)
         else:
             self.fftfreq_max = 0.5
+
+        # Pre-compute band mask for fftshifted rfft DFTs (used when fftfreq_min > 0).
+        # Always built so it can be applied in forward() without branching on __init__.
+        img_size = vol_shape[-1]
+        max_freq_px = int(round(self.fftfreq_max * img_size))
+        min_freq_px = int(round(self.fftfreq_min * img_size)) if self.fftfreq_min > 0 else 0
+        # band_mask is computed on CPU at init; moved to device in forward() via self.to(device)
+        band_mask = _mask_for_dft_2d(
+            img_shape=tuple(self.image_shape),
+            max_freq_pixels=max_freq_px,
+            min_freq_pixels=min_freq_px if min_freq_px > 0 else None,
+            rfft=True,
+            fftshifted=True,
+            device=torch.device("cpu"),
+        )
+        self.register_buffer("band_mask", band_mask)  # (1, H, W//2+1)
 
     def _projectF(self, rotMats: torch.Tensor) -> torch.Tensor:
 
@@ -219,7 +310,10 @@ class ProjectionMatcher(nn.Module):
         return projs
 
     def correlateF(self, parts: torch.Tensor, projs: torch.Tensor):
-        return self._correlateCrossCorrelation(parts, projs)
+        whitening_filter = self.whitening_map if self.spectral_whitening else None
+        return self._correlateCrossCorrelation(parts, projs,
+                                               zero_dc=self.zero_dc,
+                                               whitening_filter=whitening_filter)
 
     def _apply_ctfF(self, projs, ctf):
         return projs * ctf
@@ -235,12 +329,17 @@ class ProjectionMatcher(nn.Module):
         else:
             return None
 
-    def _correlateCrossCorrelation(self, parts: torch.Tensor, projs: torch.Tensor):
-        corrs = self.correlate_dft_2d(parts, projs)
+    def _correlateCrossCorrelation(self, parts: torch.Tensor, projs: torch.Tensor,
+                                    zero_dc: bool = False,
+                                    whitening_filter: torch.Tensor | None = None):
+        corrs = self.correlate_dft_2d(parts, projs,
+                                       zero_dc=zero_dc,
+                                       whitening_filter=whitening_filter)
         b, options, l0, l1 = corrs.shape
         h0, h1, w0, w1 = _get_begin_end_from_max_shift(corrs.shape[-2:], self.max_shift_fraction)
         maxcorr, maxcorrIdxs = self._extract_ccor_max(corrs.reshape(-1, *corrs.shape[-2:]),
-                                                      h0, h1, w0, w1)
+                                                      h0, h1, w0, w1,
+                                                      use_subpixel=self.use_subpixel_shifts)
 
         del corrs
         return maxcorr.reshape(b, options), maxcorrIdxs.reshape(b, options, 2)
@@ -267,6 +366,24 @@ class ProjectionMatcher(nn.Module):
             subset_idxs=None
     ):
 
+        # Auto-configure dataset pixel size and box size to match the reference volume.
+        # Projmatching uses the original full-size images (BATCH_ORI_IMAGE_NAME), so
+        # sampling_rate_angs_for_nnet must equal the reference voxel size and
+        # image_size_px_for_nnet just needs to be a valid non-None value (unused by projmatching).
+        # TODO: Long-term, implement a simpler ParticlesDataset variant for standalone projmatching
+        #  that does not require NN-specific parameters (image_size_px_for_nnet,
+        #  sampling_rate_angs_for_nnet) and reads pixels at their native size/rate directly.
+        ref_voxel_size = self.vol_voxel_size
+        ref_box_size = int(self.ori_vol_shape[0])
+        ds_cfg = main_config.datamanager.particlesdataset
+        if not np.isclose(ds_cfg.sampling_rate_angs_for_nnet, ref_voxel_size, atol=1e-2):
+            print(f"[projmatching] Auto-setting sampling_rate_angs_for_nnet="
+                  f"{ref_voxel_size:.4f} from reference volume (was {ds_cfg.sampling_rate_angs_for_nnet})")
+            ds_cfg.sampling_rate_angs_for_nnet = ref_voxel_size
+        if ds_cfg.image_size_px_for_nnet is None:
+            print(f"[projmatching] Auto-setting image_size_px_for_nnet={ref_box_size} from reference volume")
+            ds_cfg.image_size_px_for_nnet = ref_box_size
+
         from cryoPARES.datamanager.datamanager import DataManager
         dm = DataManager(particles,
                          symmetry="C1",
@@ -292,16 +409,71 @@ class ProjectionMatcher(nn.Module):
         fparts = _real_to_fourier_2d(imgs * self.rmask,
                                      view_complex_as_two_float32=USE_TWO_FLOAT32_FOR_COMPLEX)
 
-        eulerDegs = get_eulers(rotmats)
-        expanded_eulerDegs = (self._get_so3_delta(eulerDegs.device).unsqueeze(0).unsqueeze(0) +
-                              eulerDegs.unsqueeze(2)) #BxTopKxRotsx3
-        bsize = expanded_eulerDegs.size(0)
-        n_input_angles = expanded_eulerDegs.size(2)
-        expanded_eulerDegs = expanded_eulerDegs.reshape(bsize, -1, 3)  # unrolling all the input angles into one dim
-        # TODO: Remove duplicate angles if n_input_angles > 1. Duplicates may happen if several topK poses were provided as input. Affects speed
-        # Also, for large batches, there could be redundant angles (to a certain precision)
-        projs = self._compute_projections_from_euleres(expanded_eulerDegs.reshape(-1, 3))[0]
+        # Apply frequency band mask (high-pass ring) when fftfreq_min > 0
+        if self.fftfreq_min > 0:
+            if USE_TWO_FLOAT32_FOR_COMPLEX:
+                fparts = fparts * self.band_mask.unsqueeze(-1)
+            else:
+                fparts = fparts * self.band_mask
 
+        # Particle-adaptive whitening warm-up: accumulate amplitude spectrum over the first
+        # `whitening_warmup_batches` batches, then freeze the map.
+        # Averaging over many batches smooths out per-defocus CTF oscillations — particles from
+        # different micrographs have different defocus values, so their CTF envelopes partially
+        # cancel when averaged, leaving a smooth amplitude profile (analogous to RELION's
+        # per-optics-group noise estimation averaged over many particles per group).
+        # Applied to projections only (not particles) to avoid amplifying particle noise.
+        if self.spectral_whitening and self._whitening_batches_seen < self.whitening_warmup_batches:
+            with torch.no_grad():
+                if USE_TWO_FLOAT32_FOR_COMPLEX:
+                    fparts_complex = torch.view_as_complex(fparts.contiguous())
+                else:
+                    fparts_complex = fparts
+                # Batch-mean amplitude; accumulate into a running sum
+                amp = fparts_complex.abs().mean(dim=0)  # (H, W//2+1)
+                if self._whitening_amp_sum is None:
+                    self._whitening_amp_sum = amp
+                else:
+                    self._whitening_amp_sum = self._whitening_amp_sum + amp
+                self._whitening_batches_seen += 1
+
+                # Recompute the whitening map after every accumulated batch so it is valid
+                # even if the run ends before whitening_warmup_batches batches are processed.
+                avg_amp = self._whitening_amp_sum / self._whitening_batches_seen
+                in_band = self.band_mask[0] > 0.1  # binary mask at fftfreq_max boundary
+                amp_in_band = avg_amp * in_band.float()
+                nonzero = amp_in_band[in_band]
+                eps = nonzero.mean() * 1e-3 + 1e-8 if nonzero.numel() > 0 else 1e-8
+                wmap = torch.where(in_band, 1.0 / (amp_in_band + eps), torch.zeros_like(avg_amp))
+                self.whitening_map = wmap.unsqueeze(0)  # (1, H, W//2+1)
+
+        bsize = rotmats.size(0)
+
+        if self.rotation_composition == "euler_add":
+            # Legacy: add Euler angles directly. Fast but approximate near poles.
+            eulerDegs = get_eulers(rotmats)
+            expanded_eulerDegs = (self._get_so3_delta(eulerDegs.device).unsqueeze(0).unsqueeze(0) +
+                                  eulerDegs.unsqueeze(2))  # (B, topK, nDelta, 3)
+            expanded_eulerDegs = expanded_eulerDegs.reshape(bsize, -1, 3)
+            projs = self._compute_projections_from_euleres(expanded_eulerDegs.reshape(-1, 3))[0]
+            expanded_rotmats = None  # recover from eulers at the end
+        else:
+            # Exact SO(3) composition via rotation matrices — no Euler singularity at poles.
+            # delta grid: (nDelta, 3, 3) — either Cartesian-converted or Fibonacci ω-ball
+            delta_rotmats = self._get_so3_delta_rotmats(rotmats.device)  # (nDelta, 3, 3)
+            # rotmats: (B, topK, 3, 3)
+            cur = rotmats.unsqueeze(2)           # (B, topK, 1, 3, 3)
+            dlt = delta_rotmats[None, None]      # (1, 1, nDelta, 3, 3)
+            if self.rotation_composition == "pre_multiply":
+                # R_total = R_delta @ R_current  (delta in lab frame, grid wraps around R_current)
+                expanded_rotmats = dlt @ cur     # (B, topK, nDelta, 3, 3)
+            else:  # post_multiply
+                # R_total = R_current @ R_delta  (delta in body/particle frame)
+                expanded_rotmats = cur @ dlt     # (B, topK, nDelta, 3, 3)
+            expanded_rotmats = expanded_rotmats.reshape(bsize, -1, 3, 3)  # (B, topK*nDelta, 3, 3)
+            # TODO: Remove duplicate rotmats if n_input_angles > 1 (affects speed)
+            projs = self._compute_projections_from_rotmats(expanded_rotmats.reshape(-1, 3, 3))
+            expanded_eulerDegs = None  # recover from rotmats at the end
 
         if self.correct_ctf:
             ctfs = ctfs.unsqueeze(1)
@@ -317,9 +489,11 @@ class ProjectionMatcher(nn.Module):
 
         batch_idxs_range = torch.arange(pixelShiftsXY.size(0)).unsqueeze(1)
         pixelShiftsXY = pixelShiftsXY[batch_idxs_range, maxCorrsIdxs]
-        predEulers = expanded_eulerDegs[
-            batch_idxs_range, maxCorrsIdxs]  #TODO: Try to minimize euler->rotmat conversions
-        predRotMats = get_rotmat(predEulers)
+        if expanded_rotmats is not None:
+            predRotMats = expanded_rotmats[batch_idxs_range, maxCorrsIdxs]  # (B, topK, 3, 3)
+        else:
+            predEulers = expanded_eulerDegs[batch_idxs_range, maxCorrsIdxs]
+            predRotMats = get_rotmat(predEulers)
         mean_corr = perImgCorr.mean(-1, keepdims=True)
         std_corr = perImgCorr.std(-1, keepdims=True)
         comparedWeight = torch.distributions.Normal(mean_corr, std_corr + 1e-6).cdf(maxCorrs)  # 1-P(I_i > All_images)
@@ -346,6 +520,10 @@ class ProjectionMatcher(nn.Module):
                 starFnameOut
             ), f"Error, the starFnameOut {starFnameOut} already exists"
 
+        # Reset whitening warm-up so each align_star() call re-estimates from its own particles
+        self._whitening_amp_sum = None
+        self._whitening_batches_seen = 0
+
         n_cpus = n_cpus if n_cpus > 0 else 1
         particlesDataSet = self.preprocess_particles(
             particles,
@@ -362,6 +540,10 @@ class ProjectionMatcher(nn.Module):
             pixel_size = particlesDataSet.datasets[0].original_sampling_rate()
             particle_size = particlesDataSet.datasets[0].original_image_size()
 
+        # TODO: pixel_size here is sampling_rate_angs_for_nnet (the NN target rate), not the
+        #  original particle pixel size — see TODO in particlesDataset.py::sampling_rate property.
+        #  For standalone projmatching, the user must set sampling_rate_angs_for_nnet to match
+        #  the reference voxel size, even though projmatching uses the original full-size images.
         assert np.isclose(pixel_size, self.vol_voxel_size, atol=1e-2), ("Error, the pixel size of the particle images "
                                                                         f"{pixel_size} "
                                                                         "do not match the voxel size of the reference "
@@ -396,6 +578,12 @@ class ProjectionMatcher(nn.Module):
                 confidence = torch.ones(len(particlesStar.particles_md))
         if "rlnImageId" in particlesStar.particles_md.columns:
             particlesStar.particles_md.drop("rlnImageId", axis=1, inplace=True)
+
+        # TODO: For fine grids (large n_rotations), GPU memory scales with batch_size × n_rotations.
+        #  The proper fix is to chunk the rotations dimension *inside* forward() rather than
+        #  reducing batch_size (which hurts particle throughput). Implement rotation chunking
+        #  so that n_rotations is processed in sub-batches while batch_size stays fixed.
+        #  The max_batch_rotations config field can serve as the rotation chunk size limit.
 
         dl = DataLoader(
             particlesDataSet,
@@ -500,15 +688,55 @@ def _get_begin_end_from_max_shift(image_shape, max_shift):
 
     return h0, h1, w0, w1
 
-def _extract_ccor_max(corrs, h0, h1, w0, w1):
-    pixelShiftsXY = torch.empty(corrs.shape[:-2] + (2,), device=corrs.device, dtype=torch.int64)
+def _extract_ccor_max(corrs, h0, h1, w0, w1, use_subpixel: bool = False):
+    # corrs is always (N, H, W) — reshaped by _correlateCrossCorrelation before this call
     if h0 > 0:
-        corrs = corrs[..., h0:h1, w0:w1]
-    maxCorrsJ, maxIndxJ = corrs.max(-1)
+        corrs_crop = corrs[..., h0:h1, w0:w1]
+    else:
+        corrs_crop = corrs
+    maxCorrsJ, maxIndxJ = corrs_crop.max(-1)
     perImgCorr, maxIndxI = maxCorrsJ.max(-1)
-    pixelShiftsXY[..., 1] = h0 + maxIndxI
-    pixelShiftsXY[..., 0] = w0 + torch.gather(maxIndxJ, -1, maxIndxI.unsqueeze(-1)).squeeze(-1)
+    int_i = maxIndxI  # integer peak row in cropped array, shape (N,)
+    int_j = torch.gather(maxIndxJ, -1, maxIndxI.unsqueeze(-1)).squeeze(-1)  # shape (N,)
 
+    if use_subpixel:
+        H = corrs_crop.shape[-2]
+        W = corrs_crop.shape[-1]
+        N = corrs_crop.shape[0]
+        n_idx = torch.arange(N, device=corrs.device)  # (N,)
+
+        # Clamp to interior so ±1 neighbours always exist
+        safe_i = int_i.clamp(1, H - 2)
+        safe_j = int_j.clamp(1, W - 2)
+
+        # --- sub-pixel refinement along row axis (at col = int_j) ---
+        fi_m = corrs_crop[n_idx, safe_i - 1, int_j]  # (N,)
+        fi_0 = corrs_crop[n_idx, safe_i,     int_j]
+        fi_p = corrs_crop[n_idx, safe_i + 1, int_j]
+        denom_i = 2 * fi_m - 4 * fi_0 + 2 * fi_p
+        safe_denom_i = torch.where(denom_i < -1e-8, denom_i, torch.full_like(denom_i, -1e-8))
+        delta_i = (fi_m - fi_p) / safe_denom_i
+        at_boundary_i = (int_i != safe_i)
+        delta_i = torch.where(at_boundary_i, torch.zeros_like(delta_i), delta_i)
+        sub_i = safe_i.float() + delta_i
+
+        # --- sub-pixel refinement along col axis (at row = int_i) ---
+        fj_m = corrs_crop[n_idx, int_i, safe_j - 1]  # (N,)
+        fj_0 = corrs_crop[n_idx, int_i, safe_j    ]
+        fj_p = corrs_crop[n_idx, int_i, safe_j + 1]
+        denom_j = 2 * fj_m - 4 * fj_0 + 2 * fj_p
+        safe_denom_j = torch.where(denom_j < -1e-8, denom_j, torch.full_like(denom_j, -1e-8))
+        delta_j = (fj_m - fj_p) / safe_denom_j
+        at_boundary_j = (int_j != safe_j)
+        delta_j = torch.where(at_boundary_j, torch.zeros_like(delta_j), delta_j)
+        sub_j = safe_j.float() + delta_j
+    else:
+        sub_i = int_i.float()
+        sub_j = int_j.float()
+
+    pixelShiftsXY = torch.empty(corrs.shape[:-2] + (2,), device=corrs.device, dtype=torch.float32)
+    pixelShiftsXY[..., 1] = h0 + sub_i
+    pixelShiftsXY[..., 0] = w0 + sub_j
     return perImgCorr, pixelShiftsXY
 
 def extract_ccor_max(corrs, max_shift_fraction):
@@ -528,7 +756,7 @@ def align_star(
         return_top_k_poses: int = 1,
         filter_resolution_angst: Optional[float] = None,
         num_dataworkers: int = 1,
-        batch_size: int = 1024,
+        batch_size: int = 32,
         use_cuda: bool = True,
         verbose: bool = True,
         float32_matmul_precision: Literal["highest", "high", "medium"] = "high",

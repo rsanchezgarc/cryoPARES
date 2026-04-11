@@ -212,7 +212,7 @@ def projmatching_starfile(
         filter_resolution_angst: Optional[float] = None,
         n_jobs: int = 1,
         num_dataworkers: int = 1,
-        batch_size: int = 1024,
+        batch_size: int = 32,
         use_cuda: bool = True,
         verbose: bool = False,
         float32_matmul_precision: Literal["highest", "high", "medium"] = "high",
@@ -287,10 +287,16 @@ def projmatching_starfile(
         # Particle subsampling
         if n_first_particles is not None:
             star_data = starfile.read(particles_star_fname)
-            particles_df = star_data["particles"][:n_first_particles]
-            optics_df = star_data["optics"]
-            star_in_limited = os.path.join(tmpdir, f"input_particles_{os.path.basename(particles_star_fname)}")
-            starfile.write({"optics": optics_df, "particles": particles_df}, star_in_limited)
+            if isinstance(star_data, dict):
+                particles_df = star_data["particles"][:n_first_particles]
+                optics_df = star_data["optics"]
+                star_in_limited = os.path.join(tmpdir, f"input_particles_{os.path.basename(particles_star_fname)}")
+                starfile.write({"optics": optics_df, "particles": particles_df}, star_in_limited)
+            else:
+                # Old RELION 3.0 single-block format — DataFrame directly
+                particles_df = star_data[:n_first_particles]
+                star_in_limited = os.path.join(tmpdir, f"input_particles_{os.path.basename(particles_star_fname)}")
+                starfile.write(particles_df, star_in_limited)
             particles_star_fname = star_in_limited
 
 
@@ -414,8 +420,15 @@ def main():
     from cryoPARES.utils.systemUtils import increase_file_descriptor_limit
     increase_file_descriptor_limit()
 
-    from argParseFromDoc import parse_function_and_call
-    parse_function_and_call(projmatching_starfile)
+    from autoCLI_config import ConfigArgumentParser
+    from cryoPARES.utils.paths import convert_config_args_to_absolute_paths
+
+    parser = ConfigArgumentParser(prog="projmatching_starfile", config_obj=main_config, verbose=True)
+    parser.add_args_from_function(projmatching_starfile)
+    args, config_args = parser.parse_args()
+    config_args = convert_config_args_to_absolute_paths(config_args)
+    ConfigOverrideSystem.update_config_from_configstrings(main_config, config_args, verbose=True)
+    projmatching_starfile(**vars(args))
 
 
 if __name__ == "__main__":

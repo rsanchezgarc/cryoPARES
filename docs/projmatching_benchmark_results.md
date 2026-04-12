@@ -515,14 +515,23 @@ Per-500 estimates = raw time ÷ 20.
 > These times are for the **master default** (Cartesian grid, 343 pts, no accuracy improvements).
 > They establish the speed baseline before any new features.
 
-### Branch best configs (pending — to be added after branch timing runs)
+### Branch best configs (improve_local_refinement, all accuracy flags ON)
 
-| Config | Dataset | Per 500 (estimated) | Notes |
-|--------|---------|---------------------|-------|
-| two-stage 6°/2°+1.5°/0.5° K=5 | DS2 | ~50s | batch_size=3, fine-pass limit |
-| fibo 4°/0.7° single-stage | DS3 | ~52s | batch_size=2, 1486-pt grid |
+| Config | Dataset | Run 1 | Run 2 | Run 3 | Median (10K) | Per 500 |
+|--------|---------|-------|-------|-------|--------------|---------|
+| two-stage 6°/2°+1.5°/0.5° K=5, batch_size=3 | DS2 | 11m09.6s | 11m07.8s | 11m08.7s | **11m08s (668s)** | **~33.4s** |
+| fibo 4°/0.7°, batch_size=2 | DS3 | 13m35.9s | 13m35.6s | 13m35.3s | **13m35s (815s)** | **~40.8s** |
 
-Branch timing runs in progress.
+### Speed vs accuracy comparison
+
+| Config | Dataset | Per 500 | Median err | P90 err | Slowdown vs master |
+|--------|---------|---------|-----------|---------|-------------------|
+| master (Cartesian 6°/2°, batch_size=11) | DS2 | ~9.4s | 1.64° | 3.79° | 1× |
+| two-stage K=5, batch_size=3 | DS2 | ~33.4s | **0.42°** | **2.47°** | 3.6× |
+| master (Cartesian 6°/2°, batch_size=11) | DS3 | ~10.0s | 1.69° | 4.06° | 1× |
+| fibo 4°/0.7°, batch_size=2 | DS3 | ~40.8s | **1.24°** | **2.74°** | 4.1× |
+
+The branch configs are ~3.6–4.1× slower than master but substantially more accurate (DS2: 4× better median; DS3: 1.36× better median, 1.48× better P90). The batch_size constraint from the larger/two-stage grids is the primary cost driver.
 
 ---
 
@@ -531,7 +540,7 @@ Branch timing runs in progress.
 - [x] DS3 Scenario B with two-stage K=10 — **ruled out**: 1.36°/3.50° vs K=5 1.35°/3.43°, at 77% more evaluations. D2 gap is geometric, not a K issue.
 - [x] DS3 Scen B 4°/0.5° single-stage — **done**: 1.22°/2.64° P90, ~2m. Only 0.02° better than 4°/0.7° at 2.3× cost. 4°/0.7° confirmed as sweet spot.
 - [x] **Master branch timing** — DS2: 187s/10K (~9.4s/500), DS3: 200s/10K (~10s/500). Cartesian 6°/2°, batch_size=11.
-- [ ] **Branch best-config timing** — two-stage for DS2, 4°/0.7° for DS3; 3 × 10K runs each; in progress.
+- [x] **Branch best-config timing** — DS2 two-stage: 668s/10K (~33.4s/500); DS3 4°/0.7°: 815s/10K (~40.8s/500). 3.6–4.1× slower than master, substantially more accurate.
 - [ ] DS2 Scenario A with Fibonacci grid 6°/1° (verify no regression vs GT)
 - [ ] DS3 Scenario B with Fibonacci grid 6°/1°
 

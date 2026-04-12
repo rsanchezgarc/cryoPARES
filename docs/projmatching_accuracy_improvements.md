@@ -151,16 +151,22 @@ use_two_stage_search=True, fine_grid_distance_degs=1.5, fine_grid_step_degs=0.5,
 
 | Config | Pts | DS1 med | DS2 med | DS2 P75 | DS2 P90 | DS3 med | DS3 P75 | DS3 P90 | Time/500 |
 |--------|-----|--------|--------|---------|---------|--------|---------|---------|---------|
-| fibo 6°/2° | 209 | — | 1.31° | 1.88° | 2.62° | 1.31° | 1.98° | 3.52° | ~30s |
+| **master** Cartesian 6°/2° | 343 | — | 1.64° | — | 3.79° | 1.69° | — | 4.06° | **~9.4s** |
+| fibo 6°/2° | 209 | — | 1.31° | 1.88° | 2.62° | 1.31° | 1.98° | 3.52° | **~6.4s** |
 | fibo 6°/1° | 1638 | — | 0.89° | 1.62° | 2.67° | 1.38° | 2.15° | 3.18° | ~58s |
-| fibo 4°/0.7° | 1486 | — | 0.87° | 1.43° | 2.23° | **1.24°** | **1.93°** | **2.74°** | ~52s |
-| **two-stage 6°/2°+1.5°/0.5° K=5** | **1249** | **0.22°** | **0.42°** | **1.25°** | 2.47° | 1.35° | 2.35° | 3.43° | ~50s |
+| fibo 4°/0.7° | 1486 | — | 0.87° | 1.43° | 2.23° | **1.24°** | **1.93°** | **2.74°** | **~40.8s** |
+| **two-stage 6°/2°+1.5°/0.5° K=5** | **1249** | **0.22°** | **0.42°** | **1.25°** | 2.47° | 1.35° | 2.35° | 3.43° | **~33.4s** |
 
-Note: 6°/1° (1638 pts, ~58s) is slower than two-stage (1249 pts, ~50s) yet less accurate on both datasets.
+Timing measured on 10K particles, 3 runs each, GPU 1 (one process at a time). Per-500 = raw ÷ 20.
+Master baseline: DS2 187s/10K, DS3 200s/10K (Cartesian 6°/2°, batch_size=11).
+Fibo 6°/2°: DS2 126s/10K, DS3 129s/10K — **faster than master** (fewer grid pts: 209 vs 343) and more accurate. No regression.
+Branch two-stage: DS2 668s/10K; branch 4°/0.7°: DS3 815s/10K. These are 3.6–4.1× slower than master.
+
+Note: 6°/1° (1638 pts) is slower than two-stage (1249 pts) yet less accurate on both datasets — dominated.
 4°/0.7° wins on DS3 because it concentrates coverage where it matters (≤4° initial error, 0.7° step)
 rather than wasting evaluations from 4°–6°.
 
-Two-stage gives **2–3× better median** on DS2 (C1) vs 6°/2° flat, at lower GPU evaluations. DS3 (D2): 4°/0.7° single-stage is better (coarse K=5 candidates can cluster in one D2 domain, missing poses in the other 3). DS1 (synthetic): near-perfect 0.22° recovery.
+Two-stage gives **4× better median** on DS2 (C1) vs master, 3.6× slower. DS3 (D2): 4°/0.7° single-stage is better (coarse K=5 candidates can cluster in one D2 domain, missing poses in the other 3). DS1 (synthetic): near-perfect 0.22° recovery.
 
 **Scenario A validation (GT input → expect ~0°):**
 - DS1: 0.00° ✓ (requires CTF-corrected reference volume)
@@ -176,7 +182,8 @@ Two-stage gives **2–3× better median** on DS2 (C1) vs 6°/2° flat, at lower 
 **DS3 Scen B 4°/0.5° result:** Median 1.22°, P75 1.89°, P90 2.64° in ~2m (batch_size=1) vs 4°/0.7°: 1.24°/1.93°/2.74° in ~52s (batch_size=2). Only 0.02° median gain for 2.3× wall-clock cost. **4°/0.7° is the sweet spot for D2 — going finer hits diminishing returns.**
 
 **Pending validation:**
-- [ ] Master branch comparison + wall-clock timing (required before merging)
+- [x] Master branch comparison + wall-clock timing — done (see timing table above)
+- [x] Branch fibo 6°/2° timing — **no regression**: 6.4s/500 vs master 9.4s/500; faster and more accurate
 
 ---
 

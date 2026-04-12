@@ -519,19 +519,23 @@ Per-500 estimates = raw time ÷ 20.
 
 | Config | Dataset | Run 1 | Run 2 | Run 3 | Median (10K) | Per 500 |
 |--------|---------|-------|-------|-------|--------------|---------|
+| fibo 6°/2°, batch_size=11 | DS2 | 2m06.8s | 2m05.8s | 2m05.6s | **2m06s (126s)** | **~6.3s** |
+| fibo 6°/2°, batch_size=11 | DS3 | 2m09.3s | 2m08.7s | 2m09.0s | **2m09s (129s)** | **~6.5s** |
 | two-stage 6°/2°+1.5°/0.5° K=5, batch_size=3 | DS2 | 11m09.6s | 11m07.8s | 11m08.7s | **11m08s (668s)** | **~33.4s** |
 | fibo 4°/0.7°, batch_size=2 | DS3 | 13m35.9s | 13m35.6s | 13m35.3s | **13m35s (815s)** | **~40.8s** |
 
 ### Speed vs accuracy comparison
 
-| Config | Dataset | Per 500 | Median err | P90 err | Slowdown vs master |
-|--------|---------|---------|-----------|---------|-------------------|
-| master (Cartesian 6°/2°, batch_size=11) | DS2 | ~9.4s | 1.64° | 3.79° | 1× |
-| two-stage K=5, batch_size=3 | DS2 | ~33.4s | **0.42°** | **2.47°** | 3.6× |
-| master (Cartesian 6°/2°, batch_size=11) | DS3 | ~10.0s | 1.69° | 4.06° | 1× |
-| fibo 4°/0.7°, batch_size=2 | DS3 | ~40.8s | **1.24°** | **2.74°** | 4.1× |
+| Config | Dataset | Per 500 | Median err | P90 err | vs master |
+|--------|---------|---------|-----------|---------|-----------|
+| master (Cartesian 6°/2°, batch_size=11) | DS2 | ~9.4s | 1.64° | 3.79° | baseline |
+| branch fibo 6°/2°, batch_size=11 | DS2 | **~6.3s** | **1.31°** | **2.62°** | 1.5× faster, more accurate |
+| branch two-stage K=5, batch_size=3 | DS2 | ~33.4s | **0.42°** | **2.47°** | 3.6× slower, 4× better median |
+| master (Cartesian 6°/2°, batch_size=11) | DS3 | ~10.0s | 1.69° | 4.06° | baseline |
+| branch fibo 6°/2°, batch_size=11 | DS3 | **~6.5s** | **1.31°** | **3.52°** | 1.5× faster, more accurate |
+| branch fibo 4°/0.7°, batch_size=2 | DS3 | ~40.8s | **1.24°** | **2.74°** | 4.1× slower, best accuracy |
 
-The branch configs are ~3.6–4.1× slower than master but substantially more accurate (DS2: 4× better median; DS3: 1.36× better median, 1.48× better P90). The batch_size constraint from the larger/two-stage grids is the primary cost driver.
+**Key finding — no regression:** branch fibo 6°/2° (same grid spacing as master, same batch_size) is 1.5× *faster* than master because the Fibonacci grid has fewer points (209 vs Cartesian 343) and more accurate (1.31° vs 1.64°/1.69°). The branch's accuracy improvements come at a cost only when using denser grids (4°/0.7°) or two-stage search.
 
 ---
 

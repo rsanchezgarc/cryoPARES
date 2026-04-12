@@ -32,7 +32,7 @@ _has_image_shape = "image_shape" in inspect.signature(_extract_central_slices_rf
 if _has_image_shape:
     # torch-fourier-slice <= 0.3.x: forward image_shape to the library
     def extract_central_slices_rfft_3d(volume_rfft, rotation_matrices, image_shape=None, **kw):
-        return _extract_central_slices_rfft_3d(volume_rfft, rotation_matrices,
+        return _extract_central_slices_rfft_3d(volume_rfft, rotation_matrices=rotation_matrices,
                                                image_shape=image_shape, **kw)
 else:
     # torch-fourier-slice >= 0.4.0: image_shape inferred from volume_rfft; drop silently

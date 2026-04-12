@@ -266,6 +266,17 @@ class ProjectionMatcher(nn.Module):
             halfset=None,
             subset_idxs=None
     ):
+        # Auto-configure dataset pixel size and box size to match the reference volume.
+        ref_voxel_size = self.vol_voxel_size
+        ref_box_size = int(self.ori_vol_shape[0])
+        ds_cfg = main_config.datamanager.particlesdataset
+        if not np.isclose(ds_cfg.sampling_rate_angs_for_nnet, ref_voxel_size, atol=1e-2):
+            print(f"[projmatching] Auto-setting sampling_rate_angs_for_nnet="
+                  f"{ref_voxel_size:.4f} from reference volume (was {ds_cfg.sampling_rate_angs_for_nnet})")
+            ds_cfg.sampling_rate_angs_for_nnet = ref_voxel_size
+        if ds_cfg.image_size_px_for_nnet is None:
+            print(f"[projmatching] Auto-setting image_size_px_for_nnet={ref_box_size} from reference volume")
+            ds_cfg.image_size_px_for_nnet = ref_box_size
 
         from cryoPARES.datamanager.datamanager import DataManager
         dm = DataManager(particles,

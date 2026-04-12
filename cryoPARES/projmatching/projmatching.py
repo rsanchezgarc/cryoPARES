@@ -414,8 +414,15 @@ def main():
     from cryoPARES.utils.systemUtils import increase_file_descriptor_limit
     increase_file_descriptor_limit()
 
-    from argParseFromDoc import parse_function_and_call
-    parse_function_and_call(projmatching_starfile)
+    from autoCLI_config import ConfigArgumentParser
+    from cryoPARES.utils.paths import convert_config_args_to_absolute_paths
+
+    parser = ConfigArgumentParser(prog="projmatching_starfile", config_obj=main_config, verbose=True)
+    parser.add_args_from_function(projmatching_starfile)
+    args, config_args = parser.parse_args()
+    config_args = convert_config_args_to_absolute_paths(config_args)
+    ConfigOverrideSystem.update_config_from_configstrings(main_config, config_args, verbose=True)
+    projmatching_starfile(**vars(args))
 
 
 if __name__ == "__main__":

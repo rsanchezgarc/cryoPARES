@@ -498,13 +498,42 @@ grid_distance_degs=4, grid_step_degs=0.7
 
 ---
 
+## Wall-clock timing benchmarks
+
+All timing runs: GPU 1 (NVIDIA, 14 GB), one process at a time, 3 independent runs, 10 000 particles each.
+Per-500 estimates = raw time ÷ 20.
+
+### Master branch baseline (Cartesian 6°/2°, batch_size=11)
+
+| Dataset | Run 1 | Run 2 | Run 3 | Median (10K) | Per 500 |
+|---------|-------|-------|-------|--------------|---------|
+| DS2 Scen B | 3m06.7s | 3m07.3s | 3m07.4s | **3m07s (187s)** | **~9.4s** |
+| DS3 Scen B | 4m21.1s* | 3m25.6s | 3m14.6s | **3m20s (200s)** | **~10.0s** |
+
+*DS3 Run 1 is an outlier — GPU 0 was at 100%/17 GB on a competing job at start. Steady-state median from runs 2–3.
+
+> These times are for the **master default** (Cartesian grid, 343 pts, no accuracy improvements).
+> They establish the speed baseline before any new features.
+
+### Branch best configs (pending — to be added after branch timing runs)
+
+| Config | Dataset | Per 500 (estimated) | Notes |
+|--------|---------|---------------------|-------|
+| two-stage 6°/2°+1.5°/0.5° K=5 | DS2 | ~50s | batch_size=3, fine-pass limit |
+| fibo 4°/0.7° single-stage | DS3 | ~52s | batch_size=2, 1486-pt grid |
+
+Branch timing runs in progress.
+
+---
+
 ## Pending experiments
 
 - [x] DS3 Scenario B with two-stage K=10 — **ruled out**: 1.36°/3.50° vs K=5 1.35°/3.43°, at 77% more evaluations. D2 gap is geometric, not a K issue.
 - [x] DS3 Scen B 4°/0.5° single-stage — **done**: 1.22°/2.64° P90, ~2m. Only 0.02° better than 4°/0.7° at 2.3× cost. 4°/0.7° confirmed as sweet spot.
+- [x] **Master branch timing** — DS2: 187s/10K (~9.4s/500), DS3: 200s/10K (~10s/500). Cartesian 6°/2°, batch_size=11.
+- [ ] **Branch best-config timing** — two-stage for DS2, 4°/0.7° for DS3; 3 × 10K runs each; in progress.
 - [ ] DS2 Scenario A with Fibonacci grid 6°/1° (verify no regression vs GT)
 - [ ] DS3 Scenario B with Fibonacci grid 6°/1°
-- [ ] **Master branch comparison + timing** — run master (no changes) and branch best configs on DS2/DS3 Scen B, measure wall-clock per 500 particles; required before merging
 
 ---
 

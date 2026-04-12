@@ -166,8 +166,10 @@ Two-stage gives **2–3× better median** on DS2 (C1) vs 6°/2° flat, at lower 
 - C1 / high symmetry: **two-stage** (best median, fewer evaluations)
 - D2 / low symmetry: **4°/0.7° single-stage** (robust spatial coverage avoids symmetry-domain clustering)
 
+**DS3 Scen B K=10 result:** Median 1.36°, P75 2.29°, P90 3.50° — identical to K=5 (1.35°/2.35°/3.43°) at 77% more evaluations (2299 vs 1249 pts, ~77s vs ~52s). The D2 gap is geometric (symmetry-axis ambiguity), not a candidate-count issue. K=10 ruled out.
+
 **Pending validation:**
-- [ ] DS3 Scenario B with fine_top_k=10 — check if doubling K closes the D2 tail gap
+- [ ] DS3 Scen B 4°/0.5° single-stage — accuracy ceiling for dense single-stage (batch_size=1 due to XBLOCK)
 
 ---
 

@@ -496,9 +496,11 @@ grid_distance_degs=4, grid_step_degs=0.7
 
 ## Pending experiments
 
-- [ ] DS3 Scenario B with two-stage K=10 — check if doubling fine_top_k closes the D2 tail gap
+- [x] DS3 Scenario B with two-stage K=10 — **ruled out**: 1.36°/3.50° vs K=5 1.35°/3.43°, at 77% more evaluations. D2 gap is geometric, not a K issue.
+- [ ] DS3 Scen B 4°/0.5° single-stage — accuracy ceiling (batch_size=1 due to XBLOCK; ~3875 pts)
 - [ ] DS2 Scenario A with Fibonacci grid 6°/1° (verify no regression vs GT)
 - [ ] DS3 Scenario B with Fibonacci grid 6°/1°
+- [ ] **Master branch comparison + timing** — run master (no changes) and branch best configs on DS2/DS3 Scen B, measure wall-clock per 500 particles; required before merging
 
 ---
 

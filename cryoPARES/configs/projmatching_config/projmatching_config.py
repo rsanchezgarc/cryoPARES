@@ -31,6 +31,19 @@ class Projmatching_config:
         'fftfreq_min': 'High-pass cutoff frequency as fraction of Nyquist [0, 0.5]; excludes low-frequency ring from CC (Change #5)',
         'rotation_composition': 'How to combine the SO(3) delta grid with each predicted pose. "euler_add" (default, legacy): adds Euler angles directly — fast but approximate near poles. "pre_multiply": R_total = R_delta @ R_current (delta in lab frame). "post_multiply": R_total = R_current @ R_delta (delta in body frame). Both rotation-matrix modes are exact SO(3) composition.',
         'use_fibo_grid': 'Use the geodesic Fibonacci (ω-ball tangent) SO(3) grid instead of the Cartesian Euler grid. The Fibonacci grid has uniform coverage in SO(3) (no polar clustering) with ~half the point count of the Cartesian grid at the same step size. Requires rotation_composition != "euler_add"; if euler_add is set it is automatically switched to pre_multiply.',
+        'use_two_stage_search': ('Two-pass coarse-to-fine search. Coarse pass uses grid_distance_degs/'
+            'grid_step_degs; fine pass uses fine_grid_distance_degs/fine_grid_step_degs around the top '
+            'fine_top_k coarse winners. Automatically switches rotation_composition to pre_multiply. '
+            'Example: coarse 6°/2° (209 pts) + fine 1.5°/0.5° × K=5 (1249 pts total) vs 1638 for flat '
+            '6°/1° — similar or better accuracy at lower cost. Default: False.'),
+        'fine_grid_distance_degs': ('Radius (degrees) of fine-pass Fibonacci ω-ball around each coarse '
+            'winner. Should be ≥ coarse grid_step_degs to guarantee full coverage. '
+            'Only used when use_two_stage_search=True. Point count ≈ 7.7×(distance/step)³ '
+            '(e.g. 1.5°/0.5° ≈ 208 pts, 1°/0.5° ≈ 63 pts).'),
+        'fine_grid_step_degs': ('Step (degrees) of fine-pass Fibonacci grid. '
+            'Only used when use_two_stage_search=True.'),
+        'fine_top_k': ('Number of coarse-pass winners fed into the fine pass. Must be ≥ '
+            'top_k_poses_localref. Only used when use_two_stage_search=True.'),
 
         # CLI-exposed parameters (used in projmatching_starfile)
         'reference_vol': 'Path to reference 3D volume (.mrc file) for generating projection templates',
@@ -78,3 +91,9 @@ class Projmatching_config:
     fftfreq_min: float = 0.0           # high-pass cutoff as fraction of Nyquist; 0=disabled (benchmarks showed it hurts) (Change #5)
     rotation_composition: str = "euler_add"  # "euler_add" (legacy), "pre_multiply" (R_delta@R), "post_multiply" (R@R_delta)
     use_fibo_grid: bool = False              # geodesic ω-ball grid (uniform, ~half point count vs Cartesian at same step)
+
+    # Two-stage coarse-to-fine search (#6)
+    use_two_stage_search: bool = False   # enable two-pass search (coarse then fine)
+    fine_grid_distance_degs: float = 1.5 # fine-pass ball radius (1.5°/0.5° ≈ 208 pts/candidate)
+    fine_grid_step_degs: float = 0.5     # fine-pass step size
+    fine_top_k: int = 5                  # coarse-pass candidates handed to fine pass

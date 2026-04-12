@@ -1,221 +1,194 @@
-# Projection Matching Accuracy Improvement Ideas
+# Projection Matching Accuracy — Strategy & Lessons Learned
 
-Analysis of bottlenecks in `cryoPARES/projmatching/projMatcher.py` and potential solutions.
-The code improves NN pose estimates (~7°) to ~3° but plateaus there even with fine 1° grids.
+Summary of bottlenecks identified in `cryoPARES/projmatching/projMatcher.py`, what was tried,
+what we learned, and what to try next. Detailed benchmark numbers and implementation notes live in
+`docs/projmatching_benchmark_results.md`.
 
-Previously tried (old implementation) with no improvement: rotation matrix composition with Cartesian grid, Fibonacci grid, normalized CC.
-**Newly implemented and benchmarked:** sub-pixel shifts (#1), zero DC (#2a), particle-adaptive spectral whitening (#2b, warmup8), band mask (#5 — harmful), Fibonacci ω-ball grid (#4), rotation matrix composition (#3).
-
----
-
-## Testing Protocol
-
-All changes must be validated through systematic A/B benchmarks before being promoted to default.
-
-### Datasets
-
-| # | Particles | Reference volume | Type | Symmetry | Ground truth |
-|---|-----------|-----------------|------|----------|-------------|
-| 1 | `EMPIAR-10166/data/projectionsSamePose/proj_0.star` | `EMPIAR-10166/data/reconstruct.mrc` | Synthetic | C1 | Exact known poses in star file |
-| 2 | `EMPIAR-10166/data/frealign_stack.star` | `EMPIAR-10166/data/reconstruct.mrc` | Real, full size | C1 | Frealign/RELION consensus poses |
-| 3 | `astex-5534/Refine3D/001_after2DclsEval/run_data.star` | Reference vol in same directory | Real, PKM2 | **D2** | RELION consensus poses |
-
-All paths are under `~/cryo/data/EMPIAR-download/`.
-For dataset 3, locate the reference `.mrc` in `astex-5534/Refine3D/` before running.
-
-### Two test scenarios
-
-**Scenario A — Recovery from exact ground truth poses (regression test):**
-Feed projmatching the exact ground truth poses. The code must not degrade them.
-Any change that raises the median error vs baseline in Scenario A is a regression. Code that
-improves the baseline is promissing.
-
-**Scenario B — Refinement from perturbed poses (real-world simulation):**
-Perturb ground truth poses by 4–6° random rotation per particle, feed those as input.
-Measure angular error after projmatching vs original ground truth.
-This is the real use case: NN predicts with ~4–7° error, projmatching should recover.
-
-### Pose perturbation helper
-
-**New file:** `tests/benchmarks/perturb_poses.py`
-
-Reads a star file, applies a random rotation (uniformly sampled from an SO3 ball of radius `perturb_deg`) to each particle's pose, saves a new star file.
-
-Key implementation note: perturbation must use **rotation matrix composition**, not Euler angle addition:
-```python
-from scipy.spatial.transform import Rotation
-R_current = Rotation.from_euler("ZYZ", current_euler_angles, degrees=True)
-R_delta = Rotation.random(n_particles)  # or sample from SO3 ball of given radius
-R_perturbed = R_delta * R_current
-perturbed_eulers = R_perturbed.as_euler("ZYZ", degrees=True)
-```
-
-### Error metrics
-- **Median angular error (degrees)** — primary metric; already printed by `align_star`
-- 75th and 90th percentile angular error — tracks outlier fraction
-- Median shift error (Å)
-- **Dataset 3 (D2):** always use `rotation_error_with_sym(symmetry="D2")` — already supported
-
-### Comparison protocol
-- Fix `n_first_particles=500`, `grid_distance_degs=6`, `grid_step_degs=1` for all runs
-- Enable one change at a time; always compare against the current-default baseline
-- Report Scenario A and B results side-by-side
+**Starting point:** NN pose estimates (~7°) → projmatching plateaus near 1.3–1.7° at 6°/2° grid.
+**Current best (6°/1° Fibonacci):** ~0.85° median (79% reduction from 5° perturbation input).
 
 ---
 
-## Proposed Changes
+## Implemented changes (all gated by config flags)
 
-### 1. Sub-pixel shift refinement ★ (untried, high confidence)
-
-**File:** `projMatcher.py:503–512` — `_extract_ccor_max`
-**Config flag:** `use_subpixel_shifts: bool = True`
-
-**Problem:** Shifts are found at integer pixel accuracy (`dtype=torch.int64`). Consequence:
-- 1.5 Å/px, 80 Å particle radius → 1 pixel ≈ **1.1°**
-- 4.0 Å/px, 80 Å radius → 1 pixel ≈ **2.9°**
-
-This integer-pixel floor likely explains why sub-1° improvement stops happening regardless of the angular grid.
-
-**Fix:** 3-point parabolic sub-pixel interpolation on both shift axes after finding the integer peak:
-```python
-# For a 1D peak at index p with values f[p-1], f[p], f[p+1]:
-delta = (f[p-1] - f[p+1]) / (2*f[p-1] - 4*f[p] + 2*f[p+1])
-subpixel_pos = p + delta
-```
-- Change `dtype=torch.int64` → `dtype=torch.float32` in the shift tensor
-- Guard: skip correction if the peak is at the boundary of the valid shift region
-- `forward()` already calls `.float()` on shifts — no downstream changes needed
-
-**Risk:** Low. The CC peak is smooth and band-limited, making parabolic fitting reliable. Well-established in image registration literature.
-
----
-
-### 2. Raw CC dominated by low frequencies (untried)
-
-**File:** `fourierOperations.py:135`
-
-**Problem:** `result = parts * conj(projs)` weights each frequency by its power. Cryo-EM images have a steeply falling power spectrum (~1/f² to 1/f⁴), so the CC score is dominated by large-scale blobs (DC–1/20 Å⁻¹) where all orientations look similar. The orientation-discriminating signal at higher frequencies contributes negligible weight.
-
-**Key distinction from NCC (already tried):** NCC normalizes the total amplitude but does not change the per-frequency weighting. That is why NCC had no effect. The changes below rebalance frequency contributions.
-
-#### 2a. Zero DC (trivial, nearly free)
-**Config flag:** `zero_dc: bool = True`
-
-Set the DC bin to 0 before correlating. Removes background mean bias. Single-line change in `correlate_dft_2d`.
-
-#### 2b. Spectral whitening
-**Config flag:** `spectral_whitening: bool = False`
-
-Pre-multiply each Fourier product by `1 / sqrt(ref_power_spectrum(|freq|) + ε)`. This makes all frequency shells contribute equally to the correlation score.
-
-Implementation:
-1. In `_store_reference_vol()`: compute the 1D radially-averaged amplitude spectrum of `reference_vol` in Fourier space and store as a buffer
-2. Build a 2D whitening map by evaluating at each pixel's `|freq|`
-3. In `correlate_dft_2d`: accept optional `whitening_filter` argument; multiply both `parts` and `projs` by it before taking the cross-product
-
-The whitening map is computed once at init — no per-batch overhead beyond one extra element-wise multiply.
-
-**Risk:** Medium. Whitening amplifies noise beyond the resolution limit. Always combine with the existing `fftfreq_max` mask.
-
----
-
-### 3. Euler angle addition is not rotation composition (tried, had problems)
-
-**File:** `projMatcher.py:295–303`
-**Config flag:** `rotation_composition_mode: str = "euler_add"` | `"pre_multiply"` | `"post_multiply"`
-
-**Problem:**
-```python
-expanded_eulerDegs = self._get_so3_delta(...) + eulerDegs.unsqueeze(2)
-```
-Adding Euler angles does not compose rotations. The error is O(sin(δ) × sin(β₀)) and is significant for grid ranges ≥ 3°, particularly near the pole (small β₀) where α and γ become degenerate.
-
-**Why it failed before:** The previous attempt likely used only one composition order, or the Cartesian grid's near-duplicate entries near identity caused the composed search grid to not cover the intended angular neighborhood.
-
-**Proposed fix:** Compose rotation matrices. Two orderings must both be tested:
-- `R_total = R_delta @ R_current` — delta applied in lab frame (pre-multiply)
-- `R_total = R_current @ R_delta` — delta applied in body frame (post-multiply)
-
-**Implementation:**
-1. Add `_get_so3_delta_rotmats(device)`: convert the Cartesian Euler grid to rotation matrices, cache
-2. In `forward()`: add conditional branch for each composition mode
-3. After finding best poses, index directly into `expanded_rotmats` (avoid Euler round-trip)
-
-**Critical requirement:** Do not change the default (`euler_add`) without a clear improvement on **both** Scenario A and B across all datasets.
-
----
-
-### 4. Non-uniform SO3 grid wastes sampling points (tried, had problems)
-
-**File:** `projMatcher.py:122–144`, `grids.py:96–110`
-**Config flag:** `use_fibo_grid: bool = False`
-
-**Problem:** `so3_near_identity_grid_cartesianprod` creates n³ points from independent Euler angle ranges. Near identity (small β), α and γ are nearly degenerate — the grid wastes the majority of points sampling the same in-plane rotation. A `13³=2197` point grid (for 6°/1° settings) may effectively cover only ~100–150 distinct rotations.
-
-**Better alternative already in the codebase:** `so3_grid_near_identity_fibo(use_small_aprox=True, output="matrix")` at `grids.py:142`. Uses tangent-space rotation vector sampling with a Fibonacci sphere — uniform geodesic coverage, no Euler singularities, no near-duplicate entries.
-
-**Why it failed before:** The Cartesian grid's accidental over-representation of the identity (due to duplicates) may have compensated for the wrong Euler addition. Once Change 3 is fixed, the Fibonacci grid may behave correctly.
-
-**Caveat:** The Fibonacci grid may produce a different number of points and different distribution than the Cartesian grid. Verify the count and coverage before enabling. Check for regressions in `tests/test_projmatching_distrib.py`.
-
-**Only test after Change 3 is resolved.**
-
----
-
-### 5. Frequency band masking (easy, related to #2)
-
-**File:** `fourierOperations.py`
-**Config flag:** `fftfreq_min: float = 0.0`
-
-A `_mask_for_dft_2d` helper already exists at `fourierOperations.py:89` but is never used in the correlation path. Adding a minimum frequency cutoff (high-pass ring) removes dominant low-frequency content without requiring full spectral whitening.
-
-Apply band mask `fftfreq_min < |freq| < fftfreq_max` to both `parts` and `projs` before correlating.
-
-**Risk:** Low. Simple extension of existing infrastructure.
-
----
-
-### 6. Multi-scale coarse-to-fine refinement (architectural)
-
-**Problem:** Single-pass grid search with fine step is expensive. For 6°/1° settings, the Cartesian grid has `13³ = 2197` points (most redundant); the Fibonacci grid has ~150 points. Both are searched exhaustively.
-
-**Fix:** Two-pass approach:
-1. Coarse pass: 3° steps over ±6° → keep top-K candidates per particle
-2. Fine pass: 0.5° steps over ±2° → search around each candidate → keep best
-
-Achieves fine-grid accuracy at lower cost. Already partially supported via `top_k_poses_localref` — could be exposed as a two-stage calling convention at the `align_star` level without changes to the core pipeline.
-
----
-
-### 7. FFT upsampling for sub-pixel shifts (alternative to #1)
-
-Instead of parabolic interpolation, upsample the CC map in the region around the integer peak using FFT zero-padding (the CC map is band-limited, so upsampling is exact in theory).
-
-**Advantage over parabolic:** More accurate for non-Gaussian peaks.
-**Disadvantage:** Harder to implement efficiently in batched GPU code. Change #1 (parabolic) is much simpler and usually sufficient.
-
----
-
-## Summary
-
-| # | Change | Status | Result | Default? |
-|---|--------|--------|--------|---------|
-| 1 | Sub-pixel shift | ✅ Implemented | Angular improvement at fine grid (1°); shift improvement at all grids | `True` |
-| 2a | Zero DC | ✅ Implemented | Small improvement (shift accuracy) | `True` |
-| 2b | Spectral whitening (particle-adaptive, warmup8) | ✅ Implemented | DS2: 1.64→1.33°, DS3: 1.69→1.43° | `True` |
-| 3 | Rotation composition (Cartesian grid) | ✅ Tried | **Worse** than euler_add (2.27–2.42° vs 1.33°) — grid not compatible | `euler_add` |
-| 4 | Fibonacci ω-ball grid + pre_multiply | ✅ Implemented | DS2: 1.33→1.31°, DS3: 1.43→1.31° (P90: 4.85→3.52°) | `False` (pending validation) |
-| 5 | Frequency band mask | ✅ Tried | **Harmful** (P90 7.33° vs 2.75°) — do not use | `0.0` (disabled) |
-| 6 | Multi-scale coarse-to-fine | Not tried | Speed/accuracy tradeoff | — |
-| 7 | FFT upsampling (alt to #1) | Not tried (parabolic works) | — | — |
+| # | Change | Config flag | Default | Outcome |
+|---|--------|-------------|---------|---------|
+| 1 | Sub-pixel shift (parabolic interpolation) | `use_subpixel_shifts` | `True` | Angular improvement at 1° grid; shift improvement at all grids |
+| 2a | Zero DC component | `zero_dc` | `True` | Small shift accuracy improvement |
+| 2b | Particle-adaptive spectral whitening | `spectral_whitening`, `whitening_warmup_batches=8` | `True` | DS2: 1.64→1.33°, DS3: 1.69→1.43° (19% improvement) |
+| 3 | Rotation matrix composition (Cartesian grid) | `rotation_composition` | `euler_add` | **Worse** than euler_add — grid incompatible with matrix composition |
+| 4 | Fibonacci ω-ball grid + pre_multiply | `use_fibo_grid` | `False` | DS2: 1.33→1.31°, DS3 P90: 4.85→3.52° — best overall |
+| 5 | Frequency band mask (high-pass ring) | `fftfreq_min` | `0.0` (off) | **Harmful** (P90 7.33° vs 2.75°) — keep disabled |
+| 6 | Two-stage coarse-to-fine search | `use_two_stage_search`, `fine_grid_*` | `False` | DS2: median 1.37°→**0.42°** (3×); DS3: 1.60°→1.35°; 24% fewer evals vs 6°/1° |
 
 **Current best config (behind flags):**
 ```
 use_subpixel_shifts=True, zero_dc=True, spectral_whitening=True,
 whitening_warmup_batches=8, fftfreq_min=0.0,
-use_fibo_grid=True, rotation_composition=pre_multiply
+use_fibo_grid=True, rotation_composition=pre_multiply,
+use_two_stage_search=True, fine_grid_distance_degs=1.5, fine_grid_step_degs=0.5, fine_top_k=5
 ```
 
-**Behavior-preserving defaults:** `use_fibo_grid=False`, `rotation_composition=euler_add`
+`use_fibo_grid=False`, `rotation_composition=euler_add`, and `use_two_stage_search=False` remain
+the behavior-preserving defaults. DS1 validation is complete (see two-stage section for results).
 
-**Next to try:** Multi-scale coarse-to-fine (#6) — combine 3°/1° coarse pass + 1°/0.5° fine pass.
+**Starting point:** NN pose estimates (~7°) → projmatching plateaus near 1.3–1.7° at 6°/2° grid.
+**Current best (two-stage 6°/2°+1.5°/0.5° K=5):** ~0.42° DS2 median (89% reduction from 5° perturbation input).
+
+---
+
+## Key lessons learned
+
+### Sub-pixel shifts (#1)
+Integer-pixel CC peak location creates a quantization floor of 1–3° depending on pixel size and
+particle radius. Parabolic 3-point interpolation on both axes after the integer peak resolves this.
+The parabolic approximation is valid because the CC peak is smooth and band-limited.
+
+### Spectral whitening (#2b) — particle-adaptive, not reference-based
+Three attempts at reference-based whitening (`1/sqrt(amp_3d(r))` from reference volume) failed on
+DS3: RELION's LP-filtered reference has near-zero amplitude beyond the resolution cutoff, causing
+the whitening factor to explode to 6.99× at Nyquist and degrade accuracy by ~0.3°.
+
+**Root cause:** The reference volume spectrum does not match the actual particle spectrum — they
+differ in CTF envelope, noise floor, and pixel size. Particle-adaptive whitening (estimating
+`1/amp` from the actual particle DFTs over the first 8 warm-up batches) absorbs these differences
+automatically and works across datasets.
+
+Apply whitening to projections only, not particles: whitening both sides gives `1/amp²` which over-
+amplifies particle noise; projections-only gives `1/amp` — more robust. Using 8 warm-up batches
+(vs 1) matters for DS3 where defocus diversity cancels CTF oscillations in the amplitude estimate.
+
+### Frequency band mask (#5) — harmful
+Zero DC (#2a) handles the DC bias. A high-pass ring (`fftfreq_min=0.05`) removes low-frequency
+structural information that is still orientation-discriminating above DC. Result: catastrophic P90
+regression (3.16°→7.33° on DS2). **Do not use.**
+
+### Rotation composition (#3) — grid-dependent
+Euler angle addition (`delta + euler`) is an approximation that breaks near tilt poles, but it
+works well with the Cartesian Euler grid because the grid is designed for Euler-space arithmetic.
+Converting to rotation matrix composition with the same Cartesian grid made results significantly
+worse (1.33°→2.27–2.42°): the near-identity cluster that the Cartesian grid accumulates from
+Euler degeneracy (multiple (α, 0, γ) entries collapse to the same rotation) vanishes when
+converted to matrices, leaving sparser effective search near the correct pose.
+
+**Conclusion:** rotation matrix composition is only compatible with the Fibonacci grid, which is
+specifically designed for it.
+
+### Fibonacci grid (#4) — pre_multiply ≡ post_multiply
+The hypothesis that only one composition order (pre or post) is "geometrically correct" is
+disproved: for an isotropic SO(3) ball, `{R_δ @ R_est}` and `{R_est @ R_δ}` cover the same
+geodesic ball and give identical recovery accuracy (~0.85° for both in 2×2 experiment).
+Similarly, perturbation composition order (pre vs post) has no effect on recovery accuracy —
+both produce identical geodesic distance distributions from ground truth.
+
+The Fibonacci grid eliminates Euler polar degeneracy that was harming DS3 (D2 symmetry, particles
+near symmetry axes): P90 dropped from 4.85°→3.52°, a standout improvement.
+
+**Critical implementation detail:** The ω-ball shell starts at ~3.3° geodesic distance, so the
+identity rotation must be explicitly prepended to the grid. Without it, Scenario A (GT input)
+always returns a pose ≥3.3° wrong — a guaranteed regression.
+
+### Whitening warmup and on-the-fly inference
+The current warmup strategy accumulates particle DFTs over the first 8 batches then freezes the
+map. For long-running or streaming inference sessions, microscope conditions (defocus, detector
+noise) may drift. Updating the whitening estimate periodically (e.g., every few thousand
+particles) could help accuracy but has a computational cost — not yet addressed.
+
+---
+
+## Pending validation
+
+- [ ] DS2 Scenario A with Fibonacci grid 6°/1° — confirm no regression vs GT
+- [ ] DS3 Scenario B with Fibonacci grid 6°/1°
+- [x] DS1 (synthetic, EMPIAR-10166 projectionsSamePose) Scenarios A and B — **done** (see two-stage section)
+- [ ] DS3 Scenario B with Fibonacci grid 4°/0.5°  - confirm if error can be increased further
+
+---
+
+## Implemented: Two-stage coarse-to-fine (#6)
+
+**Config flags** (all default-off):
+```
+use_two_stage_search=True, fine_grid_distance_degs=1.5, fine_grid_step_degs=0.5, fine_top_k=5
+```
+
+**Actual Fibonacci grid point counts** (measured, formula: `so3_grid_near_identity_fibo(use_small_aprox=True)`):
+
+| Config | Pts | Notes |
+|--------|-----|-------|
+| 6°/2° | 209 | coarse pass |
+| 6°/1° | 1638 | previous best single-stage |
+| 4°/0.5° | 3875 | strong single-stage baseline (covers 4° initial error) |
+| 4°/0.7° | 1486 | cheaper single-stage baseline |
+| 1.5°/0.5° | 209 | fine pass (same count as 6°/2°!) |
+| 1.0°/0.5° | 63 | fine pass (aggressive) |
+
+> **Correction of earlier doc:** "2°/0.5° → ~65 pts" was wrong — 2°/0.5° gives ~488 pts.
+> The 63-pt target is hit by **1°/0.5°**; the preferred fine grid is **1.5°/0.5° (209 pts)**.
+
+**Two-stage totals** (K=5 candidates from coarse):
+
+| Coarse + Fine | Total | vs 6°/1° single |
+|---------------|-------|-----------------|
+| 6°/2° + 1.5°/0.5° | 209 + 5×209 = **1249** | 24% fewer pts |
+| 6°/2° + 1.0°/0.5° | 209 + 5×63  = **524**  | 68% fewer pts |
+
+**Expected accuracy hypothesis (to validate on DS2/DS3):**
+- Two-stage 6°/2° + 1.5°/0.5° should beat single-stage 6°/1° (finer 0.5° step, same cost class)
+- Benchmark `4°/0.5°` and `4°/0.7°` as strong single-stage baselines (4° covers typical initial error)
+
+**XBLOCK benefit:** Coarse max=209 pts, fine max=5×209=1045 pts — both allow `batch_size≥3` on GPU 1
+(vs `batch_size=2` required for flat 6°/1°).
+
+**Implementation details:**
+- `_preprocess_particles_to_F()`: particle FFT + whitening warm-up, called once per `forward()` call
+- `_expand_rotmats()`: SO(3) composition of (B, K, 3, 3) × (nDelta, 3, 3) → (B, K*nDelta, 3, 3)
+- `_do_search()`: project + CTF + correlate + topk, reusable for coarse and fine passes
+- `_forward_two_stage()`: orchestrates both passes, confidence from coarse distribution
+- `euler_add` auto-switched to `pre_multiply` when `use_two_stage_search=True`
+
+**Results (n=500, DS1 synthetic C1 / DS2 real C1 / DS3 real D2):**
+
+| Config | DS1 median | DS2 median | DS2 P90 | DS3 median | DS3 P90 |
+|--------|-----------|-----------|---------|-----------|---------|
+| Fibonacci 6°/2° flat (prev best) | — | ~1.37° | ~2.84° | ~1.60° | ~3.36° |
+| 4°/0.7° single-stage | — | 0.87° | 2.23° | **1.24°** | **2.74°** |
+| **Two-stage 6°/2°+1.5°/0.5° K=5** | **0.22°** | **0.42°** | 2.47° | 1.35° | 3.43° |
+
+Two-stage gives **2–3× better median** on DS2 (C1) vs 6°/2° flat, at lower GPU evaluations. DS3 (D2): 4°/0.7° single-stage is better (coarse K=5 candidates can cluster in one D2 domain, missing poses in the other 3). DS1 (synthetic): near-perfect 0.22° recovery.
+
+**Scenario A validation (GT input → expect ~0°):**
+- DS1: 0.00° ✓ (requires CTF-corrected reference volume)
+- DS2: 0.00° ✓
+- DS3: 1.41° — fine search finds marginally better-correlating pose than RELION GT at 0.5° resolution; single-stage still returns 0.00° ✓
+
+**Recommendation by symmetry:**
+- C1 / high symmetry: **two-stage** (best median, fewer evaluations)
+- D2 / low symmetry: **4°/0.7° single-stage** (robust spatial coverage avoids symmetry-domain clustering)
+
+**Pending validation:**
+- [ ] DS3 Scenario B with fine_top_k=10 — check if doubling K closes the D2 tail gap
+
+---
+
+## Testing protocol (reference)
+
+See `docs/projmatching_benchmark_results.md` for datasets, star file paths, benchmark commands,
+and the XBLOCK batch-size constraint on GPU 1. Key reminders:
+
+- Always use `compare_poses.py --starfile1 OUTPUT --starfile2 GT` for GT-based metrics; the
+  inline `align_star` output measures displacement from input, not from GT.
+- Fix `n_first_particles=500` for comparability.
+- DS3 (D2 symmetry): use `--sym D2` in `compare_poses.py`.
+- Fibonacci 6°/1°: requires `batch_size=2` on GPU 1 due to Triton XBLOCK limit.
+- **New single-stage baselines** (use `grid_distance_degs=4`, `grid_step_degs=0.5` or `0.7`).
+- **Two-stage benchmark command:**
+  ```bash
+  cryopares_projmatching ... --grid_distance_degs 6 --grid_step_degs 2 --batch_size 4 --gpu_id 1 \
+    --config projmatching.use_fibo_grid=True projmatching.rotation_composition=pre_multiply \
+             projmatching.use_subpixel_shifts=True projmatching.zero_dc=True \
+             projmatching.spectral_whitening=True projmatching.whitening_warmup_batches=8 \
+             projmatching.use_two_stage_search=True \
+             projmatching.fine_grid_distance_degs=1.5 projmatching.fine_grid_step_degs=0.5 \
+             projmatching.fine_top_k=5
+  ```

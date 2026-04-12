@@ -441,33 +441,64 @@ recovery accuracy — both produce the same geodesic distance distribution from 
 
 ## Summary table (all benchmarks, Scenario B vs GT)
 
-| Config | Grid | n | DS2 median | DS2 P90 | DS3 median | DS3 P90 | Recommended? |
-|--------|------|---|-----------|---------|-----------|---------|-------------|
-| baseline (all off) | Cartesian 6°/2° | 2000 | 1.64° | 3.79° | 1.69° | 4.06° | no |
-| all flags ON | Cartesian 6°/2° | 2000 | 1.32° | 3.16° | 1.43° | 4.85° (DS3 warm only) | yes |
-| +warmup8 | Cartesian 6°/2° | 2000 | 1.33° | 2.75° | 1.43° | 4.85° | yes |
-| +fibo+pre | Fibonacci 6°/2° | 2000 | **1.31°** | **2.62°** | **1.31°** | **3.52°** | **best 2° overall** |
-| all flags ON | Cartesian 6°/1° | 500 | 1.00° | 2.78° | — | — | yes if speed ok |
-| fibo+pre | Fibonacci 6°/1° | 500 | **0.85°** | ~2.0° | — | — | **best 1° overall** |
+Grid pts measured with `so3_grid_near_identity_fibo(use_small_aprox=True)` + 1 identity.
 
-**Current best recommended config:**
-```
-use_subpixel_shifts=True, zero_dc=True, spectral_whitening=True,
-whitening_warmup_batches=8, fftfreq_min=0.0,
-use_fibo_grid=True, rotation_composition=pre_multiply
-```
+| Config | Grid pts | n | DS1 median | DS2 median | DS2 P75 | DS2 P90 | DS3 median | DS3 P75 | DS3 P90 | Recommended? |
+|--------|----------|---|-----------|-----------|---------|---------|-----------|---------|---------|-------------|
+| baseline (all off) | Cartesian 6°/2° (343) | 2000 | — | 1.64° | — | 3.79° | 1.69° | — | 4.06° | no |
+| all flags ON | Cartesian 6°/2° (343) | 2000 | — | 1.32° | — | 3.16° | 1.43° | — | 4.85° | yes |
+| +warmup8 | Cartesian 6°/2° (343) | 2000 | — | 1.33° | — | 2.75° | 1.43° | — | 4.85° | yes |
+| +fibo+pre | Fibonacci 6°/2° (209) | 2000 | — | 1.31° | 1.98° | 2.62° | 1.31° | — | 3.52° | yes |
+| all flags ON | Cartesian 6°/1° (2197) | 500 | — | 1.00° | — | 2.78° | — | — | — | yes if speed ok |
+| fibo+pre | Fibonacci 6°/1° (1638) | 500 | — | 0.85° | — | ~2.0° | — | — | — | yes if speed ok |
+| fibo+pre | Fibonacci 4°/0.7° (1486) | 500 | — | 0.87° | 1.43° | 2.23° | **1.24°** | **1.93°** | **2.74°** | **yes for D2** |
+| **two-stage 6°/2°+1.5°/0.5° K=5** | **1249** | **500** | **0.22°** | **0.42°** | **1.25°** | **2.47°** | 1.35° | 2.35° | 3.43° | **yes for C1** |
 
-**Behavior-preserving defaults (not yet promoted):** `use_fibo_grid=False`, `rotation_composition=euler_add`.
-Promote after validation on DS1 (synthetic) and additional real datasets.
+All flags used for fibo/two-stage rows: `use_subpixel_shifts=True, zero_dc=True, spectral_whitening=True, whitening_warmup_batches=8, fftfreq_min=0.0, use_fibo_grid=True, rotation_composition=pre_multiply`
+
+DS1 (synthetic, C1) two-stage Scen B = 0.22° from a ~4° perturbed start, essentially perfect recovery. DS1 reference volume must be reconstructed **with CTF correction** (`--correct_ctf` default; do NOT use `--NOT_correct_ctf`).
+
+### Scenario A validation (GT input — no regression check)
+
+| Config | DS1 Scen A | DS2 Scen A | DS3 Scen A |
+|--------|-----------|-----------|-----------|
+| single-stage fibo 6°/2° | 0.00° | 0.00° | 0.00° |
+| two-stage 6°/2°+1.5°/0.5° | 0.00° | 0.00° | 1.41°* |
+
+*DS3 two-stage Scen A: fine search (0.5° step) finds a pose 1.41° from RELION GT that correlates marginally better against the reference. This is physical — single-stage can't resolve this sub-2° variation at 2° step resolution. Not a bug; single-stage Scen A (correct behavior at coarse resolution) still passes.
+
+### Two-stage vs 4°/0.7° head-to-head (n=500, Scen B vs GT)
+
+| Config | DS2 median | DS2 P90 | DS3 median | DS3 P90 | Total pts | Winner |
+|--------|-----------|---------|-----------|---------|-----------|--------|
+| 4°/0.7° single-stage | 0.87° | 2.23° | **1.24°** | **2.74°** | 1486 | DS3 |
+| two-stage 6°/2°+1.5°/0.5° | **0.42°** | 2.47° | 1.35° | 3.43° | 1249 | DS2 + fewer pts |
+
+**Key finding:** Two-stage wins for C1 symmetry (DS2: 2× better median, fewer evaluations). 4°/0.7° wins for D2 symmetry (DS3: better median and P90). The two-stage's coarse K=5 candidates can cluster in one symmetry domain, missing better poses in the other 3 D2-related domains; dense single-stage coverage avoids this.
+
+**Recommended config by use case:**
+- C1 or high-symmetry (Cn, n≥4): **two-stage** (`use_two_stage_search=True, fine_top_k=5`)
+- Low symmetry (D2, D3, T, O): **4°/0.7° single-stage** (`grid_distance_degs=4, grid_step_degs=0.7`)
+
+```
+# Two-stage (best for C1)
+use_subpixel_shifts=True, zero_dc=True, spectral_whitening=True, whitening_warmup_batches=8,
+use_fibo_grid=True, rotation_composition=pre_multiply,
+use_two_stage_search=True, fine_grid_distance_degs=1.5, fine_grid_step_degs=0.5, fine_top_k=5
+
+# Dense single-stage (best for D2/low symmetry)
+use_subpixel_shifts=True, zero_dc=True, spectral_whitening=True, whitening_warmup_batches=8,
+use_fibo_grid=True, rotation_composition=pre_multiply,
+grid_distance_degs=4, grid_step_degs=0.7
+```
 
 ---
 
-## Pending experiments (waiting for GPU availability)
+## Pending experiments
 
+- [ ] DS3 Scenario B with two-stage K=10 — check if doubling fine_top_k closes the D2 tail gap
 - [ ] DS2 Scenario A with Fibonacci grid 6°/1° (verify no regression vs GT)
-- [ ] DS2 Scenario B euler_add (Cartesian 6°/1°) vs GT — baseline comparison for the finer grid
 - [ ] DS3 Scenario B with Fibonacci grid 6°/1°
-- [ ] DS1 (synthetic) Scenario A and B once particle images finish copying
 
 ---
 

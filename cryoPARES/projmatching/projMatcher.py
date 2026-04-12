@@ -97,6 +97,22 @@ class ProjectionMatcher(nn.Module):
             print("[projmatching] use_fibo_grid=True requires rotation matrix composition; "
                   "switching rotation_composition from 'euler_add' to 'pre_multiply'.")
             self.rotation_composition = "pre_multiply"
+
+        # Two-stage coarse-to-fine search
+        self.use_two_stage_search = main_config.projmatching.use_two_stage_search
+        self.fine_grid_distance_degs = main_config.projmatching.fine_grid_distance_degs
+        self.fine_grid_step_degs = main_config.projmatching.fine_grid_step_degs
+        self.fine_top_k = main_config.projmatching.fine_top_k
+        if self.use_two_stage_search:
+            assert self.fine_top_k >= self.top_k_poses_localref, (
+                f"fine_top_k ({self.fine_top_k}) must be >= top_k_poses_localref "
+                f"({self.top_k_poses_localref})"
+            )
+            if self.rotation_composition == "euler_add":
+                print("[projmatching] use_two_stage_search=True requires matrix composition; "
+                      "switching rotation_composition from 'euler_add' to 'pre_multiply'.")
+                self.rotation_composition = "pre_multiply"
+
         # Whitening is estimated from the first N batches of particles (lazy, warm-up averaged).
         # Averaging over multiple batches smooths out per-defocus CTF oscillations (analogous to
         # RELION's per-optics-group noise model, but here we use a single global profile and let
@@ -180,6 +196,27 @@ class ProjectionMatcher(nn.Module):
                 euler_grid = self._get_so3_delta(device)  # (nDelta, 3)  in degrees
                 self._so3_delta_rotmats_cache = get_rotmat(euler_grid, device=device)
         return self._so3_delta_rotmats_cache
+
+    def _get_fine_delta_rotmats(self, device: torch.device) -> torch.Tensor:
+        """Return fine-pass delta grid as rotation matrices (nFine, 3, 3).
+
+        Always uses the Fibonacci ω-ball grid (two-stage path requires matrix composition).
+        Result is cached on self._fine_delta_rotmats_cache.
+        """
+        if (not hasattr(self, "_fine_delta_rotmats_cache") or
+                self._fine_delta_rotmats_cache.device != device):
+            from cryoPARES.geometry.grids import so3_grid_near_identity_fibo
+            rotmats, _ = so3_grid_near_identity_fibo(
+                distance_deg=self.fine_grid_distance_degs,
+                spacing_deg=self.fine_grid_step_degs,
+                use_small_aprox=True,
+                output="matrix",
+            )
+            rotmats = rotmats.to(device, dtype=torch.float32)
+            # Fibonacci ω-ball shells start at > 0 rad; prepend identity explicitly.
+            identity = torch.eye(3, device=device, dtype=torch.float32).unsqueeze(0)
+            self._fine_delta_rotmats_cache = torch.cat([identity, rotmats], dim=0)
+        return self._fine_delta_rotmats_cache
 
     def _get_so3_delta(self, device: torch.device, as_rotmats=False):
         """
@@ -401,11 +438,16 @@ class ProjectionMatcher(nn.Module):
         ds = dm.create_dataset(None)
         return ds
 
-    def forward(self, imgs, ctfs, rotmats):
-        assert imgs.shape[1:] == self.rmask.shape, (f"Error, particle images and reference maps must have "
-                                                    f"same shape ({imgs.shape[1:], self.rmask.shape}). Make sure that "
-                                                    f"you are using the same box size and sampling rate for the particles"
-                                                    f"and the reference volume.")
+    # ----------------------- Two-stage search helpers -----------------------
+
+    def _preprocess_particles_to_F(self, imgs: torch.Tensor) -> torch.Tensor:
+        """Convert real-space particle images to Fourier domain.
+
+        Applies circular mask, converts to rfft, optionally applies frequency band mask,
+        and runs the whitening warm-up accumulation step (if still in warm-up phase).
+        Side-effect: may update self.whitening_map.
+        Returns fparts: shape (B, H, W//2+1[, 2]).
+        """
         fparts = _real_to_fourier_2d(imgs * self.rmask,
                                      view_complex_as_two_float32=USE_TWO_FLOAT32_FOR_COMPLEX)
 
@@ -447,7 +489,132 @@ class ProjectionMatcher(nn.Module):
                 wmap = torch.where(in_band, 1.0 / (amp_in_band + eps), torch.zeros_like(avg_amp))
                 self.whitening_map = wmap.unsqueeze(0)  # (1, H, W//2+1)
 
+        return fparts
+
+    def _expand_rotmats(
+            self,
+            rotmats: torch.Tensor,
+            delta_rotmats: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compose each input rotation with each delta, return flattened candidates.
+
+        Args:
+            rotmats:       (B, K_in, 3, 3) — K_in initial poses per particle
+            delta_rotmats: (nDelta, 3, 3)  — delta search grid
+
+        Returns:
+            (B, K_in * nDelta, 3, 3) — all candidate rotations
+        """
+        cur = rotmats.unsqueeze(2)        # (B, K_in, 1, 3, 3)
+        dlt = delta_rotmats[None, None]   # (1, 1, nDelta, 3, 3)
+        if self.rotation_composition == "pre_multiply":
+            # R_total = R_delta @ R_current  (delta in lab frame)
+            expanded = dlt @ cur
+        else:  # post_multiply
+            # R_total = R_current @ R_delta  (delta in body frame)
+            expanded = cur @ dlt
+        return expanded.reshape(rotmats.size(0), -1, 3, 3)
+
+    def _do_search(
+            self,
+            fparts: torch.Tensor,
+            ctfs: torch.Tensor,
+            expanded_rotmats: torch.Tensor,
+            bsize: int,
+            topk: int,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Project all candidate rotations, correlate with particles, return top-topk.
+
+        Does NOT delete ctfs — caller is responsible for freeing it after the last call.
+
+        Args:
+            fparts:          (B, H, W//2+1[, 2]) — Fourier-domain particle images
+            ctfs:            (B, H, W//2+1[, 2]) — CTF envelopes
+            expanded_rotmats:(B, nCand, 3, 3)    — all candidate rotation matrices
+            bsize:           batch size B
+            topk:            number of winners to return
+
+        Returns:
+            perImgCorr:   (B, nCand) — full correlation array (for confidence stats)
+            maxCorrs:     (B, topk)
+            predRotMats:  (B, topk, 3, 3)
+            pixelShiftsXY:(B, topk, 2)  — pixel-coordinate peak locations
+        """
+        projs = self._compute_projections_from_rotmats(expanded_rotmats.reshape(-1, 3, 3))
+
+        # Always reshape (B*nCand, ...) → (B, nCand, ...) before correlateF, whether or not CTF is applied.
+        _shapeIdx = -3 if USE_TWO_FLOAT32_FOR_COMPLEX else -2
+        projs = projs.reshape(bsize, -1, *projs.shape[_shapeIdx:])
+
+        if self.correct_ctf:
+            ctfs_view = ctfs.unsqueeze(1)
+            if USE_TWO_FLOAT32_FOR_COMPLEX:
+                ctfs_view = ctfs_view.unsqueeze(-1)
+            projs = self._apply_ctfF(projs, ctfs_view)
+
+        perImgCorr, pixelShiftsXY = self.correlateF(fparts.unsqueeze(1), projs)
+        maxCorrs, maxCorrsIdxs = perImgCorr.topk(topk, sorted=True, largest=True, dim=-1)
+
+        batch_range = torch.arange(bsize, device=fparts.device).unsqueeze(1)
+        pixelShiftsXY_topk = pixelShiftsXY[batch_range, maxCorrsIdxs]   # (B, topk, 2)
+        predRotMats = expanded_rotmats[batch_range, maxCorrsIdxs]         # (B, topk, 3, 3)
+
+        return perImgCorr, maxCorrs, predRotMats, pixelShiftsXY_topk
+
+    def _forward_two_stage(
+            self,
+            fparts: torch.Tensor,
+            ctfs: torch.Tensor,
+            rotmats: torch.Tensor,
+            bsize: int,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Two-stage coarse-to-fine search.
+
+        Stage 1 (coarse): self.grid_distance_degs / self.grid_step_degs grid → top fine_top_k
+        Stage 2 (fine):   self.fine_grid_distance_degs / self.fine_grid_step_degs grid around
+                          each coarse winner → global top top_k_poses_localref
+
+        Confidence is computed against the coarse correlation distribution (stable, full pool).
+        """
+        # --- Stage 1: coarse ---
+        coarse_delta = self._get_so3_delta_rotmats(rotmats.device)           # (nCoarse, 3, 3)
+        coarse_expanded = self._expand_rotmats(rotmats, coarse_delta)         # (B, nCoarse, 3, 3)
+        coarse_corrs_full, _, coarse_rotmats, _ = self._do_search(
+            fparts, ctfs, coarse_expanded, bsize, topk=self.fine_top_k
+        )
+        # coarse_corrs_full: (B, nCoarse) — full distribution for confidence
+        # coarse_rotmats:    (B, fine_top_k, 3, 3)
+        del coarse_expanded
+
+        # --- Stage 2: fine ---
+        fine_delta = self._get_fine_delta_rotmats(rotmats.device)             # (nFine, 3, 3)
+        fine_expanded = self._expand_rotmats(coarse_rotmats, fine_delta)      # (B, fine_top_k*nFine, 3, 3)
+        _, fine_corrs, fine_rotmats, fine_shifts = self._do_search(
+            fparts, ctfs, fine_expanded, bsize, topk=self.top_k_poses_localref
+        )
+        del ctfs
+        del fine_expanded
+
+        # Confidence: compare fine winners against the coarse correlation distribution
+        mean_corr = coarse_corrs_full.mean(-1, keepdims=True)
+        std_corr  = coarse_corrs_full.std(-1,  keepdims=True)
+        comparedWeight = torch.distributions.Normal(mean_corr, std_corr + 1e-6).cdf(fine_corrs)
+
+        predShiftsAngsXY = -(fine_shifts.float() - self.half_particle_size) * self.vol_voxel_size
+        return fine_corrs, fine_rotmats, predShiftsAngsXY, comparedWeight
+
+    # ----------------------- Main forward -----------------------
+
+    def forward(self, imgs, ctfs, rotmats):
+        assert imgs.shape[1:] == self.rmask.shape, (f"Error, particle images and reference maps must have "
+                                                    f"same shape ({imgs.shape[1:], self.rmask.shape}). Make sure that "
+                                                    f"you are using the same box size and sampling rate for the particles"
+                                                    f"and the reference volume.")
+        fparts = self._preprocess_particles_to_F(imgs)
         bsize = rotmats.size(0)
+
+        if self.use_two_stage_search:
+            return self._forward_two_stage(fparts, ctfs, rotmats, bsize)
 
         if self.rotation_composition == "euler_add":
             # Legacy: add Euler angles directly. Fast but approximate near poles.
@@ -456,44 +623,33 @@ class ProjectionMatcher(nn.Module):
                                   eulerDegs.unsqueeze(2))  # (B, topK, nDelta, 3)
             expanded_eulerDegs = expanded_eulerDegs.reshape(bsize, -1, 3)
             projs = self._compute_projections_from_euleres(expanded_eulerDegs.reshape(-1, 3))[0]
-            expanded_rotmats = None  # recover from eulers at the end
+            if self.correct_ctf:
+                ctfs = ctfs.unsqueeze(1)
+                if USE_TWO_FLOAT32_FOR_COMPLEX:
+                    _shapeIdx = -3
+                    ctfs = ctfs.unsqueeze(-1)
+                else:
+                    _shapeIdx = -2
+                projs = self._apply_ctfF(projs.reshape(bsize, -1, *projs.shape[_shapeIdx:]), ctfs)
+            del ctfs
+            perImgCorr, pixelShiftsXY = self.correlateF(fparts.unsqueeze(1), projs)
+            maxCorrs, maxCorrsIdxs = perImgCorr.topk(self.top_k_poses_localref, sorted=True, largest=True, dim=-1)
+            batch_idxs_range = torch.arange(pixelShiftsXY.size(0)).unsqueeze(1)
+            pixelShiftsXY = pixelShiftsXY[batch_idxs_range, maxCorrsIdxs]
+            predEulers = expanded_eulerDegs[batch_idxs_range, maxCorrsIdxs]
+            predRotMats = get_rotmat(predEulers)
         else:
             # Exact SO(3) composition via rotation matrices — no Euler singularity at poles.
             # delta grid: (nDelta, 3, 3) — either Cartesian-converted or Fibonacci ω-ball
             delta_rotmats = self._get_so3_delta_rotmats(rotmats.device)  # (nDelta, 3, 3)
             # rotmats: (B, topK, 3, 3)
-            cur = rotmats.unsqueeze(2)           # (B, topK, 1, 3, 3)
-            dlt = delta_rotmats[None, None]      # (1, 1, nDelta, 3, 3)
-            if self.rotation_composition == "pre_multiply":
-                # R_total = R_delta @ R_current  (delta in lab frame, grid wraps around R_current)
-                expanded_rotmats = dlt @ cur     # (B, topK, nDelta, 3, 3)
-            else:  # post_multiply
-                # R_total = R_current @ R_delta  (delta in body/particle frame)
-                expanded_rotmats = cur @ dlt     # (B, topK, nDelta, 3, 3)
-            expanded_rotmats = expanded_rotmats.reshape(bsize, -1, 3, 3)  # (B, topK*nDelta, 3, 3)
+            expanded_rotmats = self._expand_rotmats(rotmats, delta_rotmats)
             # TODO: Remove duplicate rotmats if n_input_angles > 1 (affects speed)
-            projs = self._compute_projections_from_rotmats(expanded_rotmats.reshape(-1, 3, 3))
-            expanded_eulerDegs = None  # recover from rotmats at the end
+            perImgCorr, maxCorrs, predRotMats, pixelShiftsXY = self._do_search(
+                fparts, ctfs, expanded_rotmats, bsize, self.top_k_poses_localref
+            )
+            del ctfs
 
-        if self.correct_ctf:
-            ctfs = ctfs.unsqueeze(1)
-            if USE_TWO_FLOAT32_FOR_COMPLEX:
-                _shapeIdx = -3
-                ctfs = ctfs.unsqueeze(-1)
-            else:
-                _shapeIdx = -2
-            projs = self._apply_ctfF(projs.reshape(bsize, -1, *projs.shape[_shapeIdx:]), ctfs)
-        del ctfs
-        perImgCorr, pixelShiftsXY = self.correlateF(fparts.unsqueeze(1), projs)
-        maxCorrs, maxCorrsIdxs = perImgCorr.topk(self.top_k_poses_localref, sorted=True, largest=True, dim=-1)
-
-        batch_idxs_range = torch.arange(pixelShiftsXY.size(0)).unsqueeze(1)
-        pixelShiftsXY = pixelShiftsXY[batch_idxs_range, maxCorrsIdxs]
-        if expanded_rotmats is not None:
-            predRotMats = expanded_rotmats[batch_idxs_range, maxCorrsIdxs]  # (B, topK, 3, 3)
-        else:
-            predEulers = expanded_eulerDegs[batch_idxs_range, maxCorrsIdxs]
-            predRotMats = get_rotmat(predEulers)
         mean_corr = perImgCorr.mean(-1, keepdims=True)
         std_corr = perImgCorr.std(-1, keepdims=True)
         comparedWeight = torch.distributions.Normal(mean_corr, std_corr + 1e-6).cdf(maxCorrs)  # 1-P(I_i > All_images)

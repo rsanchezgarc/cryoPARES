@@ -443,17 +443,20 @@ recovery accuracy — both produce the same geodesic distance distribution from 
 
 Grid pts measured with `so3_grid_near_identity_fibo(use_small_aprox=True)` + 1 identity.
 
-| Config | Grid pts | n | DS1 median | DS2 median | DS2 P75 | DS2 P90 | DS3 median | DS3 P75 | DS3 P90 | Recommended? |
-|--------|----------|---|-----------|-----------|---------|---------|-----------|---------|---------|-------------|
-| baseline (all off) | Cartesian 6°/2° (343) | 2000 | — | 1.64° | — | 3.79° | 1.69° | — | 4.06° | no |
-| all flags ON | Cartesian 6°/2° (343) | 2000 | — | 1.32° | — | 3.16° | 1.43° | — | 4.85° | yes |
-| +warmup8 | Cartesian 6°/2° (343) | 2000 | — | 1.33° | — | 2.75° | 1.43° | — | 4.85° | yes |
-| +fibo+pre | Fibonacci 6°/2° (209) | 2000 | — | 1.31° | 1.98° | 2.62° | 1.31° | — | 3.52° | yes |
-| all flags ON | Cartesian 6°/1° (2197) | 500 | — | 1.00° | — | 2.78° | — | — | — | yes if speed ok |
-| fibo+pre | Fibonacci 6°/1° (1638) | 500 | — | 0.85° | — | ~2.0° | — | — | — | yes if speed ok |
-| fibo+pre | Fibonacci 4°/0.7° (1486) | 500 | — | 0.87° | 1.43° | 2.23° | **1.24°** | **1.93°** | **2.74°** | **yes for D2** |
-| fibo+pre | Fibonacci 4°/0.5° (3875) | 500 | — | — | — | — | 1.22° | 1.89° | 2.64° | no (2× cost, 0.02° gain) |
-| **two-stage 6°/2°+1.5°/0.5° K=5** | **1249** | **500** | **0.22°** | **0.42°** | **1.25°** | **2.47°** | 1.35° | 2.35° | 3.43° | **yes for C1** |
+| Config | Grid pts | n | DS1 med | DS2 med | DS2 P75 | DS2 P90 | DS3 med | DS3 P75 | DS3 P90 | Time/500 | Rec? |
+|--------|----------|---|--------|--------|---------|---------|--------|---------|---------|---------|------|
+| baseline (all off) | Cartesian 6°/2° (343) | 2000 | — | 1.64° | — | 3.79° | 1.69° | — | 4.06° | — | no |
+| all flags ON | Cartesian 6°/2° (343) | 2000 | — | 1.32° | — | 3.16° | 1.43° | — | 4.85° | — | yes |
+| +warmup8 | Cartesian 6°/2° (343) | 2000 | — | 1.33° | — | 2.75° | 1.43° | — | 4.85° | — | yes |
+| +fibo+pre | Fibonacci 6°/2° (209) | 2000 | — | 1.31° | 1.88° | 2.62° | 1.31° | 1.98° | 3.52° | ~30s | yes |
+| all flags ON | Cartesian 6°/1° (2197) | 500 | — | 1.00° | — | 2.78° | — | — | — | — | yes |
+| fibo+pre | Fibonacci 6°/1° (1638) | 500 | — | 0.89° | 1.62° | 2.67° | 1.38° | 2.15° | 3.18° | ~58s | no¹ |
+| fibo+pre | Fibonacci 4°/0.7° (1486) | 500 | — | 0.87° | 1.43° | 2.23° | **1.24°** | **1.93°** | **2.74°** | ~52s | **yes D2** |
+| fibo+pre | Fibonacci 4°/0.5° (3875) | 500 | — | — | — | — | 1.22° | 1.89° | 2.64° | ~2m | no² |
+| **two-stage 6°/2°+1.5°/0.5° K=5** | **1249** | **500** | **0.22°** | **0.42°** | **1.25°** | **2.47°** | 1.35° | 2.35° | 3.43° | ~50s | **yes C1** |
+
+¹ 6°/1°: slower than two-stage (58s vs 50s) yet less accurate on both datasets — dominated by two-stage.
+² 4°/0.5°: 2.3× slower than 4°/0.7° for 0.02° median gain — not worth it.
 
 All flags used for fibo/two-stage rows: `use_subpixel_shifts=True, zero_dc=True, spectral_whitening=True, whitening_warmup_batches=8, fftfreq_min=0.0, use_fibo_grid=True, rotation_composition=pre_multiply`
 

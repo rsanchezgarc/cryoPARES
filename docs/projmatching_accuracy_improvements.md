@@ -147,13 +147,18 @@ use_two_stage_search=True, fine_grid_distance_degs=1.5, fine_grid_step_degs=0.5,
 - `_forward_two_stage()`: orchestrates both passes, confidence from coarse distribution
 - `euler_add` auto-switched to `pre_multiply` when `use_two_stage_search=True`
 
-**Results (n=500, DS1 synthetic C1 / DS2 real C1 / DS3 real D2):**
+**Results (n=500 except 6°/2° n=2000, Scen B vs GT):**
 
-| Config | DS1 median | DS2 median | DS2 P90 | DS3 median | DS3 P90 |
-|--------|-----------|-----------|---------|-----------|---------|
-| Fibonacci 6°/2° flat (prev best) | — | ~1.37° | ~2.84° | ~1.60° | ~3.36° |
-| 4°/0.7° single-stage | — | 0.87° | 2.23° | **1.24°** | **2.74°** |
-| **Two-stage 6°/2°+1.5°/0.5° K=5** | **0.22°** | **0.42°** | 2.47° | 1.35° | 3.43° |
+| Config | Pts | DS1 med | DS2 med | DS2 P75 | DS2 P90 | DS3 med | DS3 P75 | DS3 P90 | Time/500 |
+|--------|-----|--------|--------|---------|---------|--------|---------|---------|---------|
+| fibo 6°/2° | 209 | — | 1.31° | 1.88° | 2.62° | 1.31° | 1.98° | 3.52° | ~30s |
+| fibo 6°/1° | 1638 | — | 0.89° | 1.62° | 2.67° | 1.38° | 2.15° | 3.18° | ~58s |
+| fibo 4°/0.7° | 1486 | — | 0.87° | 1.43° | 2.23° | **1.24°** | **1.93°** | **2.74°** | ~52s |
+| **two-stage 6°/2°+1.5°/0.5° K=5** | **1249** | **0.22°** | **0.42°** | **1.25°** | 2.47° | 1.35° | 2.35° | 3.43° | ~50s |
+
+Note: 6°/1° (1638 pts, ~58s) is slower than two-stage (1249 pts, ~50s) yet less accurate on both datasets.
+4°/0.7° wins on DS3 because it concentrates coverage where it matters (≤4° initial error, 0.7° step)
+rather than wasting evaluations from 4°–6°.
 
 Two-stage gives **2–3× better median** on DS2 (C1) vs 6°/2° flat, at lower GPU evaluations. DS3 (D2): 4°/0.7° single-stage is better (coarse K=5 candidates can cluster in one D2 domain, missing poses in the other 3). DS1 (synthetic): near-perfect 0.22° recovery.
 

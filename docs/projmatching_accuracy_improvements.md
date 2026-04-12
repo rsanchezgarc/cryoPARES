@@ -168,8 +168,10 @@ Two-stage gives **2–3× better median** on DS2 (C1) vs 6°/2° flat, at lower 
 
 **DS3 Scen B K=10 result:** Median 1.36°, P75 2.29°, P90 3.50° — identical to K=5 (1.35°/2.35°/3.43°) at 77% more evaluations (2299 vs 1249 pts, ~77s vs ~52s). The D2 gap is geometric (symmetry-axis ambiguity), not a candidate-count issue. K=10 ruled out.
 
+**DS3 Scen B 4°/0.5° result:** Median 1.22°, P75 1.89°, P90 2.64° in ~2m (batch_size=1) vs 4°/0.7°: 1.24°/1.93°/2.74° in ~52s (batch_size=2). Only 0.02° median gain for 2.3× wall-clock cost. **4°/0.7° is the sweet spot for D2 — going finer hits diminishing returns.**
+
 **Pending validation:**
-- [ ] DS3 Scen B 4°/0.5° single-stage — accuracy ceiling for dense single-stage (batch_size=1 due to XBLOCK)
+- [ ] Master branch comparison + wall-clock timing (required before merging)
 
 ---
 

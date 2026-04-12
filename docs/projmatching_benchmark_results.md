@@ -452,6 +452,7 @@ Grid pts measured with `so3_grid_near_identity_fibo(use_small_aprox=True)` + 1 i
 | all flags ON | Cartesian 6°/1° (2197) | 500 | — | 1.00° | — | 2.78° | — | — | — | yes if speed ok |
 | fibo+pre | Fibonacci 6°/1° (1638) | 500 | — | 0.85° | — | ~2.0° | — | — | — | yes if speed ok |
 | fibo+pre | Fibonacci 4°/0.7° (1486) | 500 | — | 0.87° | 1.43° | 2.23° | **1.24°** | **1.93°** | **2.74°** | **yes for D2** |
+| fibo+pre | Fibonacci 4°/0.5° (3875) | 500 | — | — | — | — | 1.22° | 1.89° | 2.64° | no (2× cost, 0.02° gain) |
 | **two-stage 6°/2°+1.5°/0.5° K=5** | **1249** | **500** | **0.22°** | **0.42°** | **1.25°** | **2.47°** | 1.35° | 2.35° | 3.43° | **yes for C1** |
 
 All flags used for fibo/two-stage rows: `use_subpixel_shifts=True, zero_dc=True, spectral_whitening=True, whitening_warmup_batches=8, fftfreq_min=0.0, use_fibo_grid=True, rotation_composition=pre_multiply`
@@ -497,7 +498,7 @@ grid_distance_degs=4, grid_step_degs=0.7
 ## Pending experiments
 
 - [x] DS3 Scenario B with two-stage K=10 — **ruled out**: 1.36°/3.50° vs K=5 1.35°/3.43°, at 77% more evaluations. D2 gap is geometric, not a K issue.
-- [ ] DS3 Scen B 4°/0.5° single-stage — accuracy ceiling (batch_size=1 due to XBLOCK; ~3875 pts)
+- [x] DS3 Scen B 4°/0.5° single-stage — **done**: 1.22°/2.64° P90, ~2m. Only 0.02° better than 4°/0.7° at 2.3× cost. 4°/0.7° confirmed as sweet spot.
 - [ ] DS2 Scenario A with Fibonacci grid 6°/1° (verify no regression vs GT)
 - [ ] DS3 Scenario B with Fibonacci grid 6°/1°
 - [ ] **Master branch comparison + timing** — run master (no changes) and branch best configs on DS2/DS3 Scen B, measure wall-clock per 500 particles; required before merging

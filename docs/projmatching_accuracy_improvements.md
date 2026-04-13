@@ -158,12 +158,12 @@ use_two_stage_search=True, fine_grid_distance_degs=1.5, fine_grid_step_degs=0.5,
 | fibo 4°/0.7° | 1486 | — | 0.87° | 1.43° | 2.23° | **1.24°** | **1.93°** | **2.74°** | **~40.8s** |
 | **two-stage 6°/2°+1.5°/0.5° K=5** | **1249** | **0.22°** | **0.42°** | **1.25°** | 2.47° | 1.35° | 2.35° | 3.43° | **~33.4s** |
 
-Timing measured on 10K particles, 3 runs each, GPU 1 (one process at a time). Per-500 = raw ÷ 20.
+Timing measured on 10K particles, 3 runs each, RTX 6000 Ada 49 GB. Per-500 = raw ÷ 20.
 Master baseline: DS2 187s/10K, DS3 200s/10K (Cartesian 6°/2°, batch_size=11).
-Fibo 6°/2°: DS2 126s/10K, DS3 129s/10K — **faster than master** (fewer grid pts: 209 vs 343) and more accurate. No regression.
-Fibo 4°/1°: DS2 595s/10K, DS3 612s/10K (batch_size=8, 488 pts).
-Fibo 6°/1°: DS2 1960s/10K, DS3 2020s/10K (batch_size=2, 1638 pts — XBLOCK limited).
-Branch two-stage: DS2 668s/10K; branch 4°/0.7°: DS3 815s/10K.
+Fibo 6°/2°: DS2 126s/10K, DS3 129s/10K — **faster than master** (fewer grid pts: 209 vs 343). No regression.
+Fibo 4°/1°: DS2 595s/10K, DS3 612s/10K (batch_size=8). Fibo 6°/1°: DS2 1960s/10K, DS3 2020s/10K (batch_size=2).
+Branch two-stage: DS2 668s/10K (batch_size=3); branch 4°/0.7°: DS3 815s/10K (batch_size=2).
+**Batch-size note:** the OOM limit is ~8192 total projs/batch (not 4096). Optimal: 6°/1°→bs=4 (~2× speedup), 4°/0.7°→bs=5, two-stage→bs=7. Times above are under-batched; re-measurement pending.
 
 Note: 6°/1° (1638 pts) is slower than two-stage (1249 pts) yet less accurate on both datasets — dominated.
 4°/0.7° wins on DS3 because it concentrates coverage where it matters (≤4° initial error, 0.7° step)

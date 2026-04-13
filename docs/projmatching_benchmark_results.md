@@ -445,17 +445,18 @@ Grid pts measured with `so3_grid_near_identity_fibo(use_small_aprox=True)` + 1 i
 
 | Config | Grid pts | n | DS1 med | DS2 med | DS2 P75 | DS2 P90 | DS3 med | DS3 P75 | DS3 P90 | Time/500 | Rec? |
 |--------|----------|---|--------|--------|---------|---------|--------|---------|---------|---------|------|
-| baseline (all off) | Cartesian 6°/2° (343) | 2000 | — | 1.64° | — | 3.79° | 1.69° | — | 4.06° | — | no |
+| baseline (all off) | Cartesian 6°/2° (343) | 2000 | — | 1.64° | — | 3.79° | 1.69° | — | 4.06° | ~9.4s | no |
 | all flags ON | Cartesian 6°/2° (343) | 2000 | — | 1.32° | — | 3.16° | 1.43° | — | 4.85° | — | yes |
 | +warmup8 | Cartesian 6°/2° (343) | 2000 | — | 1.33° | — | 2.75° | 1.43° | — | 4.85° | — | yes |
-| +fibo+pre | Fibonacci 6°/2° (209) | 2000 | — | 1.31° | 1.88° | 2.62° | 1.31° | 1.98° | 3.52° | ~30s | yes |
+| +fibo+pre | Fibonacci 6°/2° (209) | 2000 | — | 1.31° | 1.88° | 2.62° | 1.31° | 1.98° | 3.52° | **~6.4s** | yes |
 | all flags ON | Cartesian 6°/1° (2197) | 500 | — | 1.00° | — | 2.78° | — | — | — | — | yes |
-| fibo+pre | Fibonacci 6°/1° (1638) | 500 | — | 0.89° | 1.62° | 2.67° | 1.38° | 2.15° | 3.18° | ~58s | no¹ |
-| fibo+pre | Fibonacci 4°/0.7° (1486) | 500 | — | 0.87° | 1.43° | 2.23° | **1.24°** | **1.93°** | **2.74°** | ~52s | **yes D2** |
+| fibo+pre | Fibonacci 4°/1° (488) | 500 | — | 0.97° | 1.53° | 2.13° | 1.35° | 2.03° | 2.81° | **~30s** | yes |
+| fibo+pre | Fibonacci 6°/1° (1638) | 500 | — | 0.89° | 1.62° | 2.67° | 1.38° | 2.15° | 3.18° | ~99s | no¹ |
+| fibo+pre | Fibonacci 4°/0.7° (1486) | 500 | — | 0.87° | 1.43° | 2.23° | **1.24°** | **1.93°** | **2.74°** | ~40.8s | **yes D2** |
 | fibo+pre | Fibonacci 4°/0.5° (3875) | 500 | — | — | — | — | 1.22° | 1.89° | 2.64° | ~2m | no² |
-| **two-stage 6°/2°+1.5°/0.5° K=5** | **1249** | **500** | **0.22°** | **0.42°** | **1.25°** | **2.47°** | 1.35° | 2.35° | 3.43° | ~50s | **yes C1** |
+| **two-stage 6°/2°+1.5°/0.5° K=5** | **1249** | **500** | **0.22°** | **0.42°** | **1.25°** | **2.47°** | 1.35° | 2.35° | 3.43° | ~33.4s | **yes C1** |
 
-¹ 6°/1°: slower than two-stage (58s vs 50s) yet less accurate on both datasets — dominated by two-stage.
+¹ 6°/1°: 99s/500 — 3× slower than two-stage and less accurate on both datasets — dominated.
 ² 4°/0.5°: 2.3× slower than 4°/0.7° for 0.02° median gain — not worth it.
 
 All flags used for fibo/two-stage rows: `use_subpixel_shifts=True, zero_dc=True, spectral_whitening=True, whitening_warmup_batches=8, fftfreq_min=0.0, use_fibo_grid=True, rotation_composition=pre_multiply`
@@ -521,8 +522,14 @@ Per-500 estimates = raw time ÷ 20.
 |--------|---------|-------|-------|-------|--------------|---------|
 | fibo 6°/2°, batch_size=11 | DS2 | 2m06.8s | 2m05.8s | 2m05.6s | **2m06s (126s)** | **~6.3s** |
 | fibo 6°/2°, batch_size=11 | DS3 | 2m09.3s | 2m08.7s | 2m09.0s | **2m09s (129s)** | **~6.5s** |
+| fibo 4°/1°, batch_size=8 | DS2 | 9m55.8s | 9m55.0s | 9m54.1s | **9m55s (595s)** | **~29.8s** |
+| fibo 4°/1°, batch_size=8 | DS3 | 10m11.3s | 10m12.5s | 10m12.5s | **10m12s (612s)** | **~30.6s** |
 | two-stage 6°/2°+1.5°/0.5° K=5, batch_size=3 | DS2 | 11m09.6s | 11m07.8s | 11m08.7s | **11m08s (668s)** | **~33.4s** |
 | fibo 4°/0.7°, batch_size=2 | DS3 | 13m35.9s | 13m35.6s | 13m35.3s | **13m35s (815s)** | **~40.8s** |
+| fibo 6°/1°, batch_size=2 | DS2 | 28m07.3s* | 32m40.8s | 32m40.4s | **32m40s (1960s)** | **~98s** |
+| fibo 6°/1°, batch_size=2 | DS3 | 33m40.7s | 33m32.7s | 33m42.0s | **33m38s (2018s)** | **~101s** |
+
+*DS2 6°/1° Run 1 faster (GPU warmup/cache effect); runs 2–3 are steady-state.
 
 ### Speed vs accuracy comparison
 
@@ -530,9 +537,12 @@ Per-500 estimates = raw time ÷ 20.
 |--------|---------|---------|-----------|---------|-----------|
 | master (Cartesian 6°/2°, batch_size=11) | DS2 | ~9.4s | 1.64° | 3.79° | baseline |
 | branch fibo 6°/2°, batch_size=11 | DS2 | **~6.3s** | **1.31°** | **2.62°** | 1.5× faster, more accurate |
+| branch fibo 4°/1°, batch_size=8 | DS2 | ~29.8s | 0.97° | 2.13° | 3.2× slower, good tradeoff |
 | branch two-stage K=5, batch_size=3 | DS2 | ~33.4s | **0.42°** | **2.47°** | 3.6× slower, 4× better median |
+| branch fibo 6°/1°, batch_size=2 | DS2 | ~98s | 0.89° | 2.67° | 10.4× slower, worse than two-stage |
 | master (Cartesian 6°/2°, batch_size=11) | DS3 | ~10.0s | 1.69° | 4.06° | baseline |
 | branch fibo 6°/2°, batch_size=11 | DS3 | **~6.5s** | **1.31°** | **3.52°** | 1.5× faster, more accurate |
+| branch fibo 4°/1°, batch_size=8 | DS3 | ~30.6s | 1.35° | 2.81° | 3.1× slower |
 | branch fibo 4°/0.7°, batch_size=2 | DS3 | ~40.8s | **1.24°** | **2.74°** | 4.1× slower, best accuracy |
 
 **Key finding — no regression:** branch fibo 6°/2° (same grid spacing as master, same batch_size) is 1.5× *faster* than master because the Fibonacci grid has fewer points (209 vs Cartesian 343) and more accurate (1.31° vs 1.64°/1.69°). The branch's accuracy improvements come at a cost only when using denser grids (4°/0.7°) or two-stage search.

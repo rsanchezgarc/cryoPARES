@@ -152,18 +152,18 @@ use_two_stage_search=True, fine_grid_distance_degs=1.5, fine_grid_step_degs=0.5,
 | Config | Pts | DS1 med | DS2 med | DS2 P75 | DS2 P90 | DS3 med | DS3 P75 | DS3 P90 | Time/500 |
 |--------|-----|--------|--------|---------|---------|--------|---------|---------|---------|
 | **master** Cartesian 6°/2° | 343 | — | 1.64° | — | 3.79° | 1.69° | — | 4.06° | **~9.4s** |
-| fibo 6°/2° | 209 | — | 1.31° | 1.88° | 2.62° | 1.31° | 1.98° | 3.52° | **~6.4s** |
-| fibo 4°/1° | 488 | — | 0.97° | 1.53° | 2.13° | 1.35° | 2.03° | 2.81° | **~30s** |
-| fibo 6°/1° | 1638 | — | 0.89° | 1.62° | 2.67° | 1.38° | 2.15° | 3.18° | **~99s** |
-| fibo 4°/0.7° | 1486 | — | 0.87° | 1.43° | 2.23° | **1.24°** | **1.93°** | **2.74°** | **~40.8s** |
-| **two-stage 6°/2°+1.5°/0.5° K=5** | **1249** | **0.22°** | **0.42°** | **1.25°** | 2.47° | 1.35° | 2.35° | 3.43° | **~33.4s** |
+| fibo 6°/2° (bs=32) | 209 | — | 1.31° | 1.88° | 2.62° | 1.31° | 1.98° | 3.52° | **~6.2s** |
+| fibo 4°/1° (bs=16) | 488 | — | 0.97° | 1.53° | 2.13° | 1.35° | 2.03° | 2.81° | **~13.4s** |
+| fibo 4°/0.7° (bs=5) | 1486 | — | 0.87° | 1.43° | 2.23° | **1.24°** | **1.93°** | **2.74°** | **~40.4s** |
+| fibo 6°/1° (bs=4) | 1638 | — | 0.89° | 1.62° | 2.67° | 1.38° | 2.15° | 3.18° | **~43.2s** |
+| **two-stage 6°/2°+1.5°/0.5° K=5 (bs=7)** | **1249** | **0.22°** | **0.42°** | **1.25°** | 2.47° | 1.35° | 2.35° | 3.43° | **~33.2s** |
 
-Timing measured on 10K particles, 3 runs each, RTX 6000 Ada 49 GB. Per-500 = raw ÷ 20.
+Timing measured on 10K particles, 3 runs each, RTX 6000 Ada 49 GB. Per-500 = raw ÷ 20. All branch times use optimal batch sizes (OOM limit ~8192 total projs/batch).
 Master baseline: DS2 187s/10K, DS3 200s/10K (Cartesian 6°/2°, batch_size=11).
-Fibo 6°/2°: DS2 126s/10K, DS3 129s/10K — **faster than master** (fewer grid pts: 209 vs 343). No regression.
-Fibo 4°/1°: DS2 595s/10K, DS3 612s/10K (batch_size=8). Fibo 6°/1°: DS2 1960s/10K, DS3 2020s/10K (batch_size=2).
-Branch two-stage: DS2 668s/10K (batch_size=3); branch 4°/0.7°: DS3 815s/10K (batch_size=2).
-**Batch-size note:** the OOM limit is ~8192 total projs/batch (not 4096). Optimal: 6°/1°→bs=4 (~2× speedup), 4°/0.7°→bs=5, two-stage→bs=7. Times above are under-batched; re-measurement pending.
+Fibo 6°/2° (bs=32): DS2 124s/10K, DS3 128s/10K — **faster than master** (fewer grid pts: 209 vs 343). No regression.
+Fibo 4°/1° (bs=16): DS2 267s/10K, DS3 277s/10K — **2.2× faster than prior bs=8 measurement** (595s/612s).
+Fibo 6°/1° (bs=4): DS2 863s/10K, DS3 889s/10K — **2.3× faster than prior bs=2 measurement** (1960s/2018s).
+Two-stage (bs=7): DS2 664s/10K. Fibo 4°/0.7° (bs=5): DS3 808s/10K — both unchanged from prior sub-optimal bs (sparse grids are compute-bound per batch, not launch-overhead-bound).
 
 Note: 6°/1° (1638 pts) is slower than two-stage (1249 pts) yet less accurate on both datasets — dominated.
 4°/0.7° wins on DS3 because it concentrates coverage where it matters (≤4° initial error, 0.7° step)

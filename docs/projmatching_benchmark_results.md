@@ -512,14 +512,14 @@ Hardware: NVIDIA RTX 6000 Ada (49 GB). One process at a time, 3 runs, 10 000 par
 | **master** Cartesian 6°/2° | Cartesian | 216 | 11–32 | ~3200 | ~3000 |
 | **master** Cartesian 4°/2° | Cartesian | 64 | 64 | ~7700 | ~7400 |
 | **master** Cartesian 4°/1° | Cartesian | 512 | 8–16 | ~1600 | ~700† |
-| **master** Cartesian 6°/1° (bs=2) | Cartesian | 1728 | 2 | ~270 | — |
+| **master** Cartesian 6°/1° (bs=2) | Cartesian | 1728 | 2 | ~272 | — |
 | **master** Cartesian 6°/1° (bs=4) | Cartesian | 1728 | **4** | **~545** | — |
-| **branch** fibo 6°/2° | Fibo | 209 | 11 | ~4760 | ~4650 |
-| **branch** fibo 4°/2° | Fibo | 63 | — | — | — |
-| **branch** fibo 4°/1° | Fibo | 488 | 8 | ~1010 | ~980 |
-| **branch** fibo 6°/1° (bs=2) | Fibo | 1638 | 2 | ~306 | ~297 |
-| **branch** fibo 4°/0.7° | Fibo | 1486 | 2 | — | ~736 |
-| **branch** two-stage K=5 | 1249 | 3 | ~898 | — |
+| **branch** fibo 4°/2° (bs=64) | Fibo | 63 | 64 | **~9760** | **~8160** |
+| **branch** fibo 6°/2° (bs=32) | Fibo | 209 | 32 | ~4840 | ~4680 |
+| **branch** fibo 4°/1° (bs=16) | Fibo | 488 | 16 | ~2240 | ~2170 |
+| **branch** two-stage K=5 (bs=7) | — | 1249 | 7 | ~903 | — |
+| **branch** fibo 4°/0.7° (bs=5) | Fibo | 1486 | 5 | — | ~740 |
+| **branch** fibo 6°/1° (bs=4) | Fibo | 1638 | 4 | ~695 | ~675 |
 
 †DS3 4/1 highly variable across runs (IO jitter); ~700 p/min is conservative.
 
@@ -545,7 +545,7 @@ Hardware: NVIDIA RTX 6000 Ada (49 GB). One process at a time, 3 runs, 10 000 par
 
 †DS3 4/1: Run 1=10m44s (likely IO cache warm), Runs 2–3=14m20–31s. Using conservative median.
 
-### Branch best configs (improve_local_refinement, all accuracy flags ON)
+### Branch best configs — original measurements (sub-optimal batch sizes)
 
 | Config | Dataset | Run 1 | Run 2 | Run 3 | Median (10K) | Per 500 |
 |--------|---------|-------|-------|-------|--------------|---------|
@@ -560,19 +560,47 @@ Hardware: NVIDIA RTX 6000 Ada (49 GB). One process at a time, 3 runs, 10 000 par
 
 *DS2 6°/1° Run 1 faster (GPU warmup/cache effect); runs 2–3 are steady-state.
 
-### Speed vs accuracy comparison
+### Branch optimal-bs configs (improve_local_refinement, GPU 0, 3 runs each)
+
+All accuracy flags ON. Batch sizes set to maximum safe value (batch_size × n_rotations < 8192).
+
+| Config | Dataset | Run 1 | Run 2 | Run 3 | Avg (10K) | Per 500 | p/min | vs sub-opt bs |
+|--------|---------|-------|-------|-------|-----------|---------|-------|--------------|
+| fibo 4°/2° bs=64 | DS2 | 1m01.9s | 1m01.3s | 1m01.4s | **1m01.5s (61.5s)** | **~3.1s** | **~9760** | first measurement |
+| fibo 4°/2° bs=64 | DS3 | 1m13.8s | 1m13.7s | 1m13.1s | **1m13.5s (73.5s)** | **~3.7s** | **~8160** | first measurement |
+| fibo 6°/2° bs=32 | DS2 | 2m04.0s | 2m03.9s | 2m04.3s | **2m04.1s (124s)** | **~6.2s** | **~4840** | ≈same (bs=11→32) |
+| fibo 6°/2° bs=32 | DS3 | 2m08.3s | 2m08.2s | 2m08.4s | **2m08.3s (128s)** | **~6.4s** | **~4680** | ≈same (bs=11→32) |
+| fibo 4°/1° bs=16 | DS2 | 4m27.3s | 4m27.4s | 4m27.6s | **4m27.4s (267s)** | **~13.4s** | **~2240** | **2.2× faster** (bs=8→16) |
+| fibo 4°/1° bs=16 | DS3 | 4m36.3s | 4m36.9s | 4m37.3s | **4m36.8s (277s)** | **~13.8s** | **~2170** | **2.2× faster** (bs=8→16) |
+| two-stage K=5 bs=7 | DS2 | 11m04.9s | 11m03.9s | 11m04.3s | **11m04.4s (664s)** | **~33.2s** | **~903** | ≈same (bs=3→7) |
+| fibo 4°/0.7° bs=5 | DS3 | 13m28.0s | 13m27.9s | 13m28.6s | **13m28.2s (808s)** | **~40.4s** | **~740** | ≈same (bs=2→5) |
+| fibo 6°/1° bs=4 | DS2 | 14m22.3s | 14m26.3s | 14m20.6s | **14m23.1s (863s)** | **~43.2s** | **~695** | **2.3× faster** (bs=2→4) |
+| fibo 6°/1° bs=4 | DS3 | 14m48.7s | 14m49.8s | 14m49.8s | **14m49.4s (889s)** | **~44.5s** | **~675** | **first measurement** at bs=4 |
+
+**Key observations:**
+- Dense grids (4°/1°, 6°/1°): 2.2–2.3× speedup from optimal bs — these were severely under-batched at bs=2/8.
+- Sparse grids (6°/2°, two-stage, 4°/0.7°): little to no benefit — already compute-bound per batch, not launch-overhead-bound.
+- fibo 4°/2° (63 pts): ~9760 p/min on DS2, the fastest branch config by far.
+- fibo 6°/1° bs=4 (863s/10K DS2) is now **faster than two-stage** (664s... wait, two-stage is still faster). Correction: two-stage 664s < 6°/1° 863s — two-stage still wins on speed AND accuracy for C1.
+
+### Speed vs accuracy comparison (optimal batch sizes)
 
 | Config | Dataset | Per 500 | Median err | P90 err | vs master |
 |--------|---------|---------|-----------|---------|-----------|
-| master (Cartesian 6°/2°, batch_size=11) | DS2 | ~9.4s | 1.64° | 3.79° | baseline |
-| branch fibo 6°/2°, batch_size=11 | DS2 | **~6.3s** | **1.31°** | **2.62°** | 1.5× faster, more accurate |
-| branch fibo 4°/1°, batch_size=8 | DS2 | ~29.8s | 0.97° | 2.13° | 3.2× slower, good tradeoff |
-| branch two-stage K=5, batch_size=3 | DS2 | ~33.4s | **0.42°** | **2.47°** | 3.6× slower, 4× better median |
-| branch fibo 6°/1°, batch_size=2 | DS2 | ~98s | 0.89° | 2.67° | 10.4× slower, worse than two-stage |
-| master (Cartesian 6°/2°, batch_size=11) | DS3 | ~10.0s | 1.69° | 4.06° | baseline |
-| branch fibo 6°/2°, batch_size=11 | DS3 | **~6.5s** | **1.31°** | **3.52°** | 1.5× faster, more accurate |
-| branch fibo 4°/1°, batch_size=8 | DS3 | ~30.6s | 1.35° | 2.81° | 3.1× slower |
-| branch fibo 4°/0.7°, batch_size=2 | DS3 | ~40.8s | **1.24°** | **2.74°** | 4.1× slower, best accuracy |
+| master (Cartesian 6°/2°, bs=11) | DS2 | ~9.4s | 1.64° | 3.79° | baseline |
+| branch fibo 4°/2°, bs=64 | DS2 | **~3.1s** | — | — | **3.0× faster** (accuracy TBD) |
+| branch fibo 6°/2°, bs=32 | DS2 | **~6.2s** | **1.31°** | **2.62°** | 1.5× faster, more accurate |
+| branch fibo 4°/1°, bs=16 | DS2 | ~13.4s | 0.97° | 2.13° | 1.4× slower, good tradeoff |
+| branch two-stage K=5, bs=7 | DS2 | ~33.2s | **0.42°** | **2.47°** | 3.5× slower, 4× better median |
+| branch fibo 6°/1°, bs=4 | DS2 | ~43.2s | 0.89° | 2.67° | 4.6× slower, worse than two-stage |
+| master (Cartesian 6°/2°, bs=11) | DS3 | ~10.0s | 1.69° | 4.06° | baseline |
+| branch fibo 4°/2°, bs=64 | DS3 | **~3.7s** | — | — | **2.7× faster** (accuracy TBD) |
+| branch fibo 6°/2°, bs=32 | DS3 | **~6.4s** | **1.31°** | **3.52°** | 1.6× faster, more accurate |
+| branch fibo 4°/1°, bs=16 | DS3 | ~13.8s | 1.35° | 2.81° | 1.4× slower |
+| branch fibo 4°/0.7°, bs=5 | DS3 | ~40.4s | **1.24°** | **2.74°** | 4.0× slower, best accuracy |
+| branch fibo 6°/1°, bs=4 | DS3 | ~44.5s | 0.89°† | 3.18°† | 4.5× slower |
+
+†DS3 6°/1° accuracy not yet measured at optimal bs; using prior measurement.
 
 **Key finding — no regression:** branch fibo 6°/2° (same grid spacing as master, same batch_size) is 1.5× *faster* than master because the Fibonacci grid has fewer points (209 vs Cartesian 343) and more accurate (1.31° vs 1.64°/1.69°). The branch's accuracy improvements come at a cost only when using denser grids (4°/0.7°) or two-stage search.
 
@@ -590,7 +618,7 @@ The `torch.compile` inductor OOMs when `batch_size × n_rotations ≳ 8192` (twi
 | 1638 (fibo 6°/1°) | **4** | 6552 | **bs=4 halves runtime vs bs=2** |
 | 1728 (Cartesian 6°/1°) | **4** | 6912 | **bs=4 confirmed 2× speedup** |
 
-**Impact:** Previously all runs with ≥1000 pts used bs=2 (assumed 4096 limit). With the correct limit of ~8192, bs=4 is valid for 6°/1° grids, halving wall time. The fibo 6°/1° bs=2 timings (~98–101s/500) should improve to ~49–51s/500 at bs=4. Pending re-measurement.
+**Impact:** Previously all runs with ≥1000 pts used bs=2 (assumed 4096 limit). With the correct limit of ~8192, bs=4 is valid for 6°/1° grids, halving wall time. Re-measured: fibo 6°/1° at bs=4 gives ~43–45s/500 (2.3× faster). fibo 4°/1° at bs=16 gives ~13.4–13.8s/500 (2.2× faster). Sparse grids (4°/2°, 6°/2°, two-stage, 4°/0.7°) show no meaningful speedup from larger bs — they are compute-bound per batch, not launch-overhead-bound.
 
 **Recommended batch sizes (updated):**
 
@@ -614,8 +642,8 @@ Note: increasing bs beyond the sweet spot gives only marginal throughput gains (
 - [x] **Master branch timing** — DS2: 187s/10K (~9.4s/500), DS3: 200s/10K (~10s/500). Cartesian 6°/2°, batch_size=11.
 - [x] **Branch best-config timing** — DS2 two-stage: 668s/10K (~33.4s/500); DS3 4°/0.7°: 815s/10K (~40.8s/500). 3.6–4.1× slower than master, substantially more accurate.
 - [x] **Batch-size investigation** — real OOM limit is ~8192 total projs/batch (not 4096). bs=4 valid for 6°/1°, halving runtime. bs=32 optimal for 6°/2°. See batch-size table above.
-- [ ] **Re-measure branch timings with optimal batch sizes** — fibo 6°/1° at bs=4, 4°/0.7° at bs=5, two-stage at bs=7. Expected 1.5–2× speedup for dense configs.
-- [ ] **Branch 4°/2° timing** (63 pts, bs=64) — pending GPU availability.
+- [x] **Re-measure branch timings with optimal batch sizes** — done. Dense grids 2.2–2.3× faster; sparse grids unchanged. See "Branch optimal-bs configs" table above.
+- [x] **Branch 4°/2° timing** (63 pts, bs=64) — DS2: ~61.5s/10K (~9760 p/min), DS3: ~73.5s/10K (~8160 p/min).
 - [ ] DS2 Scenario A with Fibonacci grid 6°/1° (verify no regression vs GT)
 - [ ] DS3 Scenario B with Fibonacci grid 6°/1°
 

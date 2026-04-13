@@ -622,16 +622,27 @@ The `torch.compile` inductor OOMs when `batch_size × n_rotations ≳ 8192` (twi
 
 **Recommended batch sizes (updated):**
 
-| Config | n_pts | Recommended bs |
-|--------|-------|---------------|
-| 6°/2° (fibo 209, Cartesian 216) | 209–216 | 32 |
-| 4°/2° (fibo 63, Cartesian 64) | 63–64 | 64 |
-| 4°/1° (fibo 488, Cartesian 512) | 488–512 | 16 |
-| 4°/0.7° (fibo 1486) | 1486 | 5 |
-| 6°/1° (fibo 1638, Cartesian 1728) | 1638–1728 | 4 |
-| two-stage fine (5×209=1045 pts) | 1045 | 7 |
+| Config | n_pts | Recommended bs | OOM threshold bs | Total projs at rec. bs |
+|--------|-------|---------------|-----------------|----------------------|
+| 4°/2° (fibo 63, Cartesian 64) | 63–64 | 64 | >128 | ~4096 |
+| 6°/2° (fibo 209, Cartesian 216) | 209–216 | 32 | ≥40 | ~6688–6912 |
+| 4°/1° (fibo 488, Cartesian 512) | 488–512 | 16 | ≥32 | ~7808–8192 |
+| two-stage fine (5×209=1045 pts) | 1045 | 7 | ≥8 | ~7315 |
+| 4°/0.7° (fibo 1486) | 1486 | 5 | ≥6 | ~7430 |
+| 6°/1° (fibo 1638, Cartesian 1728) | 1638–1728 | 4 | ≥5 | ~6552–6912 |
 
 Note: increasing bs beyond the sweet spot gives only marginal throughput gains (compute-bound); the benefit of going from bs=2→4 for 6°/1° is large because it halves kernel launch overhead.
+
+**Implementation note — user-facing warnings:**
+These recommendations should be used to warn users who specify a suboptimal `--batch_size`. Two warning levels are appropriate:
+
+1. **Too large (OOM risk):** If `batch_size × n_rotations > 8192`, warn before running:
+   > `Warning: batch_size={bs} with {n} grid points gives {total} total projections/batch, which exceeds the safe limit of ~8192 and will likely OOM. Recommended: batch_size≤{rec}.`
+
+2. **Too small (throughput penalty):** If `batch_size × n_rotations < 4096` and a safe larger value exists, warn:
+   > `Warning: batch_size={bs} with {n} grid points gives {total} total projections/batch. Recommended batch_size={rec} ({rec_total} total) for ~{speedup}× better throughput without OOM risk.`
+
+The `n_rotations` value is known at startup (after grid construction), so these checks can be added to `projMatcher.__init__` or at the top of `forward()`. The hard OOM threshold of 8192 may vary slightly with GPU VRAM; consider using 7500 as the warning threshold to give headroom.
 
 ---
 

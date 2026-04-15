@@ -242,6 +242,86 @@ class ProjectionMatcher(nn.Module):
 
         return self._so3_delta
 
+    # ----------------------- Batch-size helpers -----------------------
+
+    @staticmethod
+    def _count_rotations(use_fibo: bool, distance_deg: float, step_deg: float) -> int:
+        """Return the number of SO(3) grid points for given parameters.
+
+        Mirrors the grid-building logic in _get_so3_delta_rotmats / _get_fine_delta_rotmats
+        without allocating tensors on GPU or touching the instance cache.
+        """
+        if use_fibo:
+            from cryoPARES.geometry.grids import so3_grid_near_identity_fibo
+            rotmats, _ = so3_grid_near_identity_fibo(
+                distance_deg=distance_deg,
+                spacing_deg=step_deg,
+                use_small_aprox=True,
+                output="matrix",
+            )
+            return len(rotmats) + 1  # +1 for the prepended identity rotation
+        else:
+            n_angles = math.ceil(distance_deg * 2 / step_deg)
+            n_angles = n_angles if n_angles % 2 == 1 else n_angles + 1
+            grid = so3_near_identity_grid_cartesianprod(
+                distance_deg, n_angles, transposed=False, degrees=True, remove_duplicates=False
+            )
+            return len(grid)
+
+    def _check_batch_size(self, batch_size: int, device: str) -> None:
+        """Warn if batch_size is too large (OOM risk) or too small (throughput penalty).
+
+        Empirical memory model (box=336, PyTorch 2.8 + Triton 3.4, RTX 6000 Ada 49 GB):
+            peak_GB ≈ 0.164 + 0.571 × batch_size
+
+        Peak memory scales with batch_size only, NOT with n_rotations.  torch.compile fuses
+        the projection-generation + cross-correlation kernels so the full (B×N) projection
+        bank is never materialised in global GPU memory simultaneously.
+
+        For other box sizes the cost scales with image area (H²):
+            baseline_GB  = 0.164 × (H/336)³    (reference-volume FFT in GPU memory)
+            per_part_GB  = 0.571 × (H/336)²    (particle cross-correlation working set)
+
+        Safe batch size for a GPU with V GB of VRAM:
+            bs_safe = floor((0.85 × V - baseline_GB) / per_part_GB)
+        """
+        if not torch.cuda.is_available():
+            return
+
+        try:
+            dev = torch.device(device)
+            if dev.type != "cuda":
+                return
+            gpu_idx = dev.index if dev.index is not None else torch.cuda.current_device()
+            total_vram_gb = torch.cuda.get_device_properties(gpu_idx).total_memory / 1e9
+        except Exception:
+            return  # can't query GPU properties; skip
+
+        H = self.image_shape[-2]
+        box_scale2 = (H / 336) ** 2
+        box_scale3 = (H / 336) ** 3
+        baseline_gb = 0.164 * box_scale3
+        per_part_gb = 0.571 * box_scale2
+
+        safe_bs    = max(1, int((total_vram_gb * 0.85 - baseline_gb) / per_part_gb))
+        underuse_bs = max(1, safe_bs // 8)  # below 12.5 % of safe capacity is wasteful
+
+        est_peak_gb = baseline_gb + per_part_gb * batch_size
+        if batch_size > safe_bs:
+            print(
+                f"[projmatching] WARNING: batch_size={batch_size} may exhaust GPU memory "
+                f"({total_vram_gb:.0f} GB, estimated peak {est_peak_gb:.1f} GB). "
+                f"Recommended: --batch_size {safe_bs}."
+            )
+        elif batch_size < underuse_bs:
+            safe_peak_gb = baseline_gb + per_part_gb * safe_bs
+            print(
+                f"[projmatching] NOTE: batch_size={batch_size} uses only "
+                f"{est_peak_gb:.1f}/{total_vram_gb:.0f} GB GPU memory. "
+                f"Consider --batch_size {safe_bs} ({safe_peak_gb:.1f} GB) "
+                f"for better GPU throughput."
+            )
+
     # ----------------------- Fourier-specific core -----------------------
 
     def _store_reference_vol(
@@ -735,11 +815,7 @@ class ProjectionMatcher(nn.Module):
         if "rlnImageId" in particlesStar.particles_md.columns:
             particlesStar.particles_md.drop("rlnImageId", axis=1, inplace=True)
 
-        # TODO: For fine grids (large n_rotations), GPU memory scales with batch_size × n_rotations.
-        #  The proper fix is to chunk the rotations dimension *inside* forward() rather than
-        #  reducing batch_size (which hurts particle throughput). Implement rotation chunking
-        #  so that n_rotations is processed in sub-batches while batch_size stays fixed.
-        #  The max_batch_rotations config field can serve as the rotation chunk size limit.
+        self._check_batch_size(batch_size, device)
 
         dl = DataLoader(
             particlesDataSet,

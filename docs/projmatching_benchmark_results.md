@@ -66,25 +66,20 @@ $PYTHON -m cryoPARES.scripts.compare_poses \
     --starfile1 $OUT --starfile2 $DATA/tests/frealign_stack_relion3.star --sym C1
 ```
 
-### Batch size constraint (XBLOCK Triton error)
+### Batch size constraint (historical: XBLOCK Triton error — no longer relevant)
 
-On GPU 1 (and possibly GPU 0 as well), Triton compilation fails with:
+Early experiments on GPU 1 (PyTorch ≤ 2.5) hit a Triton XBLOCK error:
 
 ```
 AssertionError: 'XBLOCK' too large. Maximum: 4096. Actual: 8192.
 ```
 
-when the total number of projections per batch (batch_size × n_grid_points) exceeds 4096.
+This was a software limit in the Triton inductor (`TRITON_MAX_BLOCK['X'] = 2048` at the time).
+The limit was raised to 4096 in PyTorch PR #135181.  With **PyTorch 2.8 + Triton 3.4** the
+XBLOCK error no longer occurs for any B×N combination tested (up to B×N = 104,832).
 
-- Fibonacci grid at 6°/1°: 1638 points → `batch_size ≤ 2` required (2 × 1638 = 3276 < 4096)
-- Cartesian grid at 6°/1°: 2197 points → `batch_size = 1` required (1 × 2197 = 2197 < 4096)
-- Cartesian grid at 6°/2°: 343 points → `batch_size ≤ 11` (used 32 in early benchmarks, worked on GPU 0)
-
-The 32× batch_size early benchmarks ran on GPU 0 which may have a higher XBLOCK limit or was
-using a different Triton compilation path. Always specify `--batch_size 2` (Fibonacci) or
-`--batch_size 1` (Cartesian at 1° step) when running on GPU 1.
-
-TODO: In the projection matching script verify if the selected size will cause problems (you will need to figure outthe XBLOCK value at running time, in case it changes. Also, it possible, capture this error, and have a user friendly error)
+**GPU memory is now the true constraint.** See "Batch-size limits and throughput" below for the
+revised model.
 ---
 
 ## Implementation Details
@@ -503,7 +498,7 @@ grid_distance_degs=4, grid_step_degs=0.7
 
 Hardware: NVIDIA RTX 6000 Ada (49 GB). One process at a time, 3 runs, 10 000 particles each. Per-500 = raw ÷ 20. p/min = 600 000 ÷ raw_seconds.
 
-**Batch-size constraint:** `torch.compile` OOMs when `batch_size × n_rotations ≳ 8192`. This is twice the 4096 limit previously assumed — see batch-size section below.
+**Batch-size constraint:** GPU memory scales with `batch_size` only (N-independent). Safe bs = `floor((0.85×VRAM_GB − 0.164) / 0.571)` for box=336. See "Batch-size limits and throughput" below.
 
 ### Particles-per-minute summary
 
@@ -606,43 +601,64 @@ All accuracy flags ON. Batch sizes set to maximum safe value (batch_size × n_ro
 
 ### Batch-size limits and throughput
 
-The `torch.compile` inductor OOMs when `batch_size × n_rotations ≳ 8192` (twice the 4096 previously assumed). Empirical thresholds on RTX 6000 Ada 49 GB:
+**Memory model (PyTorch 2.8 + Triton 3.4, RTX 6000 Ada 49 GB, box=336):**
 
-| n_rotations | Max working bs | Total projs | Notes |
-|-------------|---------------|-------------|-------|
-| 64 (4°/2° Cartesian) | ≥64 | ~4096 | Not a bottleneck |
-| 209 (fibo 6°/2°) | 32–39 | ~6912–8151 | bs=32 confirmed OK; bs=40 fails |
-| 216 (Cartesian 6°/2°) | 32–37 | ~6912–7992 | same as above |
-| 488 (fibo 4°/1°) | 16 | 7808 | bs=16 OK; bs=32 fails |
-| 512 (Cartesian 4°/1°) | 16 | 8192 | bs=16 OK; bs=32 fails |
-| 1638 (fibo 6°/1°) | **4** | 6552 | **bs=4 halves runtime vs bs=2** |
-| 1728 (Cartesian 6°/1°) | **4** | 6912 | **bs=4 confirmed 2× speedup** |
+Peak GPU memory scales with `batch_size` only — **independent of `n_rotations`**. `torch.compile`
+fuses the projection-generation + cross-correlation kernels so the full (B×N) projection bank is
+never materialised in global GPU memory simultaneously.
 
-**Impact:** Previously all runs with ≥1000 pts used bs=2 (assumed 4096 limit). With the correct limit of ~8192, bs=4 is valid for 6°/1° grids, halving wall time. Re-measured: fibo 6°/1° at bs=4 gives ~43–45s/500 (2.3× faster). fibo 4°/1° at bs=16 gives ~13.4–13.8s/500 (2.2× faster). Sparse grids (4°/2°, 6°/2°, two-stage, 4°/0.7°) show no meaningful speedup from larger bs — they are compute-bound per batch, not launch-overhead-bound.
+Empirical fit (box=336, all grid configs: 63 / 209 / 488 / 1638 rotations give identical curve):
+```
+peak_GB ≈ 0.164 + 0.571 × batch_size
+```
+For other box sizes the per-particle cost scales with image area (H²) and the volume baseline
+with volume size (H³):
+```
+baseline_GB  = 0.164 × (H/336)³
+per_part_GB  = 0.571 × (H/336)²
+```
 
-**Recommended batch sizes (updated):**
+Safe batch size for a GPU with V GB VRAM (using 85 % budget):
+```
+bs_safe = floor((0.85 × V - baseline_GB) / per_part_GB)
+```
 
-| Config | n_pts | Recommended bs | OOM threshold bs | Total projs at rec. bs |
-|--------|-------|---------------|-----------------|----------------------|
-| 4°/2° (fibo 63, Cartesian 64) | 63–64 | 64 | >128 | ~4096 |
-| 6°/2° (fibo 209, Cartesian 216) | 209–216 | 32 | ≥40 | ~6688–6912 |
-| 4°/1° (fibo 488, Cartesian 512) | 488–512 | 16 | ≥32 | ~7808–8192 |
-| two-stage fine (5×209=1045 pts) | 1045 | 7 | ≥8 | ~7315 |
-| 4°/0.7° (fibo 1486) | 1486 | 5 | ≥6 | ~7430 |
-| 6°/1° (fibo 1638, Cartesian 1728) | 1638–1728 | 4 | ≥5 | ~6552–6912 |
+Per-VRAM safe batch sizes at box=336:
 
-Note: increasing bs beyond the sweet spot gives only marginal throughput gains (compute-bound); the benefit of going from bs=2→4 for 6°/1° is large because it halves kernel launch overhead.
+| VRAM (GB) | safe bs | ~peak at safe bs |
+|-----------|---------|-----------------|
+| 8  | 11  | 6.4 GB |
+| 10 | 14  | 8.2 GB |
+| 16 | 23  | 13.3 GB |
+| 24 | 35  | 20.1 GB |
+| 32 | 47  | 27.0 GB |
+| 40 | 59  | 33.9 GB |
+| 48 | 71  | 40.7 GB |
+| 64 | 95  | 54.5 GB |
+| 80 | 118 | 67.6 GB |
 
-**Implementation note — user-facing warnings:**
-These recommendations should be used to warn users who specify a suboptimal `--batch_size`. Two warning levels are appropriate:
+These limits are **N-independent**: the same safe `batch_size` applies regardless of whether you
+use 63-point or 1638-point grids.
 
-1. **Too large (OOM risk):** If `batch_size × n_rotations > 8192`, warn before running:
-   > `Warning: batch_size={bs} with {n} grid points gives {total} total projections/batch, which exceeds the safe limit of ~8192 and will likely OOM. Recommended: batch_size≤{rec}.`
+**Historical note:** the old B×N ≈ 8192 threshold was a Triton XBLOCK error from PyTorch ≤ 2.5.
+It is no longer relevant (see "Batch size constraint" section above). The early "optimal bs" values
+in the batch tables below (bs=4 for 6°/1°, bs=16 for 4°/1°) were set by that old constraint, not
+by memory. On the current 49 GB GPU the true optimal bs is 71 for any grid.
 
-2. **Too small (throughput penalty):** If `batch_size × n_rotations < 4096` and a safe larger value exists, warn:
-   > `Warning: batch_size={bs} with {n} grid points gives {total} total projections/batch. Recommended batch_size={rec} ({rec_total} total) for ~{speedup}× better throughput without OOM risk.`
+**Impact on throughput:** Dense grids (4°/1°, 6°/1°) gained 2.2–2.3× speedup moving from the
+old bs=2/8 to the XBLOCK-corrected bs=4/16. Further gains are possible by increasing to the
+memory-safe limit (bs=71 on 49 GB). Sparse grids (6°/2°, two-stage, 4°/0.7°) are compute-bound
+per batch — no throughput gain beyond bs≈32.
 
-The `n_rotations` value is known at startup (after grid construction), so these checks can be added to `projMatcher.__init__` or at the top of `forward()`. The hard OOM threshold of 8192 may vary slightly with GPU VRAM; consider using 7500 as the warning threshold to give headroom.
+**Implementation note — user-facing warnings (`_check_batch_size`):**
+The method `ProjectionMatcher._check_batch_size(batch_size, device)` queries total VRAM from
+`torch.cuda.get_device_properties` and uses the formula above to compute `bs_safe`.
+
+1. **Too large (OOM risk):** if `batch_size > bs_safe`:
+   > `[projmatching] WARNING: batch_size={bs} may exhaust GPU memory ({V} GB, estimated peak {p} GB). Recommended: --batch_size {bs_safe}.`
+
+2. **Too small (throughput penalty):** if `batch_size < bs_safe // 8` (below 12.5 % of safe capacity):
+   > `[projmatching] NOTE: batch_size={bs} uses only {p}/{V} GB GPU memory. Consider --batch_size {bs_safe} ({p_safe} GB) for better GPU throughput.`
 
 ---
 
@@ -652,7 +668,7 @@ The `n_rotations` value is known at startup (after grid construction), so these 
 - [x] DS3 Scen B 4°/0.5° single-stage — **done**: 1.22°/2.64° P90, ~2m. Only 0.02° better than 4°/0.7° at 2.3× cost. 4°/0.7° confirmed as sweet spot.
 - [x] **Master branch timing** — DS2: 187s/10K (~9.4s/500), DS3: 200s/10K (~10s/500). Cartesian 6°/2°, batch_size=11.
 - [x] **Branch best-config timing** — DS2 two-stage: 668s/10K (~33.4s/500); DS3 4°/0.7°: 815s/10K (~40.8s/500). 3.6–4.1× slower than master, substantially more accurate.
-- [x] **Batch-size investigation** — real OOM limit is ~8192 total projs/batch (not 4096). bs=4 valid for 6°/1°, halving runtime. bs=32 optimal for 6°/2°. See batch-size table above.
+- [x] **Batch-size investigation** — memory scales with bs only (N-independent). Safe bs = f(VRAM, box). Old B×N ≈ 8192 limit was XBLOCK from older PyTorch, no longer relevant. See batch-size table above.
 - [x] **Re-measure branch timings with optimal batch sizes** — done. Dense grids 2.2–2.3× faster; sparse grids unchanged. See "Branch optimal-bs configs" table above.
 - [x] **Branch 4°/2° timing** (63 pts, bs=64) — DS2: ~61.5s/10K (~9760 p/min), DS3: ~73.5s/10K (~8160 p/min).
 - [ ] DS2 Scenario A with Fibonacci grid 6°/1° (verify no regression vs GT)

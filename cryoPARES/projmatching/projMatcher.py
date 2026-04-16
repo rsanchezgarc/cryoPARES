@@ -271,19 +271,15 @@ class ProjectionMatcher(nn.Module):
     def _check_batch_size(self, batch_size: int, device: str) -> None:
         """Warn if batch_size is too large (OOM risk) or too small (throughput penalty).
 
-        Empirical memory model (box=336, PyTorch 2.8 + Triton 3.4, RTX 6000 Ada 49 GB):
-            peak_GB ≈ 0.164 + 0.571 × batch_size
+        Memory model: the compiled projection kernel materialises a
+            (batch_size × n_rotations × n_valid_coords × 9) float32 buffer
+        where n_valid_coords ≈ π/4 × H × (H//2+1) is the number of rfft grid points
+        within the Nyquist sphere. This dominates peak GPU memory.
 
-        Peak memory scales with batch_size only, NOT with n_rotations.  torch.compile fuses
-        the projection-generation + cross-correlation kernels so the full (B×N) projection
-        bank is never materialised in global GPU memory simultaneously.
+        For a GPU with V GB of VRAM:
+            safe_bs = floor(0.85 × V / (n_rots × n_valid × 9 × 4 bytes))
 
-        For other box sizes the cost scales with image area (H²):
-            baseline_GB  = 0.164 × (H/336)³    (reference-volume FFT in GPU memory)
-            per_part_GB  = 0.571 × (H/336)²    (particle cross-correlation working set)
-
-        Safe batch size for a GPU with V GB of VRAM:
-            bs_safe = floor((0.85 × V - baseline_GB) / per_part_GB)
+        Memory scales with BOTH batch_size and n_rotations.
         """
         if not torch.cuda.is_available():
             return
@@ -297,16 +293,24 @@ class ProjectionMatcher(nn.Module):
         except Exception:
             return  # can't query GPU properties; skip
 
+        import math
         H = self.image_shape[-2]
-        box_scale2 = (H / 336) ** 2
-        box_scale3 = (H / 336) ** 3
-        baseline_gb = 0.164 * box_scale3
-        per_part_gb = 0.571 * box_scale2
+        n_valid = int(math.pi / 4 * H * (H // 2 + 1))   # rfft pts within Nyquist sphere
 
-        safe_bs    = max(1, int((total_vram_gb * 0.85 - baseline_gb) / per_part_gb))
+        if self.use_two_stage_search:
+            n_fine = self._count_rotations(True, self.fine_grid_distance_degs,
+                                           self.fine_grid_step_degs)
+            n_rots = self.fine_top_k * n_fine      # fine pass materialises the largest buffer
+        else:
+            n_rots = self._count_rotations(self.use_fibo_grid,
+                                           self.grid_distance_degs, self.grid_step_degs)
+
+        gb_per_batch = n_rots * n_valid * 9 * 4 / 1e9     # GB per batch element
+
+        safe_bs    = max(1, int(total_vram_gb * 0.85 / gb_per_batch))
         underuse_bs = max(1, safe_bs // 8)  # below 12.5 % of safe capacity is wasteful
 
-        est_peak_gb = baseline_gb + per_part_gb * batch_size
+        est_peak_gb = batch_size * gb_per_batch
         if batch_size > safe_bs:
             print(
                 f"[projmatching] WARNING: batch_size={batch_size} may exhaust GPU memory "
@@ -314,7 +318,7 @@ class ProjectionMatcher(nn.Module):
                 f"Recommended: --batch_size {safe_bs}."
             )
         elif batch_size < underuse_bs:
-            safe_peak_gb = baseline_gb + per_part_gb * safe_bs
+            safe_peak_gb = safe_bs * gb_per_batch
             print(
                 f"[projmatching] NOTE: batch_size={batch_size} uses only "
                 f"{est_peak_gb:.1f}/{total_vram_gb:.0f} GB GPU memory. "

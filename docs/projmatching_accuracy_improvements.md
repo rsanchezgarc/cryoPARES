@@ -98,10 +98,11 @@ particles) could help accuracy but has a computational cost — not yet addresse
 
 ## Pending validation
 
-- [ ] DS2 Scenario A with Fibonacci grid 6°/1° — confirm no regression vs GT
-- [ ] DS3 Scenario B with Fibonacci grid 6°/1°
+- [x] DS2 Scenario A with Fibonacci grid 6°/1° — **0.00° median** ✓ (bs=8, Step 1)
+- [x] DS3 Scenario B with Fibonacci grid 6°/1° — **1.35° median** (bs=8, Step 2)
 - [x] DS1 (synthetic, EMPIAR-10166 projectionsSamePose) Scenarios A and B — **done** (see two-stage section)
-- [ ] DS3 Scenario B with Fibonacci grid 4°/0.5°  - confirm if error can be increased further
+- [x] fibo 4°/2° accuracy DS2 + DS3 — **DS2: 1.39°, DS3: 1.50°** (Step 3)
+- [ ] DS3 Scenario B with Fibonacci grid 4°/0.5°  - confirm if error can be reduced further
 
 ---
 
@@ -152,18 +153,20 @@ use_two_stage_search=True, fine_grid_distance_degs=1.5, fine_grid_step_degs=0.5,
 | Config | Pts | DS1 med | DS2 med | DS2 P75 | DS2 P90 | DS3 med | DS3 P75 | DS3 P90 | Time/500 |
 |--------|-----|--------|--------|---------|---------|--------|---------|---------|---------|
 | **master** Cartesian 6°/2° | 343 | — | 1.64° | — | 3.79° | 1.69° | — | 4.06° | **~9.4s** |
+| fibo 4°/2° (bs=75) | 63 | — | 1.39° | — | — | 1.50° | — | — | **~3.1s** |
 | fibo 6°/2° (bs=32) | 209 | — | 1.31° | 1.88° | 2.62° | 1.31° | 1.98° | 3.52° | **~6.2s** |
 | fibo 4°/1° (bs=16) | 488 | — | 0.97° | 1.53° | 2.13° | 1.35° | 2.03° | 2.81° | **~13.4s** |
 | fibo 4°/0.7° (bs=5) | 1486 | — | 0.87° | 1.43° | 2.23° | **1.24°** | **1.93°** | **2.74°** | **~40.4s** |
-| fibo 6°/1° (bs=4) | 1638 | — | 0.89° | 1.62° | 2.67° | 1.38° | 2.15° | 3.18° | **~43.2s** |
+| fibo 6°/1° (bs=8) | 1638 | — | 0.89° | 1.62° | 2.67° | **1.35°** | — | — | **~43.2s** |
 | **two-stage 6°/2°+1.5°/0.5° K=5 (bs=7)** | **1249** | **0.22°** | **0.42°** | **1.25°** | 2.47° | 1.35° | 2.35° | 3.43° | **~33.2s** |
 
-Timing measured on 10K particles, 3 runs each, RTX 6000 Ada 49 GB. Per-500 = raw ÷ 20. All branch times use optimal batch sizes (OOM limit ~8192 total projs/batch).
+Timing measured on 10K particles, 3 runs each, RTX 6000 Ada 49 GB. Per-500 = raw ÷ 20.
 Master baseline: DS2 187s/10K, DS3 200s/10K (Cartesian 6°/2°, batch_size=11).
+Fibo 4°/2° timing from master-branch Cartesian 4°/2° (similar pts count); accuracy measured at bs=75.
 Fibo 6°/2° (bs=32): DS2 124s/10K, DS3 128s/10K — **faster than master** (fewer grid pts: 209 vs 343). No regression.
-Fibo 4°/1° (bs=16): DS2 267s/10K, DS3 277s/10K — **2.2× faster than prior bs=8 measurement** (595s/612s).
-Fibo 6°/1° (bs=4): DS2 863s/10K, DS3 889s/10K — **2.3× faster than prior bs=2 measurement** (1960s/2018s).
-Two-stage (bs=7): DS2 664s/10K. Fibo 4°/0.7° (bs=5): DS3 808s/10K — both unchanged from prior sub-optimal bs (sparse grids are compute-bound per batch, not launch-overhead-bound).
+Fibo 4°/1° (bs=16): DS2 267s/10K, DS3 277s/10K.
+Fibo 6°/1° (bs=8): DS2 863s/10K (timing from bs=4 run). DS3 889s/10K. Accuracy confirmed at bs=8.
+Two-stage (bs=7): DS2 664s/10K. Fibo 4°/0.7° (bs=5): DS3 808s/10K.
 
 Note: 6°/1° (1638 pts) is slower than two-stage (1249 pts) yet less accurate on both datasets — dominated.
 4°/0.7° wins on DS3 because it concentrates coverage where it matters (≤4° initial error, 0.7° step)
@@ -192,18 +195,20 @@ Two-stage gives **4× better median** on DS2 (C1) vs master, 3.6× slower. DS3 (
 
 ## Testing protocol (reference)
 
-See `docs/projmatching_benchmark_results.md` for datasets, star file paths, benchmark commands,
-and the XBLOCK batch-size constraint on GPU 1. Key reminders:
+See `docs/projmatching_benchmark_results.md` for datasets, star file paths, and benchmark commands.
+Key reminders:
 
 - Always use `compare_poses.py --starfile1 OUTPUT --starfile2 GT` for GT-based metrics; the
   inline `align_star` output measures displacement from input, not from GT.
 - Fix `n_first_particles=500` for comparability.
 - DS3 (D2 symmetry): use `--sym D2` in `compare_poses.py`.
-- Fibonacci 6°/1°: requires `batch_size=2` on GPU 1 due to Triton XBLOCK limit.
-- **New single-stage baselines** (use `grid_distance_degs=4`, `grid_step_degs=0.5` or `0.7`).
+- **Batch size**: memory scales with `batch_size × n_rotations`; see `_check_batch_size` for
+  per-grid safe limits (e.g., bs=8 for 6°/1°, bs=16 for two-stage, bs=75 for 6°/2°).
+- **Triton compile**: use `dynamic=False` (applied in `extract_central_slices_as_real.py`) to
+  avoid XBLOCK=8192 errors from dynamic shape size hints.
 - **Two-stage benchmark command:**
   ```bash
-  cryopares_projmatching ... --grid_distance_degs 6 --grid_step_degs 2 --batch_size 4 --gpu_id 1 \
+  cryopares_projmatching ... --grid_distance_degs 6 --grid_step_degs 2 --batch_size 16 --gpu_id 0 \
     --config projmatching.use_fibo_grid=True projmatching.rotation_composition=pre_multiply \
              projmatching.use_subpixel_shifts=True projmatching.zero_dc=True \
              projmatching.spectral_whitening=True projmatching.whitening_warmup_batches=8 \

@@ -66,20 +66,25 @@ $PYTHON -m cryoPARES.scripts.compare_poses \
     --starfile1 $OUT --starfile2 $DATA/tests/frealign_stack_relion3.star --sym C1
 ```
 
-### Batch size constraint (historical: XBLOCK Triton error — no longer relevant)
+### Batch size constraint (XBLOCK Triton error)
 
-Early experiments on GPU 1 (PyTorch ≤ 2.5) hit a Triton XBLOCK error:
+The compiled projection kernel (`extract_central_slices_rfft_3d_multichannel`) materialises a
+`(batch_size × n_rotations × n_valid_coords × 9)` float32 buffer. When this buffer exceeds
+`2^35 / (n_valid × 9)` elements, Triton's pointwise-kernel heuristic selects `XBLOCK = 8192`
+which exceeds the hardware maximum of 4096:
 
 ```
 AssertionError: 'XBLOCK' too large. Maximum: 4096. Actual: 8192.
 ```
 
-This was a software limit in the Triton inductor (`TRITON_MAX_BLOCK['X'] = 2048` at the time).
-The limit was raised to 4096 in PyTorch PR #135181.  With **PyTorch 2.8 + Triton 3.4** the
-XBLOCK error no longer occurs for any B×N combination tested (up to B×N = 104,832).
+**Fix:** compile with `dynamic=False` (applied in `extract_central_slices_as_real.py`).
+With `dynamic=False`, Triton receives the concrete tensor shape and selects an appropriate XBLOCK.
+The compilation cache handles subsequent calls with the same shape without recompiling.
 
-**GPU memory is now the true constraint.** See "Batch-size limits and throughput" below for the
-revised model.
+**Note:** With `dynamic=True` (prior to this fix), Triton used a conservative worst-case size hint
+of 2^36 for all dynamic shapes, triggering the XBLOCK error regardless of actual batch size.
+
+**GPU memory is the true constraint.** See "Batch-size limits and throughput" below.
 ---
 
 ## Implementation Details
@@ -463,6 +468,7 @@ DS1 (synthetic, C1) two-stage Scen B = 0.22° from a ~4° perturbed start, essen
 | Config | DS1 Scen A | DS2 Scen A | DS3 Scen A |
 |--------|-----------|-----------|-----------|
 | single-stage fibo 6°/2° | 0.00° | 0.00° | 0.00° |
+| single-stage fibo 6°/1° | — | **0.00°** | — |
 | two-stage 6°/2°+1.5°/0.5° | 0.00° | 0.00° | 1.41°* |
 
 *DS3 two-stage Scen A: fine search (0.5° step) finds a pose 1.41° from RELION GT that correlates marginally better against the reference. This is physical — single-stage can't resolve this sub-2° variation at 2° step resolution. Not a bug; single-stage Scen A (correct behavior at coarse resolution) still passes.
@@ -557,7 +563,7 @@ Hardware: NVIDIA RTX 6000 Ada (49 GB). One process at a time, 3 runs, 10 000 par
 
 ### Branch optimal-bs configs (improve_local_refinement, GPU 0, 3 runs each)
 
-All accuracy flags ON. Batch sizes set to maximum safe value (batch_size × n_rotations < 8192).
+All accuracy flags ON. Batch sizes used at time of measurement (later analysis shows safe limits are higher for sparse grids; see "Batch-size limits and throughput").
 
 | Config | Dataset | Run 1 | Run 2 | Run 3 | Avg (10K) | Per 500 | p/min | vs sub-opt bs |
 |--------|---------|-------|-------|-------|-----------|---------|-------|--------------|
@@ -583,72 +589,50 @@ All accuracy flags ON. Batch sizes set to maximum safe value (batch_size × n_ro
 | Config | Dataset | Per 500 | Median err | P90 err | vs master |
 |--------|---------|---------|-----------|---------|-----------|
 | master (Cartesian 6°/2°, bs=11) | DS2 | ~9.4s | 1.64° | 3.79° | baseline |
-| branch fibo 4°/2°, bs=64 | DS2 | **~3.1s** | — | — | **3.0× faster** (accuracy TBD) |
+| branch fibo 4°/2°, bs=64 | DS2 | **~3.1s** | 1.39° | — | **3.0× faster** |
 | branch fibo 6°/2°, bs=32 | DS2 | **~6.2s** | **1.31°** | **2.62°** | 1.5× faster, more accurate |
 | branch fibo 4°/1°, bs=16 | DS2 | ~13.4s | 0.97° | 2.13° | 1.4× slower, good tradeoff |
 | branch two-stage K=5, bs=7 | DS2 | ~33.2s | **0.42°** | **2.47°** | 3.5× slower, 4× better median |
 | branch fibo 6°/1°, bs=4 | DS2 | ~43.2s | 0.89° | 2.67° | 4.6× slower, worse than two-stage |
 | master (Cartesian 6°/2°, bs=11) | DS3 | ~10.0s | 1.69° | 4.06° | baseline |
-| branch fibo 4°/2°, bs=64 | DS3 | **~3.7s** | — | — | **2.7× faster** (accuracy TBD) |
+| branch fibo 4°/2°, bs=64 | DS3 | **~3.7s** | 1.50° | — | **2.7× faster** |
 | branch fibo 6°/2°, bs=32 | DS3 | **~6.4s** | **1.31°** | **3.52°** | 1.6× faster, more accurate |
 | branch fibo 4°/1°, bs=16 | DS3 | ~13.8s | 1.35° | 2.81° | 1.4× slower |
 | branch fibo 4°/0.7°, bs=5 | DS3 | ~40.4s | **1.24°** | **2.74°** | 4.0× slower, best accuracy |
-| branch fibo 6°/1°, bs=4 | DS3 | ~44.5s | 0.89°† | 3.18°† | 4.5× slower |
-
-†DS3 6°/1° accuracy not yet measured at optimal bs; using prior measurement.
+| branch fibo 6°/1°, bs=8 | DS3 | ~44.5s | **1.35°** | — | 4.5× slower |
 
 **Key finding — no regression:** branch fibo 6°/2° (same grid spacing as master, same batch_size) is 1.5× *faster* than master because the Fibonacci grid has fewer points (209 vs Cartesian 343) and more accurate (1.31° vs 1.64°/1.69°). The branch's accuracy improvements come at a cost only when using denser grids (4°/0.7°) or two-stage search.
 
 ### Batch-size limits and throughput
 
-**Memory model (PyTorch 2.8 + Triton 3.4, RTX 6000 Ada 49 GB, box=336):**
+**Memory model (PyTorch 2.8 + Triton 3.4, RTX 6000 Ada 49–51 GB, box=336):**
 
-Peak GPU memory scales with `batch_size` only — **independent of `n_rotations`**. `torch.compile`
-fuses the projection-generation + cross-correlation kernels so the full (B×N) projection bank is
-never materialised in global GPU memory simultaneously.
-
-Empirical fit (box=336, all grid configs: 63 / 209 / 488 / 1638 rotations give identical curve):
-```
-peak_GB ≈ 0.164 + 0.571 × batch_size
-```
-For other box sizes the per-particle cost scales with image area (H²) and the volume baseline
-with volume size (H³):
-```
-baseline_GB  = 0.164 × (H/336)³
-per_part_GB  = 0.571 × (H/336)²
-```
+The projection kernel materialises a `(batch_size × n_rotations × n_valid_coords × 9)` float32
+buffer, where `n_valid_coords ≈ π/4 × H × (H//2+1)` is the number of rfft grid points within the
+Nyquist sphere (box=336: ~44,500 pts). Peak GPU memory scales with **both** `batch_size`
+and `n_rotations`.
 
 Safe batch size for a GPU with V GB VRAM (using 85 % budget):
 ```
-bs_safe = floor((0.85 × V - baseline_GB) / per_part_GB)
+n_valid ≈ π/4 × H × (H//2+1)
+bs_safe = floor(0.85 × V / (n_rots × n_valid × 9 × 4 bytes))
 ```
 
-Per-VRAM safe batch sizes at box=336:
+Per-grid safe batch sizes at box=336, 49 GB GPU (0.85×=41.6 GB usable):
 
-| VRAM (GB) | safe bs | ~peak at safe bs |
-|-----------|---------|-----------------|
-| 8  | 11  | 6.4 GB |
-| 10 | 14  | 8.2 GB |
-| 16 | 23  | 13.3 GB |
-| 24 | 35  | 20.1 GB |
-| 32 | 47  | 27.0 GB |
-| 40 | 59  | 33.9 GB |
-| 48 | 71  | 40.7 GB |
-| 64 | 95  | 54.5 GB |
-| 80 | 118 | 67.6 GB |
+| Grid | n_rots | GB/batch | safe bs | Notes |
+|------|--------|----------|---------|-------|
+| fibo 4°/2° | 63 | 0.10 | ~411 | use bs=64–75 |
+| fibo 6°/2° | 209 | 0.34 | ~124 | use bs=75 |
+| fibo 4°/1° | 488 | 0.78 | ~53 | use bs=32–40 |
+| two-stage fine 5×209 | 1045 | 1.68 | ~24 | use bs=16 |
+| fibo 4°/0.7° | 1486 | 2.39 | ~17 | use bs=8 |
+| fibo 6°/1° | 1638 | 2.63 | ~15 | use bs=8 |
 
-These limits are **N-independent**: the same safe `batch_size` applies regardless of whether you
-use 63-point or 1638-point grids.
-
-**Historical note:** the old B×N ≈ 8192 threshold was a Triton XBLOCK error from PyTorch ≤ 2.5.
-It is no longer relevant (see "Batch size constraint" section above). The early "optimal bs" values
-in the batch tables below (bs=4 for 6°/1°, bs=16 for 4°/1°) were set by that old constraint, not
-by memory. On the current 49 GB GPU the true optimal bs is 71 for any grid.
-
-**Impact on throughput:** Dense grids (4°/1°, 6°/1°) gained 2.2–2.3× speedup moving from the
-old bs=2/8 to the XBLOCK-corrected bs=4/16. Further gains are possible by increasing to the
-memory-safe limit (bs=71 on 49 GB). Sparse grids (6°/2°, two-stage, 4°/0.7°) are compute-bound
-per batch — no throughput gain beyond bs≈32.
+**Historical note:** old measurements used lower batch sizes (bs=4 for 6°/1°, bs=5 for 4°/0.7°,
+bs=7 for two-stage) because the XBLOCK compile error with `dynamic=True` limited exploration.
+After fixing to `dynamic=False`, these limits were re-evaluated. The timings at bs=4/16 for dense
+grids remain the most recent wall-clock measurements; re-timing at higher bs is pending.
 
 **Implementation note — user-facing warnings (`_check_batch_size`):**
 The method `ProjectionMatcher._check_batch_size(batch_size, device)` queries total VRAM from

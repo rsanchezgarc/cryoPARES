@@ -144,7 +144,11 @@ def _extract_central_slices_rfft_3d_multichannel_precomputed(
     return projection_image_dfts
 
 _compiled_extract_central_slices_rfft_3d_multichannel = torch.compile(
-    _extract_central_slices_rfft_3d_multichannel_precomputed, dynamic=True, #TODO: Move dynamic to config, as it might depend on inductor bug
+    _extract_central_slices_rfft_3d_multichannel_precomputed, dynamic=False,
+    # dynamic=True caused Triton to generate XBLOCK=8192 > max=4096 for the
+    # torch.flip clone kernel (size_hints={'x': 2^36} from unbounded dynamic shapes).
+    # dynamic=False compiles for concrete shapes on first call; recompiles only when
+    # the rotation-matrix count changes (once per run).
     mode=main_config.projmatching.compile_projectVol_mode, fullgraph=True)
 
 

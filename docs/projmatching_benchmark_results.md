@@ -25,7 +25,7 @@ model** (the actual D2 use case), which will be the ground truth for configurati
 ## Executive summary
 
 **Starting point:** NN pose estimates (~7°) → Cartesian 6°/2° projmatching plateaus near 1.3–1.7° (master branch).
-**Current best on real data:** two-stage 6°/2°+2.1°/0.7° K=5 remains best on median (1.05°/2.18°), but **cart_6-2 + SO(3) interpolation** beats two-stage on FSC for lig_00892 (2.581 vs 2.594 Å) at cart_6-2 speed (~3,500 p/min vs 838). SO(3) interp closes ~80% of the cart→two-stage angular gap at zero throughput cost.
+**Current best on real data:** Cartesian two-stage + SO(3) interpolation (6°/2° coarse Euler-add, 2.1°/0.7° Fibo fine, K=5, SO(3) interp on fine winner) — **0.98° / 2.574 Å on lig_00892, 2.08° / 2.898 Å on lig_00893** — best on every metric across both datasets.
 
 ### Implemented changes
 
@@ -650,13 +650,14 @@ CUDA_VISIBLE_DEVICES=0 $BIN_DIR/cryopares_reconstruct \
 | true_master_6-2 (improvements OFF) | 343 | 8 | 1.49° | 76.7% | 2.697 Å | ~3,500 |
 | master_regression_6-2 (on master branch) | 343 | 8 | 1.49° | 76.8% | 2.760 Å | ~3,500 |
 | cart_6-2 (improvements ON, Cartesian) | 343 | 8 | 1.47° | 76.7% | 2.667 Å | 3,300 |
-| **cart_6-2 + SO(3) interp** | **343** | **8** | **1.13°** | **76.7%** | **2.581 Å** | **~3,500** |
+| cart_6-2 + SO(3) interp | 343 | 8 | 1.13° | 76.7% | 2.581 Å | ~3,500 |
 | cart_4-1 | 343+ | 6 | 1.26° | — | 2.589 Å | 1,700 |
 | fibo_6-2 | 208 | 16 | 1.62° | 76.3% | 2.637 Å | 5,100 |
 | fibo_6-1.8 (density-matched to cart) | 339 | 16 | 1.51° | 76.4% | 2.622 Å | — |
 | fibo_6.8-2 (wider ball, same step) | 353 | 16 | 1.64° | 76.6% | 2.637 Å | — |
 | fibo_4-1 | 488 | 8 | 1.41° | — | 2.594 Å | 2,480 |
-| twostage_6-2_2.1-0.7 K=5 | ~1250 | 4 | **1.05°** | 76.8% | 2.594 Å | 838 |
+| twostage_6-2_2.1-0.7 K=5 (fibo) | ~1250 | 4 | 1.05° | 76.8% | 2.594 Å | 838 |
+| **cart_twostage_6-2_2.1-0.7 K=5 + SO(3) interp** | **~1250** | **4** | **0.98°** | **77.0%** | **2.574 Å** | **~800** |
 
 ### Results — lig_00893 (~42K particles, harder)
 
@@ -665,13 +666,14 @@ CUDA_VISIBLE_DEVICES=0 $BIN_DIR/cryopares_reconstruct \
 | true_master_6-2 (improvements OFF) | 343 | 8 | 2.56° | 64.5% | 3.082 Å | ~3,500 |
 | master_regression_6-2 (on master branch) | 343 | 8 | 2.56° | 64.6% | 3.043 Å | ~3,500 |
 | cart_6-2 (improvements ON, Cartesian) | 343 | 8 | 2.49° | 64.7% | 2.967 Å | 3,300 |
-| **cart_6-2 + SO(3) interp** | **343** | **8** | **2.25°** | **64.3%** | **2.926 Å** | **~3,500** |
+| cart_6-2 + SO(3) interp | 343 | 8 | 2.25° | 64.3% | 2.926 Å | ~3,500 |
 | cart_4-1 | 343+ | 6 | 2.63° | — | 2.968 Å | 1,700 |
 | fibo_6-2 | 208 | 16 | 2.69° | 63.8% | 3.062 Å | 5,100 |
 | fibo_6-1.8 (density-matched to cart) | 339 | 16 | 2.63° | 63.9% | 3.023 Å | — |
 | fibo_6.8-2 (wider ball, same step) | 353 | 16 | 2.63° | 64.0° | 2.985 Å | — |
 | fibo_4-1 | 488 | 8 | 2.92° | — | 2.986 Å | 2,480 |
-| twostage_6-2_2.1-0.7 K=5 | ~1250 | 4 | **2.18°** | 65.5% | **2.948 Å** | 838 |
+| twostage_6-2_2.1-0.7 K=5 (fibo) | ~1250 | 4 | 2.18° | 65.5% | 2.948 Å | 838 |
+| **cart_twostage_6-2_2.1-0.7 K=5 + SO(3) interp** | **~1250** | **4** | **2.08°** | **65.9%** | **2.898 Å** | **~800** |
 
 ### Key findings (bgal)
 

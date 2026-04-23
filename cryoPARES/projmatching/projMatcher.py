@@ -111,24 +111,49 @@ class ProjectionMatcher(nn.Module):
                 f"fine_top_k ({self.fine_top_k}) must be >= top_k_poses_localref "
                 f"({self.top_k_poses_localref})"
             )
-            if self.rotation_composition == "euler_add":
-                print("[projmatching] use_two_stage_search=True requires matrix composition; "
-                      "switching rotation_composition from 'euler_add' to 'pre_multiply'.")
-                self.rotation_composition = "pre_multiply"
+            # No forced rotation_composition switch: the coarse stage uses _compose_coarse
+            # (set below) which respects the configured composition mode. The fine stage
+            # always uses direct pre_multiply (fine_delta @ coarse_winner rotmat) since the
+            # coarse winner is already a rotation matrix regardless of coarse composition.
 
-        # Precompute SO(3) neighbor tables for parabolic interpolation (Change #7).
-        # Only meaningful for Cartesian euler_add; silently ignored for other modes.
-        if self.use_so3_interpolation and self.rotation_composition == "euler_add":
-            nb_idx, nb_valid = _precompute_so3_interp_neighbors(
-                self.grid_distance_degs, self.grid_step_degs
-            )
-            # Store on CPU; moved to GPU lazily on first forward() call.
-            self._so3_interp_nb_idx   = nb_idx    # (nDelta, 6) long
-            self._so3_interp_nb_valid = nb_valid  # (nDelta, 6) bool
-        elif self.use_so3_interpolation:
-            print("[projmatching] use_so3_interpolation=True is only supported with "
-                  "rotation_composition='euler_add'; ignoring.")
-            self.use_so3_interpolation = False
+        # Dynamic coarse-stage composition — set once at init, used in all forward paths.
+        #
+        #   euler_add:               adds Euler angle deltas to the input Euler angles.
+        #                            Works only with the Cartesian grid. Preserves the
+        #                            grid's axis-aligned structure (needed for SO(3) interp
+        #                            precomputed neighbor table in the single-stage path).
+        #   pre_multiply / post_multiply: composes delta rotation matrices with input rotmats.
+        #                            Required for Fibonacci grid; also used when explicitly
+        #                            requested via config.
+        #
+        # Coarse composition is separate from the fine-stage composition (which is always
+        # pre_multiply regardless of this setting — see _forward_two_stage).
+        if self.rotation_composition == "euler_add":
+            self._compose_coarse = self._compose_coarse_euler_add
+        else:
+            self._compose_coarse = self._compose_coarse_matrix
+
+        # SO(3) parabolic sub-step interpolation (Change #7).
+        #
+        # Single-stage (euler_add):  uses a precomputed axis-aligned neighbor index table
+        #   for the coarse Cartesian grid — O(1) lookup on the hot path.
+        # Two-stage (any composition): interpolates the fine-stage winner on-the-fly by
+        #   projecting 6 axis-aligned Euler perturbations (±fine_step per axis). Overhead
+        #   is 6 projections vs the ~K×nFine already computed — negligible.
+        if self.use_so3_interpolation:
+            if self.use_two_stage_search:
+                # On-the-fly path: no precomputation needed; flag stays True.
+                pass
+            elif self.rotation_composition == "euler_add":
+                nb_idx, nb_valid = _precompute_so3_interp_neighbors(
+                    self.grid_distance_degs, self.grid_step_degs
+                )
+                self._so3_interp_nb_idx   = nb_idx    # (nDelta, 6) long, CPU
+                self._so3_interp_nb_valid = nb_valid  # (nDelta, 6) bool, CPU
+            else:
+                print("[projmatching] use_so3_interpolation=True requires "
+                      "rotation_composition='euler_add' for single-stage search; ignoring.")
+                self.use_so3_interpolation = False
 
         # Whitening is estimated from the first N batches of particles (lazy, warm-up averaged).
         # Averaging over multiple batches smooths out per-defocus CTF oscillations (analogous to
@@ -217,8 +242,9 @@ class ProjectionMatcher(nn.Module):
     def _get_fine_delta_rotmats(self, device: torch.device) -> torch.Tensor:
         """Return fine-pass delta grid as rotation matrices (nFine, 3, 3).
 
-        Always uses the Fibonacci ω-ball grid (two-stage path requires matrix composition).
-        Result is cached on self._fine_delta_rotmats_cache.
+        Uses the Fibonacci ω-ball grid (good uniform SO(3) coverage for the fine ball).
+        The fine stage always composes via matrix multiplication (fine_delta @ coarse_winner)
+        regardless of the coarse rotation_composition setting. Cached on self.
         """
         if (not hasattr(self, "_fine_delta_rotmats_cache") or
                 self._fine_delta_rotmats_cache.device != device):
@@ -234,6 +260,47 @@ class ProjectionMatcher(nn.Module):
             identity = torch.eye(3, device=device, dtype=torch.float32).unsqueeze(0)
             self._fine_delta_rotmats_cache = torch.cat([identity, rotmats], dim=0)
         return self._fine_delta_rotmats_cache
+
+    # ── Coarse-stage composition functions (set dynamically in __init__) ────────
+
+    def _compose_coarse_euler_add(self, rotmats: torch.Tensor) -> torch.Tensor:
+        """Coarse stage: compose input poses with the Cartesian grid via Euler addition.
+
+        Adds the Cartesian Euler delta grid to the input Euler angles element-wise,
+        then converts to rotation matrices. Preserves the axis-aligned structure of
+        the Cartesian grid (required for the SO(3) interp neighbor-table lookup in
+        the single-stage path and for the correct degeneracy behaviour near poles).
+
+        Args:
+            rotmats: (B, topK, 3, 3) — input rotation matrices
+        Returns:
+            (B, topK*nCoarse, 3, 3) — all candidate rotation matrices
+        """
+        bsize = rotmats.size(0)
+        eulerDegs = get_eulers(rotmats)                  # (B, topK, 3)
+        euler_delta = self._get_so3_delta(rotmats.device)  # (nCoarse, 3)
+        expanded = (euler_delta.unsqueeze(0).unsqueeze(0) +
+                    eulerDegs.unsqueeze(2))               # (B, topK, nCoarse, 3)
+        return get_rotmat(
+            expanded.reshape(-1, 3), device=rotmats.device
+        ).reshape(bsize, -1, 3, 3)
+
+    def _compose_coarse_matrix(self, rotmats: torch.Tensor) -> torch.Tensor:
+        """Coarse stage: compose input poses with the grid via rotation matrix multiply.
+
+        Uses self.rotation_composition (pre_multiply or post_multiply) to expand
+        the delta search grid over all input poses. Works for both Cartesian-converted
+        and Fibonacci grids.
+
+        Args:
+            rotmats: (B, topK, 3, 3) — input rotation matrices
+        Returns:
+            (B, topK*nCoarse, 3, 3) — all candidate rotation matrices
+        """
+        coarse_delta = self._get_so3_delta_rotmats(rotmats.device)  # (nCoarse, 3, 3)
+        return self._expand_rotmats(rotmats, coarse_delta)
+
+    # ── Delta-grid helpers ───────────────────────────────────────────────────
 
     def _get_so3_delta(self, device: torch.device, as_rotmats=False):
         """
@@ -662,6 +729,66 @@ class ProjectionMatcher(nn.Module):
 
         return perImgCorr, maxCorrs, predRotMats, pixelShiftsXY_topk
 
+    def _so3_interp_fine_winner(
+            self,
+            fparts: torch.Tensor,         # (B, H, W//2+1[, 2])
+            ctfs: torch.Tensor,           # (B, H, W//2+1[, 2])
+            winner_rotmats: torch.Tensor, # (B, 1, 3, 3)
+            winner_corr: torch.Tensor,    # (B,)
+    ) -> torch.Tensor:                    # (B, 1, 3, 3)
+        """SO(3) parabolic sub-step refinement for the two-stage fine winner (Change #7).
+
+        Converts the fine winner to Euler angles, generates 6 axis-aligned Euler
+        neighbors (±fine_grid_step_degs per axis), projects them, correlates with
+        the particles, and fits a 1D parabola per axis to find the sub-step offset.
+
+        Overhead: 6 projections + correlations vs the K×nFine already computed — negligible.
+        Works regardless of which grid type was used for the coarse or fine stages.
+        """
+        B = winner_rotmats.size(0)
+        device = winner_rotmats.device
+        step = self.fine_grid_step_degs
+
+        euler_winner = get_eulers(winner_rotmats[:, 0])  # (B, 3)
+
+        # 6 neighbors: ±step along each of the 3 Euler axes
+        # Layout: [rot+, rot-, tilt+, tilt-, psi+, psi-]
+        deltas = torch.zeros(6, 3, device=device)
+        for ax in range(3):
+            deltas[2 * ax,     ax] = +step
+            deltas[2 * ax + 1, ax] = -step
+        neighbor_eulers = euler_winner.unsqueeze(1) + deltas      # (B, 6, 3)
+        neighbor_rotmats = get_rotmat(
+            neighbor_eulers.reshape(-1, 3), device=device
+        )                                                           # (B*6, 3, 3)
+
+        # Project, optionally apply CTF, correlate
+        projs = self._compute_projections_from_rotmats(neighbor_rotmats)
+        _shapeIdx = -3 if USE_TWO_FLOAT32_FOR_COMPLEX else -2
+        projs = projs.reshape(B, 6, *projs.shape[_shapeIdx:])
+        if self.correct_ctf:
+            ctfs_view = ctfs.unsqueeze(1)
+            if USE_TWO_FLOAT32_FOR_COMPLEX:
+                ctfs_view = ctfs_view.unsqueeze(-1)
+            projs = self._apply_ctfF(projs, ctfs_view)
+        nb_corrs, _ = self.correlateF(fparts.unsqueeze(1), projs)  # (B, 6)
+
+        # Parabolic interpolation per axis — identical formula to _so3_interpolate_euler_winner
+        cc_0 = winner_corr                                          # (B,)
+        delta_euler = torch.zeros(B, 3, device=device, dtype=cc_0.dtype)
+        for ax in range(3):
+            cc_p = nb_corrs[:, 2 * ax]        # +step neighbor CC
+            cc_m = nb_corrs[:, 2 * ax + 1]    # -step neighbor CC
+            denom = 2.0 * cc_m - 4.0 * cc_0 + 2.0 * cc_p
+            safe_denom = torch.where(denom < -1e-8, denom, torch.full_like(denom, -1e-8))
+            delta_ax = (cc_m - cc_p) / safe_denom * step
+            delta_ax = delta_ax.clamp(-step * 0.5, step * 0.5)
+            apply = denom < -1e-8   # only where CC surface is concave (valid local max)
+            delta_euler[:, ax] = torch.where(apply, delta_ax, torch.zeros_like(delta_ax))
+
+        refined = get_rotmat(euler_winner + delta_euler, device=device)  # (B, 3, 3)
+        return refined.unsqueeze(1)                                       # (B, 1, 3, 3)
+
     def _forward_two_stage(
             self,
             fparts: torch.Tensor,
@@ -671,30 +798,44 @@ class ProjectionMatcher(nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Two-stage coarse-to-fine search.
 
-        Stage 1 (coarse): self.grid_distance_degs / self.grid_step_degs grid → top fine_top_k
-        Stage 2 (fine):   self.fine_grid_distance_degs / self.fine_grid_step_degs grid around
-                          each coarse winner → global top top_k_poses_localref
+        Stage 1 (coarse): grid_distance_degs / grid_step_degs → top fine_top_k winners.
+          Composition: self._compose_coarse (euler_add for Cartesian, matrix multiply for Fibo).
+        Stage 2 (fine):  fine_grid_distance_degs / fine_grid_step_degs around each coarse winner
+          → global top top_k_poses_localref. Always uses pre_multiply (fine_delta @ coarse_winner)
+          since the coarse winner is already a rotation matrix.
+        Change #7: if use_so3_interpolation, refines the fine winner with 6 extra projections.
 
         Confidence is computed against the coarse correlation distribution (stable, full pool).
         """
         # --- Stage 1: coarse ---
-        coarse_delta = self._get_so3_delta_rotmats(rotmats.device)           # (nCoarse, 3, 3)
-        coarse_expanded = self._expand_rotmats(rotmats, coarse_delta)         # (B, nCoarse, 3, 3)
+        # _compose_coarse respects rotation_composition: euler_add for Cartesian grids,
+        # matrix multiplication for Fibonacci or explicit pre/post_multiply.
+        coarse_expanded = self._compose_coarse(rotmats)                        # (B, nCoarse, 3, 3)
         coarse_corrs_full, _, coarse_rotmats, _ = self._do_search(
             fparts, ctfs, coarse_expanded, bsize, topk=self.fine_top_k
         )
-        # coarse_corrs_full: (B, nCoarse) — full distribution for confidence
+        # coarse_corrs_full: (B, nCoarse) — full distribution for confidence scoring
         # coarse_rotmats:    (B, fine_top_k, 3, 3)
         del coarse_expanded
 
         # --- Stage 2: fine ---
-        fine_delta = self._get_fine_delta_rotmats(rotmats.device)             # (nFine, 3, 3)
-        fine_expanded = self._expand_rotmats(coarse_rotmats, fine_delta)      # (B, fine_top_k*nFine, 3, 3)
+        # Always pre_multiply: fine_delta @ coarse_winner. The coarse winner is a rotation
+        # matrix regardless of how the coarse stage was composed.
+        fine_delta = self._get_fine_delta_rotmats(rotmats.device)              # (nFine, 3, 3)
+        fine_expanded = (fine_delta[None, None] @
+                         coarse_rotmats.unsqueeze(2)).reshape(bsize, -1, 3, 3) # (B, K*nFine, 3, 3)
         _, fine_corrs, fine_rotmats, fine_shifts = self._do_search(
             fparts, ctfs, fine_expanded, bsize, topk=self.top_k_poses_localref
         )
-        del ctfs
         del fine_expanded
+
+        # --- Change #7: SO(3) sub-step interpolation on the fine winner ---
+        if self.use_so3_interpolation and self.top_k_poses_localref == 1:
+            fine_rotmats = self._so3_interp_fine_winner(
+                fparts, ctfs, fine_rotmats, fine_corrs[:, 0]
+            )
+
+        del ctfs
 
         # Confidence: compare fine winners against the coarse correlation distribution
         mean_corr = coarse_corrs_full.mean(-1, keepdims=True)

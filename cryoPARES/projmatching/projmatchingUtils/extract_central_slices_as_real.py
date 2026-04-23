@@ -83,17 +83,22 @@ def compiled_extract_central_slices_rfft_3d_multichannel(
 ) -> torch.Tensor:  # (..., c, h, w)
     """Extract central slice from an fftshifted rfft."""
     rotation_matrices = rotation_matrices.to(torch.float32)
+    # Apply torch.flip *outside* the compiled function: with dynamic=True, Triton's
+    # worst-case size_hints (2^36) for the flip clone kernel causes XBLOCK=8192 > max=4096.
+    # Moving the flip here (eager) keeps the compiled kernel free of that op.
+    if not zyx_matrices:
+        rotation_matrices = torch.flip(rotation_matrices, dims=(-2, -1))
     rfft_shape, valid_coords, freq_mask_indices = _get_freq_grid_valid_coords_and_freq_grid_mask(image_shape,
                                                                                                  volume_rfft.device,
                                                                                                  fftfreq_max)
     return _compiled_extract_central_slices_rfft_3d_multichannel(
                                                         volume_rfft,
                                                         image_shape,
-                                                        rotation_matrices,  # (..., 3, 3)
+                                                        rotation_matrices,
                                                         rfft_shape,
                                                         valid_coords,
                                                         freq_mask_indices,
-                                                        zyx_matrices)
+                                                        zyx_matrices=True)  # flip already applied
 
 #TODO: This might be redundant if compilation becomes possible for complex numbers, becuase it is just being as a replacement of extract_central_slices_rfft_3d
 def _extract_central_slices_rfft_3d_multichannel_precomputed(
@@ -144,11 +149,9 @@ def _extract_central_slices_rfft_3d_multichannel_precomputed(
     return projection_image_dfts
 
 _compiled_extract_central_slices_rfft_3d_multichannel = torch.compile(
-    _extract_central_slices_rfft_3d_multichannel_precomputed, dynamic=False,
-    # dynamic=True caused Triton to generate XBLOCK=8192 > max=4096 for the
-    # torch.flip clone kernel (size_hints={'x': 2^36} from unbounded dynamic shapes).
-    # dynamic=False compiles for concrete shapes on first call; recompiles only when
-    # the rotation-matrix count changes (once per run).
+    _extract_central_slices_rfft_3d_multichannel_precomputed, dynamic=True,
+    # torch.flip is applied *outside* this compiled function (in the wrapper above) to avoid
+    # Triton generating XBLOCK=8192 > max=4096 from worst-case size_hints with dynamic=True.
     mode=main_config.projmatching.compile_projectVol_mode, fullgraph=True)
 
 

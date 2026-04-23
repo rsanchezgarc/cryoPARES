@@ -44,6 +44,11 @@ class Projmatching_config:
             'Only used when use_two_stage_search=True.'),
         'fine_top_k': ('Number of coarse-pass winners fed into the fine pass. Must be ≥ '
             'top_k_poses_localref. Only used when use_two_stage_search=True.'),
+        'use_so3_interpolation': ('Parabolic sub-step SO(3) interpolation of the winning grid point '
+            'after single-stage Cartesian (euler_add) search. Fits a 1D parabola through the winner '
+            'and its two axis-aligned neighbors for each of the 3 Euler axes, giving a sub-step '
+            'correction analogous to sub-pixel shift refinement. Only active when '
+            'rotation_composition=euler_add and top_k_poses_localref=1. (Change #7)'),
 
         # CLI-exposed parameters (used in projmatching_starfile)
         'reference_vol': 'Path to reference 3D volume (.mrc file) for generating projection templates',
@@ -97,3 +102,6 @@ class Projmatching_config:
     fine_grid_distance_degs: float = 1.5 # fine-pass ball radius (1.5°/0.5° ≈ 208 pts/candidate)
     fine_grid_step_degs: float = 0.5     # fine-pass step size
     fine_top_k: int = 5                  # coarse-pass candidates handed to fine pass
+
+    # SO(3) sub-step pose interpolation (#7)
+    use_so3_interpolation: bool = False  # parabolic sub-step angular refinement after grid search (Change #7)

@@ -98,6 +98,9 @@ class ProjectionMatcher(nn.Module):
                   "switching rotation_composition from 'euler_add' to 'pre_multiply'.")
             self.rotation_composition = "pre_multiply"
 
+        # SO(3) sub-step interpolation (#7) — Cartesian euler_add path only
+        self.use_so3_interpolation = main_config.projmatching.use_so3_interpolation
+
         # Two-stage coarse-to-fine search
         self.use_two_stage_search = main_config.projmatching.use_two_stage_search
         self.fine_grid_distance_degs = main_config.projmatching.fine_grid_distance_degs
@@ -112,6 +115,20 @@ class ProjectionMatcher(nn.Module):
                 print("[projmatching] use_two_stage_search=True requires matrix composition; "
                       "switching rotation_composition from 'euler_add' to 'pre_multiply'.")
                 self.rotation_composition = "pre_multiply"
+
+        # Precompute SO(3) neighbor tables for parabolic interpolation (Change #7).
+        # Only meaningful for Cartesian euler_add; silently ignored for other modes.
+        if self.use_so3_interpolation and self.rotation_composition == "euler_add":
+            nb_idx, nb_valid = _precompute_so3_interp_neighbors(
+                self.grid_distance_degs, self.grid_step_degs
+            )
+            # Store on CPU; moved to GPU lazily on first forward() call.
+            self._so3_interp_nb_idx   = nb_idx    # (nDelta, 6) long
+            self._so3_interp_nb_valid = nb_valid  # (nDelta, 6) bool
+        elif self.use_so3_interpolation:
+            print("[projmatching] use_so3_interpolation=True is only supported with "
+                  "rotation_composition='euler_add'; ignoring.")
+            self.use_so3_interpolation = False
 
         # Whitening is estimated from the first N batches of particles (lazy, warm-up averaged).
         # Averaging over multiple batches smooths out per-defocus CTF oscillations (analogous to
@@ -721,6 +738,25 @@ class ProjectionMatcher(nn.Module):
             batch_idxs_range = torch.arange(pixelShiftsXY.size(0)).unsqueeze(1)
             pixelShiftsXY = pixelShiftsXY[batch_idxs_range, maxCorrsIdxs]
             predEulers = expanded_eulerDegs[batch_idxs_range, maxCorrsIdxs]
+
+            # Change #7: parabolic sub-step SO(3) refinement of the winning grid point.
+            # Only runs when top_k_poses_localref=1 (default) so winner_idx maps directly
+            # into the nDelta dimension without block-offset arithmetic.
+            if self.use_so3_interpolation and self.top_k_poses_localref == 1:
+                dev = perImgCorr.device
+                if (not hasattr(self, '_so3_interp_nb_idx_dev') or
+                        self._so3_interp_nb_idx_dev.device != dev):
+                    self._so3_interp_nb_idx_dev   = self._so3_interp_nb_idx.to(dev)
+                    self._so3_interp_nb_valid_dev = self._so3_interp_nb_valid.to(dev)
+                delta_euler = _so3_interpolate_euler_winner(
+                    perImgCorr,
+                    maxCorrsIdxs[:, 0],            # (B,) winner flat index in nDelta
+                    self._so3_interp_nb_idx_dev,
+                    self._so3_interp_nb_valid_dev,
+                    self.grid_step_degs,
+                )
+                predEulers = predEulers + delta_euler.unsqueeze(1)  # (B, 1, 3)
+
             predRotMats = get_rotmat(predEulers)
         else:
             # Exact SO(3) composition via rotation matrices — no Euler singularity at poles.
@@ -764,7 +800,7 @@ class ProjectionMatcher(nn.Module):
         self._whitening_amp_sum = None
         self._whitening_batches_seen = 0
 
-        n_cpus = n_cpus if n_cpus > 0 else 1
+        n_cpus = max(0, n_cpus)  # 0 = inline loading in main process (no subprocess spawn)
         particlesDataSet = self.preprocess_particles(
             particles,
             data_rootdir,
@@ -923,6 +959,106 @@ def _get_begin_end_from_max_shift(image_shape, max_shift):
     w1 = w - delta_w
 
     return h0, h1, w0, w1
+
+def _precompute_so3_interp_neighbors(
+        grid_distance_degs: float,
+        grid_step_degs: float,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Build axis-aligned neighbor index tables for Cartesian SO(3) parabolic interpolation.
+
+    For the Cartesian euler_add grid (n_angles³ points), each grid point has up to 6 axis-aligned
+    neighbors (rot±, tilt±, psi±). This function precomputes their flat indices and a validity
+    mask once at init, so the hot interpolation path only does cheap index lookups.
+
+    Args:
+        grid_distance_degs: half-width of the search ball (degrees).
+        grid_step_degs:     angular step between grid points (degrees).
+
+    Returns:
+        neighbor_idx:   (nDelta, 6) long — flat indices of the 6 neighbors in order
+                        (rot+, rot-, tilt+, tilt-, psi+, psi-). Boundary entries are
+                        clamped to the point itself; check neighbor_valid before using.
+        neighbor_valid: (nDelta, 6) bool — True where the neighbor lies inside the grid.
+    """
+    n_angles = math.ceil(grid_distance_degs * 2 / grid_step_degs)
+    if n_angles % 2 == 0:
+        n_angles += 1
+    nDelta = n_angles ** 3
+
+    flat_idx = torch.arange(nDelta, dtype=torch.long)
+    rot_i  = flat_idx // (n_angles * n_angles)
+    tilt_j = (flat_idx // n_angles) % n_angles
+    psi_l  = flat_idx % n_angles
+
+    strides     = [n_angles * n_angles, n_angles, 1]
+    axis_coords = [rot_i, tilt_j, psi_l]
+
+    neighbor_idx   = torch.zeros(nDelta, 6, dtype=torch.long)
+    neighbor_valid = torch.zeros(nDelta, 6, dtype=torch.bool)
+
+    for ax, (stride, coord) in enumerate(zip(strides, axis_coords)):
+        col_p = 2 * ax      # positive-step neighbor column
+        col_m = 2 * ax + 1  # negative-step neighbor column
+
+        valid_p = coord < n_angles - 1
+        neighbor_valid[:, col_p] = valid_p
+        neighbor_idx[:, col_p] = torch.where(valid_p, flat_idx + stride, flat_idx)
+
+        valid_m = coord > 0
+        neighbor_valid[:, col_m] = valid_m
+        neighbor_idx[:, col_m] = torch.where(valid_m, flat_idx - stride, flat_idx)
+
+    return neighbor_idx, neighbor_valid
+
+
+def _so3_interpolate_euler_winner(
+        perImgCorr: torch.Tensor,       # (B, nDelta)
+        winner_idx: torch.Tensor,        # (B,) long
+        neighbor_idx: torch.Tensor,      # (nDelta, 6) long
+        neighbor_valid: torch.Tensor,    # (nDelta, 6) bool
+        grid_step_degs: float,
+) -> torch.Tensor:                       # (B, 3) delta Euler angles in degrees
+    """Parabolic sub-step refinement of the winning Cartesian Euler grid point.
+
+    For each of the 3 Euler axes independently, fits a 1D parabola through the CC values at
+    the winner and its two axis-aligned neighbors and returns the sub-step offset to the
+    parabola peak. Identical in spirit to the sub-pixel shift refinement in _extract_ccor_max.
+
+    Corrections are clamped to ±step/2 and zeroed wherever a neighbor is missing (boundary)
+    or the CC surface is not concave along that axis (no well-defined local maximum).
+
+    Only meaningful for the Cartesian euler_add path (structured axis-aligned grid).
+    """
+    B = winner_idx.shape[0]
+    batch_range = torch.arange(B, device=perImgCorr.device)
+
+    cc_0 = perImgCorr[batch_range, winner_idx]  # (B,)
+
+    nb_idx   = neighbor_idx[winner_idx]    # (B, 6)
+    nb_valid = neighbor_valid[winner_idx]  # (B, 6)
+
+    delta_euler = torch.zeros(B, 3, device=perImgCorr.device, dtype=perImgCorr.dtype)
+
+    for ax in range(3):
+        col_p, col_m = 2 * ax, 2 * ax + 1
+
+        cc_p = perImgCorr[batch_range, nb_idx[:, col_p]]  # (B,)
+        cc_m = perImgCorr[batch_range, nb_idx[:, col_m]]  # (B,)
+
+        # Parabolic interpolation: same formula as _extract_ccor_max
+        # delta = (cc_m - cc_p) / (2*cc_m - 4*cc_0 + 2*cc_p)  in grid-step units
+        denom = 2.0 * cc_m - 4.0 * cc_0 + 2.0 * cc_p          # (B,)
+        safe_denom = torch.where(denom < -1e-8, denom, torch.full_like(denom, -1e-8))
+        delta_ax = (cc_m - cc_p) / safe_denom * grid_step_degs  # (B,) in degrees
+
+        delta_ax = delta_ax.clamp(-grid_step_degs * 0.5, grid_step_degs * 0.5)
+
+        # Only apply where both neighbors exist AND the surface is concave (denom < 0)
+        apply = nb_valid[:, col_p] & nb_valid[:, col_m] & (denom < -1e-8)
+        delta_euler[:, ax] = torch.where(apply, delta_ax, torch.zeros_like(delta_ax))
+
+    return delta_euler
+
 
 def _extract_ccor_max(corrs, h0, h1, w0, w1, use_subpixel: bool = False):
     # corrs is always (N, H, W) — reshaped by _correlateCrossCorrelation before this call

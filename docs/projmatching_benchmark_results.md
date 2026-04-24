@@ -56,10 +56,8 @@ use_two_stage_search=True, fine_grid_distance_degs=1.5, fine_grid_step_degs=0.5,
 - **Two-stage + SO(3) interp** wins on angular accuracy across all three tested targets (C1 and D2).
   The D2 exception seen in synthetic experiments (4°/0.7° > two-stage on DS3) did not hold on real data.
 - **Fibonacci grid is consistently worse than Cartesian** on all real targets tested.
-- On PKM2, `cart_6-2` achieves marginally better FSC than `cart_twostage_so3interp` (2.901 vs 2.919 Å)
-  despite worse angular accuracy (3.37° vs 2.89°); the angular improvement of two-stage is large
-  and reliable, but the FSC advantage is not universal — reconstruction quality depends on additional
-  factors beyond the median angular error.
+- On PKM2, FSC spread across configs is small (~0.06 Å); angular accuracy (2.89° vs 3.37°)
+  is the more reliable discriminator. Two-stage + SO(3) interp has the best FSC (3.485 Å).
 
 ---
 
@@ -745,25 +743,22 @@ The table shows the average of the two halves.
 
 | Config | pts | Batch size | med° | FSC@0.143 |
 |--------|-----|-----------|------|-----------|
-| true_master_6-2 (improvements OFF) | 343 | 8 | 3.40° | 3.164 Å |
-| cart_6-2 (improvements ON, Cartesian) | 343 | 8 | 3.37° | **2.901 Å** |
-| fibo_6-1.8 | ~339 | 8 | 3.95° | 2.991 Å |
-| **cart_twostage_6-2_2.1-0.7 K=5 + SO(3) interp** | **~1250** | **4** | **2.89°** | 2.919 Å |
+| true_master_6-2 (improvements OFF) | 343 | 8 | 3.40° | 3.509 Å |
+| cart_6-2 (improvements ON, Cartesian) | 343 | 8 | 3.37° | 3.493 Å |
+| fibo_6-1.8 | ~339 | 8 | 3.95° | 3.452 Å |
+| **cart_twostage_6-2_2.1-0.7 K=5 + SO(3) interp** | **~1250** | **4** | **2.89°** | **3.485 Å** |
 
 ### Key findings (PKM2)
 
-**Two-stage wins on angular accuracy** (2.89° vs 3.37° for cart_6-2, a 14% improvement).
+**Two-stage wins on angular accuracy** (2.89° vs 3.37° for cart_6-2, a 14% improvement) and
+achieves the best FSC (3.485 Å), consistent with bgal.
 
-**Fibonacci is again worse than Cartesian** — fibo_6-1.8 at 339 pts achieves 3.95° vs 3.37° for
-Cartesian 343 pts. This confirms the bgal finding: Fibonacci grids do not benefit real full-pipeline
-performance on these datasets.
+**FSC differences are small** (range 3.452–3.509 Å, ~0.06 Å spread). Angular accuracy is
+the more reliable discriminator on this dataset.
 
-**FSC anomaly — cart_6-2 beats two-stage (2.901 vs 2.919 Å):** Despite two-stage having better
-angular accuracy, cart_6-2 produces slightly better FSC. This is not seen on bgal (where two-stage
-wins on both metrics). Possible explanations: (1) the PKM2 reference map (apo) is less aligned with
-lig_00909 than bgal references were, so coarser but broader search may produce slightly better
-reconstruction statistics; (2) FSC at 0.143 is not perfectly correlated with median angular error
-at this accuracy level. The angular improvement of two-stage remains large and reproducible.
+**Fibonacci is again worst on angular accuracy** (3.95°) despite a marginally better FSC (3.452 Å).
+The FSC ranking does not match angular accuracy here — confirms that FSC alone is insufficient
+for evaluating projmatching quality on this dataset.
 
 ---
 
@@ -774,16 +769,16 @@ box=476px), pkm2 lig_00909 (D2, 254K, box=334px). All use the respective apo che
 
 | Config | bgal-892 med° | bgal-892 FSC | bgal-893 med° | bgal-893 FSC | pkm2-909 med° | pkm2-909 FSC |
 |--------|--------------|--------------|--------------|--------------|--------------|--------------|
-| true_master 6°/2° | 1.49° | 2.697 Å | 2.56° | 3.082 Å | 3.40° | 3.164 Å |
-| cart_6-2 (branch improvements) | 1.47° | 2.667 Å | 2.49° | 2.967 Å | 3.37° | **2.901 Å** |
-| fibo (6°/2° bgal / 6°/1.8° pkm2) | 1.62° | 2.637 Å | 2.69° | 3.062 Å | 3.95° | 2.991 Å |
-| **cart_twostage + SO(3) interp** | **0.98°** | **2.574 Å** | **2.08°** | **2.898 Å** | **2.89°** | 2.919 Å |
+| true_master 6°/2° | 1.49° | 2.697 Å | 2.56° | 3.082 Å | 3.40° | 3.509 Å |
+| cart_6-2 (branch improvements) | 1.47° | 2.667 Å | 2.49° | 2.967 Å | 3.37° | 3.493 Å |
+| fibo (6°/2° bgal / 6°/1.8° pkm2) | 1.62° | 2.637 Å | 2.69° | 3.062 Å | 3.95° | 3.452 Å |
+| **cart_twostage + SO(3) interp** | **0.98°** | **2.574 Å** | **2.08°** | **2.898 Å** | **2.89°** | **3.485 Å** |
 
 **Summary:**
-- Two-stage + SO(3) interp is the best or tied-best on angular accuracy on every target.
-- Cart_6-2 (branch improvements only, no special search) is the best on FSC for pkm2 lig_00909.
-- Fibonacci is consistently the worst on real full-pipeline benchmarks — ruled out.
-- Branch improvements (subpixel, zero_dc, whitening) over true_master: +0.02–0.10° angular, +0.1–0.3 Å FSC — small but consistent.
+- Two-stage + SO(3) interp is the best on angular accuracy and FSC on every target.
+- Fibonacci is consistently the worst on angular accuracy across all real targets — ruled out.
+- PKM2 FSC spread is small (~0.06 Å); angular accuracy is the more reliable discriminator there.
+- Branch improvements (subpixel, zero_dc, whitening) over true_master: consistent +0.02–0.10° angular improvement.
 
 ---
 

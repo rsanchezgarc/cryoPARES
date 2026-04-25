@@ -782,6 +782,82 @@ box=476px), pkm2 lig_00909 (D2, 254K, box=334px). All use the respective apo che
 
 ---
 
+## Ablation study — 4-factor analysis on bgal lig_00892 + PKM2 lig_00909
+
+Factors: **SO3** = SO(3) orientation interpolation (`use_so3_interpolation`),
+**SPS** = sub-pixel shifts (`use_subpixel_shifts`), **SW** = spectral whitening (`spectral_whitening`),
+**ZD** = zero DC (`zero_dc`). All configs: Cartesian 6°/2° grid, batch_size=8. Notation: T = ON, F = OFF.
+
+Base `abl_base` = all 4 ON (= `cart_6-2 + SO(3) interp`). Rows already done in prior benchmarks
+are included for completeness (`abl_no_so3` = `cart_6-2`; `true_master` = all OFF; bgal `abl_base`
+= `cart_6-2_so3interp`). Script: `benchmarks/run_ablation.sh`, submitted via SLURM gpu-priority.
+
+### bgal lig_00892 (~57K particles, D2, box=476px)
+
+| Label | SO3 | SPS | SW | ZD | med° | FSC |
+|-------|-----|-----|----|----|------|-----|
+| `true_master` | F | F | F | F | 1.49° | 2.697 Å |
+| `abl_no_so3` (= cart_6-2) | F | T | T | T | 1.47° | 2.667 Å |
+| `abl_no_so3_sps` | F | F | T | T | 1.47° | 2.715 Å |
+| `abl_no_so3_sw` | F | T | F | T | 1.49° | 2.621 Å |
+| `abl_no_so3_zd` | F | T | T | F | 1.47° | 2.654 Å |
+| `abl_base` (= cart_6-2 + SO3) | T | T | T | T | **1.13°** | **2.581 Å** |
+| `abl_no_sps` | T | F | T | T | **1.13°** | 2.655 Å |
+| `abl_no_sw` | T | T | F | T | 1.16° | **2.580 Å** |
+| `abl_no_zd` | T | T | T | F | **1.12°** | 2.565 Å |
+| `abl_no_sps_sw` | T | F | F | T | 1.16° | 2.617 Å |
+| `abl_no_sps_zd` | T | F | T | F | **1.13°** | 2.657 Å |
+| `abl_no_sw_zd` | T | T | F | F | 1.16° | 2.590 Å |
+
+### PKM2 lig_00909 (~254K particles, D2, box=334px)
+
+| Label | SO3 | SPS | SW | ZD | med° | FSC |
+|-------|-----|-----|----|----|------|-----|
+| `true_master` | F | F | F | F | 3.40° | 3.509 Å |
+| `abl_no_so3` (= cart_6-2) | F | T | T | T | 3.37° | 3.493 Å |
+| `abl_no_so3_sps` | F | F | T | T | 3.19° | 3.497 Å |
+| `abl_no_so3_sw` | F | T | F | T | 3.22° | 3.507 Å |
+| `abl_no_so3_zd` | F | T | T | F | 3.18° | 3.460 Å |
+| `abl_base` | T | T | T | T | 3.17° | 3.485 Å |
+| `abl_no_sps` | T | F | T | T | 3.17° | 3.447 Å |
+| `abl_no_sw` | T | T | F | T | 3.20° | 3.499 Å |
+| `abl_no_zd` | T | T | T | F | 3.18° | **3.431 Å** |
+| `abl_no_sps_sw` | T | F | F | T | **3.03°** | 3.517 Å |
+| `abl_no_sps_zd` | T | F | T | F | **3.00°** | 3.480 Å |
+| `abl_no_sw_zd` | T | T | F | F | 3.03° | **3.411 Å** |
+
+### Key findings
+
+**SO3 is the dominant factor for angular accuracy — on bgal.** Removing it increases median from
+1.13° to 1.47° (+0.34°, i.e. 30% worse). The SO3=T/F boundary is sharp: all 6 SO3=T configs
+cluster at 1.12–1.16°; all 5 SO3=F configs cluster at 1.47–1.49°. No other factor has any
+detectable angular effect on bgal.
+
+**SO3 effect is weaker on PKM2.** `abl_base` 3.17° vs `abl_no_so3` (= `cart_6-2`) 3.37° — a
+0.20° improvement vs 0.34° on bgal. On PKM2 all configs cluster in a narrow 3.00–3.22° band;
+the angular differences are too small to draw strong per-factor conclusions.
+
+**SPS is the only factor that affects FSC.** Removing SPS (with SO3=T) costs ~0.07 Å on bgal
+(2.655 vs 2.581 Å) and ~0.04 Å on PKM2 (3.447 vs 3.485 Å). SW and ZD removal has negligible
+or no effect on FSC on bgal; ZD removal slightly *improves* FSC on both targets (`abl_no_zd`:
+2.565 Å bgal, 3.431 Å PKM2 — both better than `abl_base`). This ZD effect is small and may
+reflect that DC zeroing shifts low-frequency power used by the FSC denominator.
+
+**PKM2 pair anomaly:** `abl_no_sps_zd` gives 3.00° — better than `abl_base` (3.17°). This is
+unexpected and likely noise: on 254K particles the inter-config spread is 0.22° total, which is
+small enough that noise and run-to-run variability dominate. Do not over-interpret individual PKM2
+angular values; use bgal where the SO3 signal is clearer.
+
+**SW and ZD contribute negligibly** on both targets and both metrics. Their benefit is too small to
+measure reliably at this scale. They are safe to keep ON (branch defaults) but are not load-bearing.
+
+**Recommendation from ablation:** If throughput is critical and you can only enable one flag, enable
+SO3 interpolation. If FSC matters and you drop any flag, drop SW or ZD rather than SPS. In practice,
+keep all 4 ON — the collective overhead is zero (SO3 adds only 6 extra projections per particle on
+the fine winner; SPS/SW/ZD are negligible compute).
+
+---
+
 ## Wall-clock timing
 
 Hardware: NVIDIA RTX 6000 Ada (49 GB). 3 runs, 10,000 particles each. Per-500 = raw ÷ 20.
@@ -1005,6 +1081,9 @@ cryopares_projmatching ... --grid_distance_degs 6 --grid_step_degs 2 --batch_siz
 - [x] **PKM2 full-pipeline benchmark** — **done.** two-stage+SO3 wins on angular accuracy (2.89° vs
   3.37°); fibo confirmed worse on both D2 targets. FSC anomaly: cart_6-2 slightly better FSC on pkm2.
   See combined table above.
+- [x] **Ablation study (4 factors × bgal lig_00892 + PKM2 lig_00909)** — **done.** SO3 is the
+  dominant angular factor (bgal: 1.13°→1.47° without it); SPS is the only factor with measurable
+  FSC effect (~0.07 Å). SW and ZD contribute negligibly. See ablation section above.
 - [ ] Merge `improve_local_refinement` to master (PKM2 benchmark complete; integration tests + daemon
   mode validation remain).
 

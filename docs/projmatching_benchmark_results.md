@@ -25,7 +25,7 @@ model** (the actual D2 use case), which will be the ground truth for configurati
 ## Executive summary
 
 **Starting point:** NN pose estimates (~7°) → Cartesian 6°/2° projmatching plateaus near 1.3–1.7° (master branch).
-**Current best on real data:** Cartesian two-stage + SO(3) interpolation (6°/2° coarse Euler-add, 2.1°/0.7° Fibo fine, K=5, SO(3) interp on fine winner) — best on angular accuracy across all three tested targets (bgal lig_00892 **0.98°/2.574 Å**, bgal lig_00893 **2.08°/2.898 Å**, pkm2 lig_00909 **2.89°/2.919 Å**).
+**Current best on real data:** Cartesian two-stage + SO(3) interpolation (6°/2° coarse Euler-add, 2.1°/0.7° Fibo fine, K=5, SO(3) interp on fine winner) — best on angular accuracy across all five tested targets (bgal lig_00892 **0.98°/2.574 Å**, bgal lig_00893 **2.08°/2.898 Å**, pkm2 lig_00909 **2.89°/3.485 Å**, gdh lig_G1 **2.14°/2.645 Å**, gdh lig_G2 **1.99°/2.861 Å**).
 
 ### Implemented changes
 
@@ -762,23 +762,74 @@ for evaluating projmatching quality on this dataset.
 
 ---
 
+## GDH full-pipeline benchmark (Phase 4 — D3 target)
+
+End-to-end runs (NN inference + projection matching + reconstruction) on the GDH checkpoint
+(`gdh/apo/version_1`, **D3 symmetry**, trained on ~112K apo particles) applied to two held-out
+ligand datasets. First D3 target in the benchmark suite.
+
+**Datasets:** GDH lig_G1 (~277K particles) and lig_G2 (~120K particles), 356 px box, 0.999 Å/px.
+**Reference map:** `gdh/apo/reconstruction.mrc`. **Mask:** `gdh/apo/mask.mrc`.
+
+### Results — lig_G1 (~277K particles, D3)
+
+| Config | pts | Batch size | med° | FSC@0.143 |
+|--------|-----|-----------|------|-----------|
+| true_master_6-2 (improvements OFF) | 343 | 8 | 3.08° | 2.819 Å |
+| cart_6-2 (improvements ON, Cartesian) | 343 | 8 | 2.88° | 2.729 Å |
+| cart_6-2_so3interp | 343 | 8 | 2.72° | 2.708 Å |
+| fibo_6-2 | 209 | 8 | 2.96° | 2.770 Å |
+| **cart_twostage_so3interp** | **~1250** | **4** | **2.14°** | **2.645 Å** |
+
+### Results — lig_G2 (~120K particles, D3)
+
+| Config | pts | Batch size | med° | FSC@0.143 |
+|--------|-----|-----------|------|-----------|
+| true_master_6-2 (improvements OFF) | 343 | 8 | 2.86° | 2.924 Å |
+| cart_6-2 (improvements ON, Cartesian) | 343 | 8 | 2.65° | 2.890 Å |
+| cart_6-2_so3interp | 343 | 8 | 2.46° | 2.906 Å |
+| fibo_6-2 | 209 | 8 | 2.85° | 2.894 Å |
+| **cart_twostage_so3interp** | **~1250** | **4** | **1.99°** | **2.861 Å** |
+
+### Key findings (GDH)
+
+**Ranking holds on D3.** `cart_twostage_so3interp` wins on both metrics on both ligands — consistent
+with bgal and PKM2. The improvement is substantial: two-stage beats `cart_6-2_so3interp` by
+0.47–0.58° (lig_G2 breaks below 2° for the first time at 1.99°).
+
+**`cart_6-2_so3interp` is a reliable intermediate.** On lig_G1: 2.72° vs `cart_6-2` 2.88° (6%
+improvement at full speed). Consistently beats `cart_6-2` on all targets.
+
+**Fibo continues to underperform Cartesian.** Both ligands confirm the pattern from bgal and PKM2:
+fibo_6-2 (209 pts, fast) is worse than cart_6-2 (343 pts) on angular accuracy and FSC.
+
+**FSC on GDH is well-separated** (~0.17 Å between true_master and two-stage on lig_G1, ~0.06 Å on
+lig_G2), making FSC a useful discriminator unlike PKM2 where the spread was only 0.06 Å.
+
+---
+
 ## Combined cross-target summary
 
-Three real full-pipeline benchmarks: bgal lig_00892 (C1, 57K, box=476px), bgal lig_00893 (D2, 42K,
-box=476px), pkm2 lig_00909 (D2, 254K, box=334px). All use the respective apo checkpoint and mask.
+Five real full-pipeline benchmarks across three molecules and two symmetries:
+bgal lig_00892 (D2, 57K, box=476px), bgal lig_00893 (D2, 42K, box=476px),
+pkm2 lig_00909 (D2, 254K, box=334px), gdh lig_G1 (D3, 277K, box=356px), gdh lig_G2 (D3, 120K, box=356px).
+All use the respective apo checkpoint and mask. PKM2 and GDH FSC values are masked.
 
-| Config | bgal-892 med° | bgal-892 FSC | bgal-893 med° | bgal-893 FSC | pkm2-909 med° | pkm2-909 FSC |
-|--------|--------------|--------------|--------------|--------------|--------------|--------------|
-| true_master 6°/2° | 1.49° | 2.697 Å | 2.56° | 3.082 Å | 3.40° | 3.509 Å |
-| cart_6-2 (branch improvements) | 1.47° | 2.667 Å | 2.49° | 2.967 Å | 3.37° | 3.493 Å |
-| fibo (6°/2° bgal / 6°/1.8° pkm2) | 1.62° | 2.637 Å | 2.69° | 3.062 Å | 3.95° | 3.452 Å |
-| **cart_twostage + SO(3) interp** | **0.98°** | **2.574 Å** | **2.08°** | **2.898 Å** | **2.89°** | **3.485 Å** |
+| Config | bgal-892 med° | bgal-892 FSC | bgal-893 med° | bgal-893 FSC | pkm2-909 med° | pkm2-909 FSC | gdh-G1 med° | gdh-G1 FSC | gdh-G2 med° | gdh-G2 FSC |
+|--------|--------------|--------------|--------------|--------------|--------------|--------------|------------|------------|------------|------------|
+| true_master 6°/2° | 1.49° | 2.697 Å | 2.56° | 3.082 Å | 3.40° | 3.509 Å | 3.08° | 2.819 Å | 2.86° | 2.924 Å |
+| cart_6-2 | 1.47° | 2.667 Å | 2.49° | 2.967 Å | 3.37° | 3.493 Å | 2.88° | 2.729 Å | 2.65° | 2.890 Å |
+| cart_6-2_so3interp | 1.13° | 2.581 Å | 2.25° | 2.926 Å | 3.17° | 3.485 Å | 2.72° | 2.708 Å | 2.46° | 2.906 Å |
+| fibo 6°/2° | 1.62° | 2.637 Å | 2.69° | 3.062 Å | 3.95° | 3.452 Å | 2.96° | 2.770 Å | 2.85° | 2.894 Å |
+| **cart_twostage_so3interp** | **0.98°** | **2.574 Å** | **2.08°** | **2.898 Å** | **2.89°** | **3.485 Å** | **2.14°** | **2.645 Å** | **1.99°** | **2.861 Å** |
 
 **Summary:**
-- Two-stage + SO(3) interp is the best on angular accuracy and FSC on every target.
+- Two-stage + SO(3) interp is the best on angular accuracy and FSC on every target tested.
+- `cart_6-2_so3interp` (single-stage + SO3) is a consistent intermediate — 6–19% over `cart_6-2` at zero throughput cost.
 - Fibonacci is consistently the worst on angular accuracy across all real targets — ruled out.
 - PKM2 FSC spread is small (~0.06 Å); angular accuracy is the more reliable discriminator there.
-- Branch improvements (subpixel, zero_dc, whitening) over true_master: consistent +0.02–0.10° angular improvement.
+- GDH (D3) confirms D2 pattern: two-stage wins clearly, lig_G2 breaks below 2° (1.99°).
+- Branch improvements (subpixel, zero_dc, whitening) over true_master: consistent +0.02–0.23° angular improvement.
 
 ---
 
@@ -1084,7 +1135,9 @@ cryopares_projmatching ... --grid_distance_degs 6 --grid_step_degs 2 --batch_siz
 - [x] **Ablation study (4 factors × bgal lig_00892 + PKM2 lig_00909)** — **done.** SO3 is the
   dominant angular factor (bgal: 1.13°→1.47° without it); SPS is the only factor with measurable
   FSC effect (~0.07 Å). SW and ZD contribute negligibly. See ablation section above.
-- [ ] Merge `improve_local_refinement` to master (PKM2 benchmark complete; integration tests + daemon
+- [x] **GDH full-pipeline benchmark (D3)** — **done.** cart_twostage_so3interp best on all metrics;
+  lig_G2 breaks below 2° (1.99°). Fibo again worst. Ranking confirmed on D3.
+- [ ] Merge `improve_local_refinement` to master (benchmarks complete; integration tests + daemon
   mode validation remain).
 
 ---

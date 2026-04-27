@@ -134,6 +134,7 @@ def correlate_dft_2d(
     projs: torch.Tensor,
     zero_dc: bool = False,
     whitening_filter: torch.Tensor | None = None,
+    phase_alpha: float = 0.0,
 ) -> torch.Tensor:
     """Correlate fftshifted rfft discrete Fourier transforms of images.
 
@@ -149,6 +150,11 @@ def correlate_dft_2d(
     whitening_filter:
         Optional real-valued tensor broadcastable to parts/projs shape. Applied as a multiply
         before the cross-product (spectral whitening). Pre-computed in ProjectionMatcher.__init__.
+    phase_alpha:
+        Phase-weighted correlation exponent (Experiment D). 0 = standard CC (default);
+        1 = pure phase correlation (normalize each Fourier bin to unit magnitude);
+        0 < alpha < 1 = mixed (divide by |F|^alpha). Applied symmetrically to both
+        parts and projs after whitening_filter.
     """
     if not parts.is_complex():
         parts = torch.view_as_complex(parts.contiguous())
@@ -167,7 +173,24 @@ def correlate_dft_2d(
         # Apply whitening only to projections (templates), not to particle data.
         # Whitening both sides gives 1/amp² weighting, which can amplify particle noise.
         # Whitening only projections gives 1/amp weighting and is more robust.
+        # Exception: noise_psd_whitening (symmetric) pre-whitens particles in
+        # _preprocess_particles_to_F before passing here, and passes noise_psd_map here for
+        # projection-side whitening — giving the full 1/σ²_noise matched-filter weight.
         projs = projs * whitening_filter
+
+    if phase_alpha > 0.0:
+        # Phase-weighted correlation (Experiment D): divide amplitudes by |F|^alpha before
+        # computing the cross-product. alpha=1 → pure phase (unit-magnitude Fourier bins),
+        # 0<alpha<1 → partial amplitude suppression. Both sides are normalized symmetrically
+        # so relative amplitude ratios between parts/projs are removed.
+        eps_p = parts.abs().mean() * 1e-6 + 1e-10
+        eps_q = projs.abs().mean() * 1e-6 + 1e-10
+        if phase_alpha == 1.0:
+            parts = parts / parts.abs().clamp(min=eps_p)
+            projs = projs / projs.abs().clamp(min=eps_q)
+        else:
+            parts = parts / parts.abs().clamp(min=eps_p).pow(phase_alpha)
+            projs = projs / projs.abs().clamp(min=eps_q).pow(phase_alpha)
 
     result = parts * torch.conj(projs)
     result = torch.fft.ifftshift(result, dim=(-2,))

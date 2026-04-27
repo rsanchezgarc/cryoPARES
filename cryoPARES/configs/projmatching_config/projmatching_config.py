@@ -105,3 +105,18 @@ class Projmatching_config:
 
     # SO(3) sub-step pose interpolation (#7)
     use_so3_interpolation: bool = False  # parabolic sub-step angular refinement after grid search (Change #7)
+
+    # Normalization experiment flags (Changes #8a–#8d)
+    noise_psd_whitening: bool = False       # symmetric noise-PSD matched filter: whiten both particles and projections
+                                            # by 1/σ_noise estimated from particle background ring (outside mask).
+                                            # Total CC weight = 1/σ²_noise — RELION-like matched filter. (Exp A)
+    noise_psd_warmup_batches: int = 8       # batches to average when building the noise PSD estimate (same logic as whitening_warmup_batches)
+    per_particle_spectral_norm: bool = False # per-particle radial amplitude normalization: each particle's Fourier
+                                            # spectrum is divided by its own radial mean amplitude, removing
+                                            # per-particle scale variation (defocus, ice thickness). (Exp B)
+    ctf_wiener: bool = False                # CTF Wiener filter: replace CTF×proj with CTF/(CTF²+ε)×particle,
+                                            # optimally suppressing CTF-zero frequencies. Only active when
+                                            # correct_ctf=True. (Exp C)
+    ctf_wiener_epsilon: float = 0.1         # Wiener regularization ε (noise-to-signal ratio); larger → more suppression near zeros
+    phase_correlation_alpha: float = 0.0    # Phase-weighted correlation: normalize Fourier amplitudes by |F|^α before
+                                            # cross-product. 0=standard CC, 1=pure phase correlation, 0<α<1=mixed. (Exp D)

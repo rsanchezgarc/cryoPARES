@@ -98,6 +98,18 @@ class ProjectionMatcher(nn.Module):
                   "switching rotation_composition from 'euler_add' to 'pre_multiply'.")
             self.rotation_composition = "pre_multiply"
 
+        # Normalization experiment flags (#8a–#8d)
+        self.noise_psd_whitening = main_config.projmatching.noise_psd_whitening
+        self.noise_psd_warmup_batches = main_config.projmatching.noise_psd_warmup_batches
+        self.per_particle_spectral_norm = main_config.projmatching.per_particle_spectral_norm
+        self.ctf_wiener = main_config.projmatching.ctf_wiener
+        self.ctf_wiener_epsilon = main_config.projmatching.ctf_wiener_epsilon
+        self.phase_correlation_alpha = main_config.projmatching.phase_correlation_alpha
+
+        # Noise PSD warm-up state (reset in align_star()).
+        self._noise_psd_amp_sum: torch.Tensor | None = None
+        self._noise_psd_batches_seen: int = 0
+
         # SO(3) sub-step interpolation (#7) — Cartesian euler_add path only
         self.use_so3_interpolation = main_config.projmatching.use_so3_interpolation
 
@@ -166,6 +178,20 @@ class ProjectionMatcher(nn.Module):
         self._whitening_batches_seen: int = 0
 
         self._store_reference_vol(reference_vol, pixel_size)
+
+        # Shape-dependent buffers for normalization experiments (image_shape known after _store_reference_vol).
+        if self.noise_psd_whitening:
+            H, W_half = self.image_shape[-2], self.image_shape[-2] // 2 + 1
+            self.register_buffer("noise_psd_map", torch.ones(1, H, W_half))
+        if self.per_particle_spectral_norm:
+            H = self.image_shape[-2]
+            W_half = H // 2 + 1
+            ky2d = torch.fft.fftshift(torch.fft.fftfreq(H)) * H
+            kx2d = torch.arange(W_half, dtype=torch.float32)
+            KY2D, KX2D = torch.meshgrid(ky2d, kx2d, indexing='ij')
+            radii_2d_idx = torch.sqrt(KY2D**2 + KX2D**2).long().clamp(0, H // 2 - 1)
+            self.register_buffer("_radii_2d_idx", radii_2d_idx)  # (H, W//2+1) long
+
         self.verbose = verbose
         self.correct_ctf = correct_ctf
         self.mainLogger = getWorkerLogger(self.verbose)
@@ -515,7 +541,24 @@ class ProjectionMatcher(nn.Module):
         return projs
 
     def correlateF(self, parts: torch.Tensor, projs: torch.Tensor):
+        # Build combined projection-side whitening filter.
+        # Particle side may already be pre-whitened in _preprocess_particles_to_F
+        # (noise_psd_whitening and per_particle_spectral_norm); here we apply the matching
+        # projection-side filter so the CC receives the full symmetric weight.
         whitening_filter = self.whitening_map if self.spectral_whitening else None
+
+        # Experiment A: noise-PSD symmetric whitening — apply noise_psd_map to projections
+        # (particles already whitened in _preprocess_particles_to_F).
+        if self.noise_psd_whitening:
+            nf = self.noise_psd_map  # (1, H, W//2+1)
+            whitening_filter = nf if whitening_filter is None else whitening_filter * nf
+
+        # Experiment B: per-particle spectral norm — apply per-particle map to projections
+        # (particles already whitened). _current_per_p_whiten is set in _preprocess_particles_to_F.
+        if self.per_particle_spectral_norm and hasattr(self, '_current_per_p_whiten'):
+            ppf = self._current_per_p_whiten.unsqueeze(1)  # (B, 1, H, W//2+1)
+            whitening_filter = ppf if whitening_filter is None else whitening_filter * ppf
+
         return self._correlateCrossCorrelation(parts, projs,
                                                zero_dc=self.zero_dc,
                                                whitening_filter=whitening_filter)
@@ -539,7 +582,8 @@ class ProjectionMatcher(nn.Module):
                                     whitening_filter: torch.Tensor | None = None):
         corrs = self.correlate_dft_2d(parts, projs,
                                        zero_dc=zero_dc,
-                                       whitening_filter=whitening_filter)
+                                       whitening_filter=whitening_filter,
+                                       phase_alpha=self.phase_correlation_alpha)
         b, options, l0, l1 = corrs.shape
         h0, h1, w0, w1 = _get_begin_end_from_max_shift(corrs.shape[-2:], self.max_shift_fraction)
         maxcorr, maxcorrIdxs = self._extract_ccor_max(corrs.reshape(-1, *corrs.shape[-2:]),
@@ -657,6 +701,80 @@ class ProjectionMatcher(nn.Module):
                 wmap = torch.where(in_band, 1.0 / (amp_in_band + eps), torch.zeros_like(avg_amp))
                 self.whitening_map = wmap.unsqueeze(0)  # (1, H, W//2+1)
 
+        # Experiment A — Symmetric noise-PSD matched filter.
+        # Estimate noise power spectrum from the particle background ring (outside rmask):
+        # FFT(background) gives σ_noise(freq). We whiten particles here by 1/σ_noise, and
+        # whiten projections by the same map in correlateF → total CC weight = 1/σ²_noise,
+        # i.e. the optimal matched filter (RELION-like frequency-dependent noise weighting).
+        if self.noise_psd_whitening:
+            with torch.no_grad():
+                if self._noise_psd_batches_seen < self.noise_psd_warmup_batches:
+                    # FFT of background (outside mask) — always compute in complex (not two-float32)
+                    background = imgs * (1.0 - self.rmask)  # (B, H, W) — outside-mask region
+                    fbackground = _real_to_fourier_2d(background, view_complex_as_two_float32=False)  # (B, H, W//2+1) complex
+                    bg_amp = fbackground.abs().mean(dim=0)  # (H, W//2+1) batch-mean amplitude
+
+                    if self._noise_psd_amp_sum is None:
+                        self._noise_psd_amp_sum = bg_amp
+                    else:
+                        self._noise_psd_amp_sum = self._noise_psd_amp_sum + bg_amp
+                    self._noise_psd_batches_seen += 1
+
+                    avg_amp = self._noise_psd_amp_sum / self._noise_psd_batches_seen
+                    in_band = self.band_mask[0] > 0.1
+                    amp_in_band = avg_amp * in_band.float()
+                    nonzero = amp_in_band[in_band]
+                    eps = nonzero.mean() * 1e-3 + 1e-8 if nonzero.numel() > 0 else 1e-8
+                    nmap = torch.where(in_band, 1.0 / (amp_in_band + eps), torch.zeros_like(avg_amp))
+                    self.noise_psd_map = nmap.unsqueeze(0)  # (1, H, W//2+1)
+
+            # Apply noise-PSD whitening to particles (particle side of the symmetric matched filter).
+            if USE_TWO_FLOAT32_FOR_COMPLEX:
+                fparts = fparts * self.noise_psd_map.unsqueeze(-1)
+            else:
+                fparts = fparts * self.noise_psd_map
+
+        # Experiment B — Per-particle radial amplitude normalization.
+        # Each particle's Fourier spectrum is divided by its own radial mean amplitude,
+        # removing per-particle scale variation (defocus-modulated CTF envelope, ice thickness).
+        # The matching per-particle map is also applied to projections in correlateF.
+        if self.per_particle_spectral_norm:
+            if USE_TWO_FLOAT32_FOR_COMPLEX:
+                fparts_complex_pp = torch.view_as_complex(fparts.contiguous())
+            else:
+                fparts_complex_pp = fparts
+            amp_pp = fparts_complex_pp.abs()  # (B, H, W//2+1)
+            B_pp = amp_pp.shape[0]
+            n_bins = self.image_shape[-2] // 2
+
+            flat_amp = amp_pp.reshape(B_pp, -1)  # (B, H*(W//2+1))
+            flat_idx = self._radii_2d_idx.reshape(-1)  # (H*(W//2+1),) long
+            flat_idx_exp = flat_idx.unsqueeze(0).expand(B_pp, -1)
+
+            bin_sum = torch.zeros(B_pp, n_bins, device=amp_pp.device, dtype=amp_pp.dtype)
+            bin_count = torch.zeros(B_pp, n_bins, device=amp_pp.device, dtype=amp_pp.dtype)
+            bin_sum.scatter_add_(1, flat_idx_exp, flat_amp)
+            bin_count.scatter_add_(1, flat_idx_exp, torch.ones_like(flat_amp))
+            bin_avg = bin_sum / bin_count.clamp(min=1)  # (B, n_bins)
+
+            eps_pp = bin_avg.mean(dim=-1, keepdim=True) * 1e-3 + 1e-8
+            per_p_whiten = 1.0 / (bin_avg + eps_pp)  # (B, n_bins)
+            per_p_whiten_map = per_p_whiten[:, self._radii_2d_idx]  # (B, H, W//2+1)
+
+            # Only whiten within the valid frequency band; set to 1 outside to avoid noise amplification.
+            in_band = self.band_mask[0] > 0.1  # (H, W//2+1) bool
+            per_p_whiten_map = torch.where(in_band.unsqueeze(0), per_p_whiten_map,
+                                           torch.ones_like(per_p_whiten_map))
+
+            # Store for projection-side application in correlateF.
+            self._current_per_p_whiten = per_p_whiten_map  # (B, H, W//2+1)
+
+            # Apply to particles.
+            if USE_TWO_FLOAT32_FOR_COMPLEX:
+                fparts = fparts * per_p_whiten_map.unsqueeze(-1)
+            else:
+                fparts = fparts * per_p_whiten_map
+
         return fparts
 
     def _expand_rotmats(
@@ -690,6 +808,7 @@ class ProjectionMatcher(nn.Module):
             expanded_rotmats: torch.Tensor,
             bsize: int,
             topk: int,
+            apply_ctf: bool = True,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Project all candidate rotations, correlate with particles, return top-topk.
 
@@ -701,6 +820,8 @@ class ProjectionMatcher(nn.Module):
             expanded_rotmats:(B, nCand, 3, 3)    — all candidate rotation matrices
             bsize:           batch size B
             topk:            number of winners to return
+            apply_ctf:       if False, skip CTF application to projections (used when CTF
+                             Wiener weight was already applied to fparts before this call)
 
         Returns:
             perImgCorr:   (B, nCand) — full correlation array (for confidence stats)
@@ -714,7 +835,7 @@ class ProjectionMatcher(nn.Module):
         _shapeIdx = -3 if USE_TWO_FLOAT32_FOR_COMPLEX else -2
         projs = projs.reshape(bsize, -1, *projs.shape[_shapeIdx:])
 
-        if self.correct_ctf:
+        if self.correct_ctf and apply_ctf:
             ctfs_view = ctfs.unsqueeze(1)
             if USE_TWO_FLOAT32_FOR_COMPLEX:
                 ctfs_view = ctfs_view.unsqueeze(-1)
@@ -735,6 +856,7 @@ class ProjectionMatcher(nn.Module):
             ctfs: torch.Tensor,           # (B, H, W//2+1[, 2])
             winner_rotmats: torch.Tensor, # (B, 1, 3, 3)
             winner_corr: torch.Tensor,    # (B,)
+            apply_ctf: bool = True,
     ) -> torch.Tensor:                    # (B, 1, 3, 3)
         """SO(3) parabolic sub-step refinement for the two-stage fine winner (Change #7).
 
@@ -766,7 +888,7 @@ class ProjectionMatcher(nn.Module):
         projs = self._compute_projections_from_rotmats(neighbor_rotmats)
         _shapeIdx = -3 if USE_TWO_FLOAT32_FOR_COMPLEX else -2
         projs = projs.reshape(B, 6, *projs.shape[_shapeIdx:])
-        if self.correct_ctf:
+        if self.correct_ctf and apply_ctf:
             ctfs_view = ctfs.unsqueeze(1)
             if USE_TWO_FLOAT32_FOR_COMPLEX:
                 ctfs_view = ctfs_view.unsqueeze(-1)
@@ -795,6 +917,7 @@ class ProjectionMatcher(nn.Module):
             ctfs: torch.Tensor,
             rotmats: torch.Tensor,
             bsize: int,
+            apply_ctf: bool = True,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Two-stage coarse-to-fine search.
 
@@ -812,7 +935,7 @@ class ProjectionMatcher(nn.Module):
         # matrix multiplication for Fibonacci or explicit pre/post_multiply.
         coarse_expanded = self._compose_coarse(rotmats)                        # (B, nCoarse, 3, 3)
         coarse_corrs_full, _, coarse_rotmats, _ = self._do_search(
-            fparts, ctfs, coarse_expanded, bsize, topk=self.fine_top_k
+            fparts, ctfs, coarse_expanded, bsize, topk=self.fine_top_k, apply_ctf=apply_ctf
         )
         # coarse_corrs_full: (B, nCoarse) — full distribution for confidence scoring
         # coarse_rotmats:    (B, fine_top_k, 3, 3)
@@ -825,14 +948,14 @@ class ProjectionMatcher(nn.Module):
         fine_expanded = (fine_delta[None, None] @
                          coarse_rotmats.unsqueeze(2)).reshape(bsize, -1, 3, 3) # (B, K*nFine, 3, 3)
         _, fine_corrs, fine_rotmats, fine_shifts = self._do_search(
-            fparts, ctfs, fine_expanded, bsize, topk=self.top_k_poses_localref
+            fparts, ctfs, fine_expanded, bsize, topk=self.top_k_poses_localref, apply_ctf=apply_ctf
         )
         del fine_expanded
 
         # --- Change #7: SO(3) sub-step interpolation on the fine winner ---
         if self.use_so3_interpolation and self.top_k_poses_localref == 1:
             fine_rotmats = self._so3_interp_fine_winner(
-                fparts, ctfs, fine_rotmats, fine_corrs[:, 0]
+                fparts, ctfs, fine_rotmats, fine_corrs[:, 0], apply_ctf=apply_ctf
             )
 
         del ctfs
@@ -855,8 +978,21 @@ class ProjectionMatcher(nn.Module):
         fparts = self._preprocess_particles_to_F(imgs)
         bsize = rotmats.size(0)
 
+        # Experiment C — CTF Wiener pre-whitening (replaces CTF multiplication on projections).
+        # Apply CTF/(CTF²+ε) to particles once here; then pass apply_ctf=False so that no
+        # code path below will additionally multiply projections by CTF.
+        if self.correct_ctf and self.ctf_wiener:
+            ctf_wiener_weight = ctfs / (ctfs ** 2 + self.ctf_wiener_epsilon)  # (B, H, W//2+1)
+            if USE_TWO_FLOAT32_FOR_COMPLEX:
+                fparts = fparts * ctf_wiener_weight.unsqueeze(-1)
+            else:
+                fparts = fparts * ctf_wiener_weight
+            _apply_ctf_in_search = False
+        else:
+            _apply_ctf_in_search = True
+
         if self.use_two_stage_search:
-            return self._forward_two_stage(fparts, ctfs, rotmats, bsize)
+            return self._forward_two_stage(fparts, ctfs, rotmats, bsize, apply_ctf=_apply_ctf_in_search)
 
         if self.rotation_composition == "euler_add":
             # Legacy: add Euler angles directly. Fast but approximate near poles.
@@ -865,14 +1001,13 @@ class ProjectionMatcher(nn.Module):
                                   eulerDegs.unsqueeze(2))  # (B, topK, nDelta, 3)
             expanded_eulerDegs = expanded_eulerDegs.reshape(bsize, -1, 3)
             projs = self._compute_projections_from_euleres(expanded_eulerDegs.reshape(-1, 3))[0]
-            if self.correct_ctf:
-                ctfs = ctfs.unsqueeze(1)
+            _shapeIdx = -3 if USE_TWO_FLOAT32_FOR_COMPLEX else -2
+            projs = projs.reshape(bsize, -1, *projs.shape[_shapeIdx:])
+            if self.correct_ctf and _apply_ctf_in_search:
+                ctfs_view = ctfs.unsqueeze(1)
                 if USE_TWO_FLOAT32_FOR_COMPLEX:
-                    _shapeIdx = -3
-                    ctfs = ctfs.unsqueeze(-1)
-                else:
-                    _shapeIdx = -2
-                projs = self._apply_ctfF(projs.reshape(bsize, -1, *projs.shape[_shapeIdx:]), ctfs)
+                    ctfs_view = ctfs_view.unsqueeze(-1)
+                projs = self._apply_ctfF(projs, ctfs_view)
             del ctfs
             perImgCorr, pixelShiftsXY = self.correlateF(fparts.unsqueeze(1), projs)
             maxCorrs, maxCorrsIdxs = perImgCorr.topk(self.top_k_poses_localref, sorted=True, largest=True, dim=-1)
@@ -907,7 +1042,8 @@ class ProjectionMatcher(nn.Module):
             expanded_rotmats = self._expand_rotmats(rotmats, delta_rotmats)
             # TODO: Remove duplicate rotmats if n_input_angles > 1 (affects speed)
             perImgCorr, maxCorrs, predRotMats, pixelShiftsXY = self._do_search(
-                fparts, ctfs, expanded_rotmats, bsize, self.top_k_poses_localref
+                fparts, ctfs, expanded_rotmats, bsize, self.top_k_poses_localref,
+                apply_ctf=_apply_ctf_in_search
             )
             del ctfs
 
@@ -940,6 +1076,9 @@ class ProjectionMatcher(nn.Module):
         # Reset whitening warm-up so each align_star() call re-estimates from its own particles
         self._whitening_amp_sum = None
         self._whitening_batches_seen = 0
+        # Reset noise PSD warm-up (Experiment A)
+        self._noise_psd_amp_sum = None
+        self._noise_psd_batches_seen = 0
 
         n_cpus = max(0, n_cpus)  # 0 = inline loading in main process (no subprocess spawn)
         particlesDataSet = self.preprocess_particles(
@@ -1066,8 +1205,8 @@ class ProjectionMatcher(nn.Module):
                 ang_err = torch.rad2deg(rotation_error_with_sym(r1, r2, symmetry="C1"))
                 shift_error = np.sqrt(((shiftsXYangs - base_shifts) ** 2).sum(-1))
 
-                print(f"Median Ang   Error degs (top-{k + 1}):", np.median(ang_err.numpy()))
-                print(f"Median Shift Error Angs (top-{k + 1}):", np.median(shift_error))
+                print(f"Median Ang   Displacement degs (top-{k + 1}):", np.median(ang_err.numpy()))
+                print(f"Median Shift Displacement Angs (top-{k + 1}):", np.median(shift_error))
                 ######## END of Debug code
 
             particles_md.loc[idds_list, angles_names] = eulerdegs

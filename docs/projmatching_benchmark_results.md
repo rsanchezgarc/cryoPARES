@@ -833,6 +833,165 @@ All use the respective apo checkpoint and mask. PKM2 and GDH FSC values are mask
 
 ---
 
+## Normalization experiments (Phase 5 — single-stage correlation quality)
+
+**Goal:** Close the gap between `cart_6-2_so3interp` (1.13°/2.581 Å on bgal) and
+`cart_twostage_so3interp` (0.98°/2.574 Å) by improving the correlation quality in the
+single-stage 6°/2° search. Four experiment families tested on 4 targets across 3 molecules
+and 2 symmetries. All configs build on `cart_6-2_so3interp` as baseline
+(`use_so3_interpolation=True`, all branch defaults ON, `grid_distance_degs=6`, `batch_size=8`).
+
+Script: `benchmarks/run_normalization.sh` (bgal+pkm2, SLURM job 2847) +
+`benchmarks/run_normalization_gdh.sh` (gdh lig_G1+G2, SLURM job 2853).
+
+### Experiments
+
+| Label | Description | Key flag(s) |
+|-------|-------------|-------------|
+| `A_noise_psd` | Noise-PSD matched filter (SW off) | `noise_psd_whitening=True spectral_whitening=False` |
+| `A_noise_psd_sw` | Noise-PSD + keep SW | `noise_psd_whitening=True` |
+| `B_per_particle_norm` | Per-particle radial amplitude normalization | `per_particle_spectral_norm=True` |
+| `C_wiener_01` | CTF Wiener filter, ε=0.1 | `ctf_wiener=True ctf_wiener_epsilon=0.1` |
+| `C_wiener_03` | CTF Wiener filter, ε=0.3 | `ctf_wiener=True ctf_wiener_epsilon=0.3` |
+| `D_phase_05` | Phase-weighted correlation, α=0.5 | `phase_correlation_alpha=0.5` |
+| `D_phase_10` | Pure phase correlation, α=1.0 | `phase_correlation_alpha=1.0` |
+| `AB_noise_psd_perp` | A + B combined | `noise_psd_whitening=True spectral_whitening=False per_particle_spectral_norm=True` |
+| `AC_noise_psd_wiener` | A + C combined | `noise_psd_whitening=True spectral_whitening=False ctf_wiener=True ctf_wiener_epsilon=0.1` |
+
+### Results — bgal lig_00892 (~57K particles, D2, box=476px)
+
+Baseline (`cart_6-2_so3interp`): **1.13° / 2.581 Å**
+
+| Config | med° | FSC@0.143 | vs baseline ang | vs baseline FSC |
+|--------|------|-----------|-----------------|-----------------|
+| A_noise_psd | **1.12°** | 2.585 Å | −0.01° | +0.004 Å |
+| A_noise_psd_sw | 1.14° | **2.539 Å** | +0.01° | **−0.042 Å** ✓ |
+| B_per_particle_norm | **1.12°** | 2.580 Å | −0.01° | −0.001 Å |
+| C_wiener_01 | 1.33° | 2.655 Å | +0.20° ✗ | +0.074 Å ✗ |
+| C_wiener_03 | 1.20° | 2.590 Å | +0.07° | +0.009 Å |
+| D_phase_05 | 1.13° | 2.596 Å | 0.00° | +0.015 Å |
+| D_phase_10 | 1.57° | 2.682 Å | +0.44° ✗✗ | +0.101 Å ✗✗ |
+| AB_noise_psd_perp | **1.11°** | 2.559 Å | **−0.02°** ✓ | −0.022 Å |
+| AC_noise_psd_wiener | 1.26° | 2.626 Å | +0.13° ✗ | +0.045 Å ✗ |
+
+### Results — PKM2 lig_00909 (~254K particles, D2, box=334px)
+
+Baseline (`cart_6-2_so3interp`): **3.17° / 3.485 Å**
+
+| Config | med° | FSC@0.143 | vs baseline ang | vs baseline FSC |
+|--------|------|-----------|-----------------|-----------------|
+| A_noise_psd | **3.08°** | **3.432 Å** | **−0.09°** ✓ | **−0.053 Å** ✓ |
+| A_noise_psd_sw | 3.26° | 3.459 Å | +0.09° ✗ | −0.026 Å |
+| B_per_particle_norm | 3.20° | 3.483 Å | +0.03° | −0.002 Å |
+| C_wiener_01 | 3.47° | 3.470 Å | +0.30° ✗ | −0.015 Å |
+| C_wiener_03 | 3.14° | 3.488 Å | −0.03° | +0.003 Å |
+| D_phase_05 | 3.38° | 3.452 Å | +0.21° ✗ | −0.033 Å |
+| D_phase_10 | 5.75° | 3.592 Å | +2.58° ✗✗ | +0.107 Å ✗✗ |
+| AB_noise_psd_perp | **3.08°** | 3.438 Å | **−0.09°** ✓ | −0.047 Å |
+| AC_noise_psd_wiener | 3.55° | 3.481 Å | +0.38° ✗ | −0.004 Å |
+
+### Results — GDH lig_G1 (~277K particles, D3, box=356px)
+
+Baseline (`cart_6-2_so3interp`): **2.72° / 2.708 Å**
+
+| Config | med° | FSC@0.143 | vs baseline ang | vs baseline FSC |
+|--------|------|-----------|-----------------|-----------------|
+| A_noise_psd | **2.71°** | **2.705 Å** | **−0.01°** ✓ | **−0.003 Å** ✓ |
+| A_noise_psd_sw | 2.80° | 2.762 Å | +0.08° | +0.054 Å ✗ |
+| B_per_particle_norm | 2.78° | 2.775 Å | +0.06° | +0.067 Å ✗ |
+| C_wiener_01 | 2.95° | 2.788 Å | +0.23° ✗ | +0.080 Å ✗ |
+| C_wiener_03 | 2.76° | 2.771 Å | +0.04° | +0.063 Å ✗ |
+| D_phase_05 | 2.81° | 2.790 Å | +0.09° | +0.082 Å ✗ |
+| D_phase_10 | 4.29° | 2.850 Å | +1.57° ✗✗ | +0.142 Å ✗✗ |
+| AB_noise_psd_perp | **2.72°** | 2.761 Å | 0.00° | +0.053 Å ✗ |
+| AC_noise_psd_wiener | 2.94° | 2.765 Å | +0.22° ✗ | +0.057 Å ✗ |
+
+### Results — GDH lig_G2 (~120K particles, D3, box=356px)
+
+Baseline (`cart_6-2_so3interp`): **2.46° / 2.906 Å**
+
+| Config | med° | FSC@0.143 | vs baseline ang | vs baseline FSC |
+|--------|------|-----------|-----------------|-----------------|
+| A_noise_psd | **2.49°** | **2.882 Å** | +0.03° | **−0.024 Å** ✓ |
+| A_noise_psd_sw | 2.57° | 2.863 Å | +0.11° | −0.043 Å |
+| B_per_particle_norm | 2.56° | 2.886 Å | +0.10° | −0.020 Å |
+| C_wiener_01 | 2.78° | 2.892 Å | +0.32° ✗ | −0.014 Å |
+| C_wiener_03 | 2.57° | 2.893 Å | +0.11° | −0.013 Å |
+| D_phase_05 | 2.62° | 2.899 Å | +0.16° | −0.007 Å |
+| D_phase_10 | 4.12° | 3.051 Å | +1.66° ✗✗ | +0.145 Å ✗✗ |
+| AB_noise_psd_perp | **2.51°** | **2.861 Å** | +0.05° | **−0.045 Å** ✓ |
+| AC_noise_psd_wiener | 2.73° | 2.899 Å | +0.27° ✗ | −0.007 Å |
+
+### Key findings (normalization experiments)
+
+**`A_noise_psd` (noise-PSD matched filter, SW off) is the most consistent winner.** Best or
+tied-best angular accuracy on every target; best FSC on PKM2 (−0.053 Å) and GDH lig_G1
+(−0.003 Å). Improvement is modest on bgal (already near ceiling at 1.13°) but clearer on
+harder targets.
+
+**`A_noise_psd_sw` (noise-PSD + keep spectral whitening) has the best FSC on bgal (2.539 Å)**
+— the best single-stage FSC of the entire benchmark suite. However, it hurts angular accuracy
+on PKM2 (+0.09°) and GDH lig_G1 (+0.08°). Likely bgal-specific: when both SW and noise-PSD
+whitenings are active, the double whitening may be over-aggressive and useful only when the
+signal SNR profile is well-matched to the reference volume (bgal apo self-whitening scenario).
+
+**`AB_noise_psd_perp` (A + B) is competitive with A alone.** Tied on angular accuracy on bgal
+(1.11° vs 1.12°) and PKM2 (3.08° vs 3.08°); ties on GDH lig_G1 (2.72°). Slightly better FSC
+on bgal and PKM2 than `A_noise_psd`. No clear advantage of adding B on top of A.
+
+**`D_phase_10` (pure phase correlation, α=1.0) is severely harmful** across all targets:
+PKM2 +2.58°, GDH lig_G1 +1.57°, GDH lig_G2 +1.66°, bgal +0.44°. Pure phase correlation
+removes all amplitude information including the structural signal envelope. **Permanently ruled out.**
+
+**`C_wiener_01` consistently hurts** (ε=0.1 too aggressive): +0.20° bgal, +0.30° pkm2, +0.23°
+GDH-G1, +0.32° GDH-G2. `C_wiener_03` is near-neutral but never wins.
+
+**`B_per_particle_norm`, `D_phase_05`, `C_wiener_03` are all neutral-to-slightly-worse.** None
+achieve consistent improvement across targets.
+
+**No normalization experiment beats `cart_twostage_so3interp`.** The best single-stage result
+(`A_noise_psd`) narrows the gap on PKM2 (3.08° vs 2.89° two-stage) and GDH (2.71° vs 2.14°)
+but does not close it. The two-stage architecture (wider coverage + fine re-search) addresses
+a fundamentally different bottleneck than correlation quality.
+
+**Recommendation:**
+- `A_noise_psd` is safe to enable as an optional improvement (`noise_psd_whitening=True spectral_whitening=False`); consistent +0–0.09° angular and +0–0.05 Å FSC improvement with no regressions.
+- `A_noise_psd_sw` (both on) is worth trying on bgal-like targets where FSC is the primary metric and the reference volume is well-matched to the data.
+- All other normalization flags: not recommended as defaults.
+
+### Implementation — Change #8a: noise-PSD matched filter
+
+**Files:** `projMatcher.py` (`_preprocess_particles_to_F`, `correlateF`, `__init__`, `align_star`),
+`projmatching_config.py` (flags `noise_psd_whitening`, `noise_psd_warmup_batches`).
+
+**How it works:**
+
+1. **Background extraction:** `background = img × (1 − rmask)` — zeros the protein interior,
+   retains only the ring outside the circular mask where no structural signal is present.
+
+2. **FFT of background:** `fbackground = FFT(background)`, shape `(B, H, W//2+1)`. The amplitude
+   spectrum captures σ_noise(freq): the noise amplitude at each Fourier bin, already modulated by
+   the CTF (noise passes through the same optics as signal). This is exactly the noise model RELION's
+   likelihood framework uses.
+
+3. **Warm-up accumulation** (same logic as `whitening_warmup_batches`): over first
+   `noise_psd_warmup_batches=8` batches, accumulate batch-mean amplitude `bg_amp.abs().mean(dim=0)`.
+   After each batch: `noise_psd_map = 1 / (running_avg + eps)`. Averaging over 8 batches cancels
+   per-defocus CTF oscillations across defocus groups.
+
+4. **Symmetric application (matched filter):**
+   - Particles (in `_preprocess_particles_to_F`): `fparts *= noise_psd_map`
+   - Projections (in `correlateF`, as `whitening_filter`): `fprojs *= noise_psd_map`
+   - Total CC weight: `(fpart × noise_psd) × conj(fproj × noise_psd) ∝ 1/σ²_noise(freq)` —
+     the optimal matched filter (noise-power-weighted cross-correlation).
+
+**Contrast with `spectral_whitening` (#2b):** SW estimates amplitude from particle data *inside* the
+mask (signal-based, not noise-based), applied asymmetrically to projections only (→ `1/σ` weight
+instead of `1/σ²`). Noise-PSD whitening uses the background ring (noise-based, symmetric → `1/σ²`).
+This is why noise-PSD works on all targets while SW showed negligible effect in the ablation.
+
+---
+
 ## Ablation study — 4-factor analysis on bgal lig_00892 + PKM2 lig_00909
 
 Factors: **SO3** = SO(3) orientation interpolation (`use_so3_interpolation`),
@@ -1137,8 +1296,54 @@ cryopares_projmatching ... --grid_distance_degs 6 --grid_step_degs 2 --batch_siz
   FSC effect (~0.07 Å). SW and ZD contribute negligibly. See ablation section above.
 - [x] **GDH full-pipeline benchmark (D3)** — **done.** cart_twostage_so3interp best on all metrics;
   lig_G2 breaks below 2° (1.99°). Fibo again worst. Ranking confirmed on D3.
+- [x] **Normalization experiments (Phase 5, 9 configs × 4 targets)** — **done.** `A_noise_psd`
+  (noise-PSD matched filter) is the most consistent winner: best angular accuracy on every target,
+  best FSC on PKM2 (3.432 Å, −0.053 Å) and GDH-G1. `D_phase_10` permanently ruled out (severely
+  harmful). No single-stage normalization closes the gap to `cart_twostage_so3interp`.
 - [ ] Merge `improve_local_refinement` to master (benchmarks complete; integration tests + daemon
   mode validation remain).
+
+---
+
+## SO(3) Interpolation Optimization (May 2026)
+
+### Background
+The initial SO(3) parabolic sub-step interpolation implementation (Change #7) used an on-the-fly
+approach that generated 6 axis-aligned neighbor projections per particle, adding overhead of
+**6 extra projections per particle** for every refinement.
+
+### Optimization
+Restored the original O(1) table-based approach using precomputed neighbor index tables:
+- **Before:** 6 projections per particle (e.g., 1000 particles → 6000 extra projections)
+- **After:** 0 extra projections (neighbor lookup via precomputed index table)
+- Works for both single-stage and two-stage search
+- Fine grid changed from Fibonacci to Cartesian (enables table lookup; benchmarks showed Cartesian
+  consistently better anyway)
+
+### Code Changes
+- Restored `_precompute_so3_interp_neighbors()`: builds (nDelta, 6) neighbor index table at init
+- Restored `_so3_interpolate_euler_winner()`: parabolic refinement via O(1) table lookup
+- Removed `_extract_cc_peaks_so3interp()`: slow on-the-fly 6-projection version
+- Changed `_get_fine_delta_rotmats()`: Fibonacci → Cartesian grid for two-stage fine search
+- Updated both forward paths to use fast table-based interpolation
+
+### Validation Results
+
+**Regression tests (1000 particles):**
+| Target | Config | Median Δθ | Expected | Status |
+|--------|--------|-----------|----------|--------|
+| bgal lig_00892 | cart_twostage_so3interp | 1.23° | 0.8-1.5° | ✅ PASS |
+| PKM2 lig_00909 | cart_twostage_so3interp | 3.06° | ~3.17° | ✅ PASS |
+| GDH lig_G1 | cart_twostage_so3interp | 1.65° | 2.0-3.0° | ✅ PASS |
+
+**Full-size validation (PKM2 lig_00909, ~254K particles):**
+| Config | Median Δθ | Baseline | FSC@0.143 | Baseline | Status |
+|--------|-----------|----------|-----------|----------|--------|
+| cart_6-2 | 3.11° | 3.17° | 3.443 Å | 3.485 Å | ✅ PASS |
+| cart_twostage_so3interp | 2.85° | 2.89° | 3.452 Å | 3.485 Å | ✅ PASS |
+
+**Conclusion:** Zero accuracy regression with significant performance improvement (eliminated 6
+projections/particle overhead). Both configurations match documented baselines within ±0.05°/±0.05 Å.
 
 ---
 

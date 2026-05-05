@@ -29,26 +29,23 @@ class Projmatching_config:
         'spectral_whitening': 'Apply particle-adaptive spectral whitening to projections: estimates the per-shell amplitude from the first particle batch and uses it to upweight high-frequency features in templates, analogous to per-shell SNR normalization in RELION (Change #2b)',
         'whitening_warmup_batches': 'Number of particle batches to average when estimating the spectral whitening filter. More batches → smoother estimate that averages out CTF oscillations across defocus groups; 1 = single-batch (legacy behavior). Only affects the first N batches of each align_star() call.',
         'fftfreq_min': 'High-pass cutoff frequency as fraction of Nyquist [0, 0.5]; excludes low-frequency ring from CC (Change #5)',
-        'rotation_composition': 'How to combine the SO(3) delta grid with each predicted pose. "euler_add" (default, legacy): adds Euler angles directly — fast but approximate near poles. "pre_multiply": R_total = R_delta @ R_current (delta in lab frame). "post_multiply": R_total = R_current @ R_delta (delta in body frame). Both rotation-matrix modes are exact SO(3) composition.',
-        'use_fibo_grid': 'Use the geodesic Fibonacci (ω-ball tangent) SO(3) grid instead of the Cartesian Euler grid. The Fibonacci grid has uniform coverage in SO(3) (no polar clustering) with ~half the point count of the Cartesian grid at the same step size. Requires rotation_composition != "euler_add"; if euler_add is set it is automatically switched to pre_multiply.',
         'use_two_stage_search': ('Two-pass coarse-to-fine search. Coarse pass uses grid_distance_degs/'
             'grid_step_degs; fine pass uses fine_grid_distance_degs/fine_grid_step_degs around the top '
-            'fine_top_k coarse winners. Automatically switches rotation_composition to pre_multiply. '
-            'Example: coarse 6°/2° (209 pts) + fine 1.5°/0.5° × K=5 (1249 pts total) vs 1638 for flat '
-            '6°/1° — similar or better accuracy at lower cost. Default: False.'),
+            'fine_top_k coarse winners. '
+            'Example: coarse 6°/2° (209 pts) + fine 2.1°/0.7° × K=5 (≈1000 pts total). '
+            'Best accuracy but slower; opt-in for maximum quality. Default: False.'),
         'fine_grid_distance_degs': ('Radius (degrees) of fine-pass Fibonacci ω-ball around each coarse '
             'winner. Should be ≥ coarse grid_step_degs to guarantee full coverage. '
-            'Only used when use_two_stage_search=True. Point count ≈ 7.7×(distance/step)³ '
-            '(e.g. 1.5°/0.5° ≈ 208 pts, 1°/0.5° ≈ 63 pts).'),
+            'Only used when use_two_stage_search=True.'),
         'fine_grid_step_degs': ('Step (degrees) of fine-pass Fibonacci grid. '
             'Only used when use_two_stage_search=True.'),
         'fine_top_k': ('Number of coarse-pass winners fed into the fine pass. Must be ≥ '
             'top_k_poses_localref. Only used when use_two_stage_search=True.'),
-        'use_so3_interpolation': ('Parabolic sub-step SO(3) interpolation of the winning grid point '
-            'after single-stage Cartesian (euler_add) search. Fits a 1D parabola through the winner '
-            'and its two axis-aligned neighbors for each of the 3 Euler axes, giving a sub-step '
-            'correction analogous to sub-pixel shift refinement. Only active when '
-            'rotation_composition=euler_add and top_k_poses_localref=1. (Change #7)'),
+        'use_so3_interpolation': ('Parabolic sub-step SO(3) interpolation of the winning grid point. '
+            'Projects 6 axis-aligned Euler neighbors (±grid_step_degs per axis), fits a 1D parabola '
+            'per axis, and applies sub-step correction — analogous to sub-pixel shift refinement. '
+            'Overhead: 6 extra projections per batch. Negligible speed cost, dominant accuracy gain. '
+            'Default: True. (Change #7)'),
 
         # CLI-exposed parameters (used in projmatching_starfile)
         'reference_vol': 'Path to reference 3D volume (.mrc file) for generating projection templates',
@@ -88,35 +85,22 @@ class Projmatching_config:
 
     float32_matmul_precision: str = "high"
 
-    # Accuracy improvement flags (Change #1, #2a, #2b, #5)
+    # Accuracy improvement flags (Change #1, #2a, #5)
     use_subpixel_shifts: bool = True   # parabolic sub-pixel peak interpolation (Change #1)
     zero_dc: bool = True               # zero DC component before correlation (Change #2a)
-    spectral_whitening: bool = True    # particle-adaptive spectral whitening applied to projections (Change #2b)
+    spectral_whitening: bool = False   # particle-adaptive spectral whitening on projections; superseded by noise_psd_whitening (Change #2b)
     whitening_warmup_batches: int = 8  # number of batches to warm-up average the whitening filter (1 = single-batch)
     fftfreq_min: float = 0.0           # high-pass cutoff as fraction of Nyquist; 0=disabled (benchmarks showed it hurts) (Change #5)
-    rotation_composition: str = "euler_add"  # "euler_add" (legacy), "pre_multiply" (R_delta@R), "post_multiply" (R@R_delta)
-    use_fibo_grid: bool = False              # geodesic ω-ball grid (uniform, ~half point count vs Cartesian at same step)
 
     # Two-stage coarse-to-fine search (#6)
-    use_two_stage_search: bool = False   # enable two-pass search (coarse then fine)
-    fine_grid_distance_degs: float = 1.5 # fine-pass ball radius (1.5°/0.5° ≈ 208 pts/candidate)
-    fine_grid_step_degs: float = 0.5     # fine-pass step size
+    use_two_stage_search: bool = False   # enable two-pass search (coarse then fine); opt-in for max accuracy
+    fine_grid_distance_degs: float = 2.1 # fine-pass ball radius (2.1°/0.7° ≈ 209 pts/candidate)
+    fine_grid_step_degs: float = 0.7     # fine-pass step size
     fine_top_k: int = 5                  # coarse-pass candidates handed to fine pass
 
     # SO(3) sub-step pose interpolation (#7)
-    use_so3_interpolation: bool = False  # parabolic sub-step angular refinement after grid search (Change #7)
+    use_so3_interpolation: bool = True   # parabolic sub-step angular refinement after grid search (Change #7)
 
-    # Normalization experiment flags (Changes #8a–#8d)
-    noise_psd_whitening: bool = False       # symmetric noise-PSD matched filter: whiten both particles and projections
-                                            # by 1/σ_noise estimated from particle background ring (outside mask).
-                                            # Total CC weight = 1/σ²_noise — RELION-like matched filter. (Exp A)
-    noise_psd_warmup_batches: int = 8       # batches to average when building the noise PSD estimate (same logic as whitening_warmup_batches)
-    per_particle_spectral_norm: bool = False # per-particle radial amplitude normalization: each particle's Fourier
-                                            # spectrum is divided by its own radial mean amplitude, removing
-                                            # per-particle scale variation (defocus, ice thickness). (Exp B)
-    ctf_wiener: bool = False                # CTF Wiener filter: replace CTF×proj with CTF/(CTF²+ε)×particle,
-                                            # optimally suppressing CTF-zero frequencies. Only active when
-                                            # correct_ctf=True. (Exp C)
-    ctf_wiener_epsilon: float = 0.1         # Wiener regularization ε (noise-to-signal ratio); larger → more suppression near zeros
-    phase_correlation_alpha: float = 0.0    # Phase-weighted correlation: normalize Fourier amplitudes by |F|^α before
-                                            # cross-product. 0=standard CC, 1=pure phase correlation, 0<α<1=mixed. (Exp D)
+    # Noise-PSD matched filter (#8a) — symmetric whitening by 1/σ²_noise, RELION-like matched filter
+    noise_psd_whitening: bool = True        # whiten particles and projections by noise PSD from background ring
+    noise_psd_warmup_batches: int = 8       # batches to average when building the noise PSD estimate

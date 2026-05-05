@@ -25,7 +25,7 @@ model** (the actual D2 use case), which will be the ground truth for configurati
 ## Executive summary
 
 **Starting point:** NN pose estimates (~7°) → Cartesian 6°/2° projmatching plateaus near 1.3–1.7° (master branch).
-**Current best on real data:** Cartesian two-stage + SO(3) interpolation (6°/2° coarse Euler-add, 2.1°/0.7° Fibo fine, K=5, SO(3) interp on fine winner) — best on angular accuracy across all five tested targets (bgal lig_00892 **0.98°/2.574 Å**, bgal lig_00893 **2.08°/2.898 Å**, pkm2 lig_00909 **2.89°/3.485 Å**, gdh lig_G1 **2.14°/2.645 Å**, gdh lig_G2 **1.99°/2.861 Å**).
+**Current best on real data:** Cartesian two-stage + SO(3) interpolation (6°/2° coarse Euler-add, 2.1°/0.7° Cartesian fine, K=5, SO(3) interp) — best on angular accuracy across all five tested targets (bgal lig_00892 **0.98°/2.574 Å**, bgal lig_00893 **2.08°/2.898 Å**, pkm2 lig_00909 **2.89°/3.485 Å**, gdh lig_G1 **2.14°/2.645 Å**, gdh lig_G2 **1.99°/2.861 Å**).
 
 ### Implemented changes
 
@@ -34,30 +34,48 @@ model** (the actual D2 use case), which will be the ground truth for configurati
 | 1 | Sub-pixel shift (parabolic interpolation) | `use_subpixel_shifts` | `True` | Angular improvement at 1° grid; shift improvement at all grids |
 | 2a | Zero DC component | `zero_dc` | `True` | Small shift accuracy improvement |
 | 2b | Particle-adaptive spectral whitening | `spectral_whitening`, `whitening_warmup_batches=8` | `True` | DS2: 1.64→1.33°, DS3: 1.69→1.43° (19% improvement) |
-| 3 | Rotation matrix composition (Cartesian grid) | `rotation_composition` | `euler_add` | **Worse** than euler_add — grid incompatible with matrix composition |
-| 4 | Fibonacci ω-ball grid + pre_multiply | `use_fibo_grid` | `False` | DS2: 1.33→1.31°, DS3 P90: 4.85→3.52° — best single-stage |
-| 5 | Frequency band mask (high-pass ring) | `fftfreq_min` | `0.0` (off) | **Harmful** (P90 7.33° vs 2.75°) — keep disabled |
 | 6 | Two-stage coarse-to-fine search | `use_two_stage_search`, `fine_grid_*` | `False` | DS2: median 1.37°→**0.42°** (3×); DS3: 1.60°→1.35°; 24% fewer evals vs 6°/1° |
-| 7 | SO(3) sub-step pose interpolation | `use_so3_interpolation` | `False` | **Benchmarked on bgal.** cart_6-2+SO3: lig_00892 1.47°→**1.13°** (23%), FSC 2.667→**2.581 Å**; lig_00893 2.49°→**2.25°** (10%), FSC 2.967→**2.926 Å**. Beats two-stage on FSC for lig_00892. Zero throughput cost (runs at cart_6-2 speed). |
+| 7 | SO(3) sub-step pose interpolation | `use_so3_interpolation` | `True` | cart_6-2+SO3: lig_00892 1.47°→**1.13°** (23%), FSC 2.667→**2.581 Å**; lig_00893 2.49°→**2.25°** (10%). O(1) table-based (0 extra projections). |
+| 8a | Noise-PSD matched filter | `noise_psd_whitening`, `noise_psd_warmup_batches` | `False` | Best angular accuracy on all 4 real targets tested; best FSC on PKM2 (3.432 Å, −0.053 Å) |
 
-`use_fibo_grid=False`, `rotation_composition=euler_add`, and `use_two_stage_search=False` remain
-behavior-preserving defaults.
+### Deprecated features (tested but ruled out)
 
-### Current best config (behind flags)
+| # | Feature | Config flag | Why deprecated |
+|---|---------|-------------|----------------|
+| 3 | Rotation matrix composition | `rotation_composition=pre/post_multiply` | **Worse** than euler_add — Cartesian grid incompatible with matrix composition |
+| 4 | Fibonacci ω-ball grid | `use_fibo_grid=True` | **Consistently worse** than Cartesian on all real targets (bgal, PKM2, GDH). Synthetic results were not representative. |
+| 5 | Frequency band mask | `fftfreq_min > 0.0` | **Harmful** (P90 7.33° vs 2.75°) — low-freq content essential |
 
+### Recommended configurations
+
+**Best accuracy (recommended):** Two-stage + SO(3) interpolation
+```python
+# Wins on angular accuracy across all 5 real targets (bgal, PKM2, GDH)
+use_subpixel_shifts=True
+zero_dc=True
+spectral_whitening=True
+whitening_warmup_batches=8
+fftfreq_min=0.0
+use_fibo_grid=False  # Cartesian grid (Fibonacci ruled out)
+rotation_composition=euler_add
+use_two_stage_search=True
+fine_grid_distance_degs=2.1
+fine_grid_step_degs=0.7
+fine_top_k=5
+use_so3_interpolation=True
 ```
-use_subpixel_shifts=True, zero_dc=True, spectral_whitening=True,
-whitening_warmup_batches=8, fftfreq_min=0.0,
-use_fibo_grid=True, rotation_composition=pre_multiply,
-use_two_stage_search=True, fine_grid_distance_degs=1.5, fine_grid_step_degs=0.5, fine_top_k=5
+
+**Speed/accuracy balance:** Single-stage + SO(3) interpolation
+```python
+# 3-4× faster than two-stage, ~0.3° less accurate
+[Same as above but use_two_stage_search=False]
 ```
 
-**Recommendation (from real full-pipeline benchmarks — bgal + PKM2):**
-- **Two-stage + SO(3) interp** wins on angular accuracy across all three tested targets (C1 and D2).
-  The D2 exception seen in synthetic experiments (4°/0.7° > two-stage on DS3) did not hold on real data.
-- **Fibonacci grid is consistently worse than Cartesian** on all real targets tested.
-- On PKM2, FSC spread across configs is small (~0.06 Å); angular accuracy (2.89° vs 3.37°)
-  is the more reliable discriminator. Two-stage + SO(3) interp has the best FSC (3.485 Å).
+**Key findings from real benchmarks (5 datasets: bgal D2, PKM2 D2, GDH D3):**
+- Two-stage + SO(3) wins on both angular accuracy and FSC
+- Fibonacci grid consistently worse than Cartesian — **ruled out**
+- Synthetic experiments (Phase 1) were not representative of real performance
+- noise_psd_whitening provides small but consistent improvements (optional)
 
 ---
 

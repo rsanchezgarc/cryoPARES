@@ -1,5 +1,9 @@
 # Projection Matching: Improvements & Benchmarks
 
+**Navigation:** [Real Benchmarks](#real-full-pipeline-benchmark-results) | [Advanced Topics](#advanced-topics) | [Appendix A: Synthetic Experiments](#appendix-a-synthetic-experiments-historical-non-representative) | [Appendix B: Development Log](#appendix-b-development-log-historical) | [Appendix C: Implementation Details](#appendix-c-implementation-details-for-developers)
+
+---
+
 ## Research progression
 
 Work went through two distinct phases:
@@ -96,31 +100,109 @@ use_so3_interpolation=True
 
 ---
 
-## Datasets
+## Real Full-Pipeline Benchmark Results
 
-### DS1/DS2/DS3 (angular accuracy benchmarks)
+This section contains all end-to-end benchmarks with actual NN inference, projection matching, and reconstruction on real held-out datasets. These are the only results that matter for production use.
 
-| ID | Source | Particles | Pixel size (Å/px) | Box | Reference volume |
-|----|--------|-----------|-------------------|-----|-----------------|
-| DS2 | EMPIAR-10166 frealign_stack (real, C1) | 238631 | 1.27 | 336 | `EMPIAR-10166/data/reconstruct.mrc` |
-| DS3 | astex-5534 PKM2 Refine3D (real, D2) | 254070 | 0.995 | 334 | `astex-5534/Refine3D/001_after2DclsEval/run_class001.mrc` |
-| DS1 | EMPIAR-10166 projectionsSamePose (synthetic) | 238631 | 1.5 | 224 | — (particle images still copying) |
+### Combined cross-target summary
 
-#### Ground-truth and perturbed star files
+Five real full-pipeline benchmarks across three molecules and two symmetries:
+bgal lig_00892 (D2, 57K, box=476px), bgal lig_00893 (D2, 42K, box=476px),
+pkm2 lig_00909 (D2, 254K, box=334px), gdh lig_G1 (D3, 277K, box=356px), gdh lig_G2 (D3, 120K, box=356px).
+All use the respective apo checkpoint and mask. PKM2 and GDH FSC values are masked.
 
-| File | Description |
-|------|-------------|
-| `tests/frealign_stack_relion3.star` | DS2 GT (RELION 3.1 format, optics+particles blocks) |
-| `tests/ds2_perturbed_5deg.star` | DS2 perturbed, pre-composition (R_δ @ R_true), seed=42 |
-| `tests/ds2_post_perturbed_5deg.star` | DS2 perturbed, post-composition (R_true @ R_δ), seed=42 |
-| `tests/ds3_perturbed_5deg.star` | DS3 perturbed, pre-composition, seed=42 |
-| `tests/ds3_post_perturbed_5deg.star` | DS3 perturbed, post-composition, seed=42 |
-| `tests/ds1_perturbed_5deg.star` | DS1 perturbed, pre-composition, seed=42 |
+| Config | bgal-892 med° | bgal-892 FSC | bgal-893 med° | bgal-893 FSC | pkm2-909 med° | pkm2-909 FSC | gdh-G1 med° | gdh-G1 FSC | gdh-G2 med° | gdh-G2 FSC |
+|--------|--------------|--------------|--------------|--------------|--------------|--------------|------------|------------|------------|------------|
+| true_master 6°/2° | 1.49° | 2.697 Å | 2.56° | 3.082 Å | 3.40° | 3.509 Å | 3.08° | 2.819 Å | 2.86° | 2.924 Å |
+| cart_6-2 | 1.47° | 2.667 Å | 2.49° | 2.967 Å | 3.37° | 3.493 Å | 2.88° | 2.729 Å | 2.65° | 2.890 Å |
+| cart_6-2_so3interp | 1.13° | 2.581 Å | 2.25° | 2.926 Å | 3.17° | 3.485 Å | 2.72° | 2.708 Å | 2.46° | 2.906 Å |
+| fibo 6°/2° | 1.62° | 2.637 Å | 2.69° | 3.062 Å | 3.95° | 3.452 Å | 2.96° | 2.770 Å | 2.85° | 2.894 Å |
+| **cart_twostage_so3interp** | **0.98°** | **2.574 Å** | **2.08°** | **2.898 Å** | **2.89°** | **3.485 Å** | **2.14°** | **2.645 Å** | **1.99°** | **2.861 Å** |
 
-**Note on frealign_stack.star format**: the original `EMPIAR-10166/data/frealign_stack.star` is RELION 3.0
-format (single pandas DataFrame, no optics block). The code's `n_first_particles` path assumes RELION 3.1
-format (dict with 'optics'/'particles' keys). A bug fix was applied to `projmatching/projmatching.py` line
-290 to handle both formats. Use `frealign_stack_relion3.star` for benchmarking to avoid format issues.
+**Summary:**
+- Two-stage + SO(3) interp is the best on angular accuracy and FSC on every target tested.
+- `cart_6-2_so3interp` (single-stage + SO3) is a consistent intermediate — 6–19% over `cart_6-2` at zero throughput cost.
+- Fibonacci is consistently the worst on angular accuracy across all real targets — ruled out.
+- PKM2 FSC spread is small (~0.06 Å); angular accuracy is the more reliable discriminator there.
+- GDH (D3) confirms D2 pattern: two-stage wins clearly, lig_G2 breaks below 2° (1.99°).
+- Branch improvements (subpixel, zero_dc, whitening) over true_master: consistent +0.02–0.23° angular improvement.
+
+### Cross-Target Key Findings
+
+#### β-galactosidase (bgal) — D2 symmetry
+
+**No regression:** `true_master_6-2` and `master_regression_6-2` are identical within noise on both
+datasets — the `improve_local_refinement` branch introduces no regression.
+
+**Subpixel+whitening alone (true_master → cart):** ~0.05–0.10° angular improvement, ~0.1 Å FSC
+improvement consistently. Small but reliable.
+
+**Fibonacci at box=476px is worse than Cartesian at matched point count.** At box=336px (DS2/DS3),
+fibo 6°/2° (208 pts) was comparable to Cartesian 6°/2° (343 pts). At box=476px the Cartesian 343-pt
+grid is denser in SO(3) coverage relative to the particle size, and fibo at 208 pts is sparser.
+Density-matching (fibo_6-1.8 at 339 pts, fibo_6.8-2 at 353 pts) closes the gap slightly but does
+not beat Cartesian in either metric. The optimal grid geometry is particle-size dependent.
+
+**`%<5°` is not discriminating here.** All single-stage configs cluster within ±0.9%.
+The meaningful variation is in the median.
+
+**Two-stage has best median on both datasets** (1.05°/2.18°), but **cart_6-2 + SO(3) interpolation
+beats two-stage on FSC for lig_00892** (2.581 vs 2.594 Å) while running at full cart speed
+(~3,500 p/min vs 838). The median gap between SO(3) interp and two-stage is 0.08°/0.07° — within
+noise on a real dataset. SO(3) interpolation is a strong result: ~23%/10% angular improvement over
+cart_6-2 at zero throughput cost.
+
+**Two-stage is still the best if absolute accuracy matters most.** Cost: ~838 p/min vs ~3,500 p/min
+for cart_6-2 + SO(3) interp.
+
+**Why fibo_4-1 underperforms on lig_00893:** On this harder dataset the initial NN error exceeds 4°
+for many particles, so the 4° ball misses the true pose. Cart_4-1 suffers the same (2.63° vs 2.49°
+for cart_6-2). Larger search radius matters more than finer step on hard data.
+
+#### PKM2 — D2 symmetry
+
+**Two-stage wins on angular accuracy** (2.89° vs 3.37° for cart_6-2, a 14% improvement) and
+achieves the best FSC (3.485 Å), consistent with bgal.
+
+**FSC differences are small** (range 3.452–3.509 Å, ~0.06 Å spread). Angular accuracy is
+the more reliable discriminator on this dataset.
+
+**Fibonacci is again worst on angular accuracy** (3.95°) despite a marginally better FSC (3.452 Å).
+The FSC ranking does not match angular accuracy here — confirms that FSC alone is insufficient
+for evaluating projmatching quality on this dataset.
+
+#### GDH — D3 symmetry
+
+**Ranking holds on D3.** `cart_twostage_so3interp` wins on both metrics on both ligands — consistent
+with bgal and PKM2. The improvement is substantial: two-stage beats `cart_6-2_so3interp` by
+0.47–0.58° (lig_G2 breaks below 2° for the first time at 1.99°).
+
+**`cart_6-2_so3interp` is a reliable intermediate.** On lig_G1: 2.72° vs `cart_6-2` 2.88° (6%
+improvement at full speed). Consistently beats `cart_6-2` on all targets.
+
+**Fibo continues to underperform Cartesian.** Both ligands confirm the pattern from bgal and PKM2:
+fibo_6-2 (209 pts, fast) is worse than cart_6-2 (343 pts) on angular accuracy and FSC.
+
+**FSC on GDH is well-separated** (~0.17 Å between true_master and two-stage on lig_G1, ~0.06 Å on
+lig_G2), making FSC a useful discriminator unlike PKM2 where the spread was only 0.06 Å.
+
+#### Lessons: what the synthetic experiments got wrong
+
+| Claim from synthetic (DS2/DS3) | Real benchmark outcome |
+|-------------------------------|----------------------|
+| For D2, 4°/0.7° single-stage > two-stage | **Reversed**: two-stage wins on both bgal D2 datasets |
+| Fibonacci at 6°/2° (209 pts) ≈ Cartesian 6°/2° (343 pts) | **Box-size dependent**: at 476px fibo 6°/2° is worse; density-matching (339 pts) needed to close the gap |
+| DS3 P90 improvement (4.85°→3.52°) shows D2 benefit of Fibonacci | Not confirmed in real pipeline; grid geometry must be re-evaluated per particle size |
+
+**Root cause:** Perturbed-pose benchmarks use a known, isotropic 5° error distribution. Real NN
+errors are correlated, model-dependent, and non-uniform across orientations. The synthetic
+benchmark cannot capture how the NN's actual error distribution interacts with grid geometry,
+especially near D2 symmetry axes where the NN may be systematically biased.
+
+**Decision:** No further synthetic experiments. Future configuration decisions will be based on
+real full-pipeline benchmarks. The next target is **PKM2 (D2) with a cryoPARES-trained model** —
+this is the actual D2 use case and will determine whether two-stage or 4°/0.7° is the right
+default for D2 symmetry.
 
 ### β-galactosidase (full-pipeline benchmark)
 
@@ -153,410 +235,6 @@ REF_LIG893=/home/rsanchez/cryo/data/astexData/bgal/lig_00893/reconstruction.mrc
 All runs: `--data_halfset allParticles --model_halfset half1`, masked FSC with the apo mask, angular
 error vs RELION GT with `--sym D2`. GPU 1 (RTX 6000 Ada 51 GB). Box = 476px.
 
----
-
-## Implemented changes — implementation details & lessons
-
-All changes are gated by config flags in `projmatching_config.py` with backward-compatible defaults.
-Key files: `projMatcher.py`, `projmatchingUtils/fourierOperations.py`, `projmatching_config.py`.
-
-### Change #1 — Sub-pixel shift refinement (`use_subpixel_shifts`, default `True`)
-
-**File:** `projMatcher.py::_extract_ccor_max`
-
-The integer CC peak location was found with `argmax` and stored as `int64`. This created a shift
-quantization floor of ~1 pixel ≈ 1–3° depending on pixel size and particle radius.
-
-**Fix:** 3-point parabolic interpolation on both row and column axes after the integer peak:
-```
-delta = (f[p-1] - f[p+1]) / (2*f[p-1] - 4*f[p] + 2*f[p+1])
-subpixel_pos = p + delta
-```
-`delta` is clamped to the border guard so boundary peaks get `delta=0`. The `pixelShiftsXY`
-tensor type changed from `int64` → `float32`. Downstream conversion in `forward()` already called
-`.float()`, so no other changes needed.
-
-**Bug encountered during implementation:** First attempt used `expand(*corrs_crop.shape[:-2], 1, W)`
-which broke `torch.compile(fullgraph=True)` because dynamic shape unpacking is not supported by
-`torch.compile`. Rewrote using explicit batch indexing: `n_idx = torch.arange(N)` followed by
-`corrs_crop[n_idx, safe_i, int_j]` — fully static shapes, compatible with `fullgraph=True`.
-
-**Lesson:** Integer-pixel CC peak location creates a quantization floor of 1–3° depending on pixel size and
-particle radius. Parabolic 3-point interpolation on both axes after the integer peak resolves this.
-The parabolic approximation is valid because the CC peak is smooth and band-limited.
-
-TODO: think if makes sense to cache n_idx = torch.arange(N)
-
----
-
-### Change #2a — Zero DC component (`zero_dc`, default `True`)
-
-**File:** `fourierOperations.py::correlate_dft_2d`
-
-The DC bin (row `H//2`, col `0` in fftshifted rfft layout) represents the mean pixel value.
-Correlating it adds a global-offset bias term that is orientation-independent.
-
-**Fix:** Zero the DC bin in both `parts` and `projs` before the cross-product:
-```python
-dc_row = parts.shape[-2] // 2
-parts[..., dc_row, 0] = 0
-projs[..., dc_row, 0] = 0
-```
-
----
-
-### Change #2b — Particle-adaptive spectral whitening (`spectral_whitening`, default `True`)
-
-**File:** `projMatcher.py::forward`, `fourierOperations.py::correlate_dft_2d`
-
-The raw CC is dominated by low frequencies (power spectrum ∝ 1/f²–1/f⁴). Orientation-
-discriminating signal at higher frequencies contributes negligible weight.
-
-**Design evolution (three failed attempts, one success):**
-
-1. *Reference-based whitening v1* (`1/sqrt(amp_3d(r))` from reference volume spectrum):
-   Failed on DS3 — RELION's LP-filtered reference has near-zero amplitude beyond 6Å cutoff →
-   whitening factor explodes to **6.99×** at Nyquist (vs 1.33× for DS2). DS3 regression: 2.0°.
-
-2. *Reference-based whitening v2* (masked at `fftfreq_max`): still 2.0° regression on DS3.
-   The amplitude spectrum from the reference volume does not match the actual particle spectrum
-   per-dataset (different CTF envelopes, noise floors, pixel sizes).
-
-3. *Reference-based v3* (apply to projections only, not particles): still 2.0° regression on DS3.
-
-4. **Particle-adaptive whitening (final):** estimate `1/amp` from the actual particle DFTs.
-   Applied to projections only (whitening both sides gives `1/amp²` weighting that amplifies
-   particle noise; projections-only gives `1/amp` — more robust). Absorbs per-dataset CTF
-   envelope, detector noise, and pixel-size effects automatically.
-
-**Implementation:**
-- `forward()`: lazy warm-up loop; accumulates `fparts.abs().mean(dim=0)` over first
-  `whitening_warmup_batches` batches (default 8). Whitening map is recomputed after each
-  batch and frozen once warm-up completes. Reset at each `align_star()` call.
-- `correlate_dft_2d`: accepts `whitening_filter` tensor; `projs = projs * whitening_filter`.
-- `align_star()`: resets `_whitening_amp_sum = None`, `_whitening_batches_seen = 0`.
-
-**Why 8 warm-up batches:** more diverse defocus conditions are averaged → CTF oscillations cancel →
-smoother amplitude profile. Analogous to RELION's per-optics-group noise estimation averaged
-over many particles per group. Single-batch was sufficient for DS2 but not DS3.
-
-**Lesson — particle-adaptive, not reference-based:**
-Three attempts at reference-based whitening failed on DS3: RELION's LP-filtered reference has
-near-zero amplitude beyond the resolution cutoff, causing the whitening factor to explode to 6.99×
-at Nyquist. The reference volume spectrum does not match the actual particle spectrum — they differ
-in CTF envelope, noise floor, and pixel size. Particle-adaptive whitening absorbs these differences
-automatically and works across datasets.
-
-Apply whitening to projections only, not particles: whitening both sides gives `1/amp²` which
-over-amplifies particle noise. Using 8 warm-up batches (vs 1) matters for DS3 where defocus
-diversity cancels CTF oscillations in the amplitude estimate.
-
-TODO: Think how to implement this for on-the-fly friendly runs — may need to keep updating stats
-every few 1000s of particles in case of microscope drift, but this could be computationally
-inefficient and we care about performance.
-
----
-
-### Change #5 — Frequency band mask (`fftfreq_min`, default `0.0`)
-
-**File:** `fourierOperations.py::_mask_for_dft_2d`, `projMatcher.py::_store_reference_vol`
-
-Extended `_mask_for_dft_2d` with a `min_freq_pixels` parameter for a high-pass ring.
-`band_mask` is pre-computed at init and registered as a buffer. Applied to `fparts` in `forward()`
-when `fftfreq_min > 0`.
-
-**Result:** Harmful at `fftfreq_min=0.05` — P90 worsened from 3.16° → 7.33° (DS2 Scen B).
-Zero DC (#2a) handles the DC bias. A high-pass ring removes low-frequency structural information
-that is still orientation-discriminating above DC. **Default kept at 0.0 (disabled).**
-
----
-
-### Change #3 — Rotation composition (`rotation_composition`, default `"euler_add"`)
-
-**File:** `projMatcher.py::forward`, `projmatching_config.py`
-
-The original Euler angle addition `delta + euler` is an approximation to rotation composition and
-is inaccurate near the tilt poles (when β ≈ 0, α and γ are degenerate). Implemented exact SO(3)
-composition via rotation matrices with two orderings:
-
-- `"pre_multiply"`: `R_total = R_delta @ R_current` (delta in lab frame)
-- `"post_multiply"`: `R_total = R_current @ R_delta` (delta in body/particle frame)
-
-**Key finding with Cartesian grid:** Both modes are **significantly worse** than `euler_add`
-(2.27–2.42° vs 1.33°). Root cause: the Cartesian Euler grid is designed for Euler-space arithmetic.
-Converted to rotation matrices and composed, the coverage pattern changes unfavorably — the
-near-identity cluster that the Cartesian grid accumulates (7 identical rot/psi values per
-tilt=0 row) vanishes when converted to matrices, leaving sparser effective search around the
-correct pose.
-
-**Cartesian grid rotation composition results (DS2 Scen B vs GT, n=2000):**
-
-| Mode | Median (°) | P75 (°) | P90 (°) |
-|------|-----------|---------|---------|
-| euler_add (baseline) | 1.33 | 1.95 | 2.75 |
-| pre_multiply (Cartesian) | 2.42 | 3.61 | 4.81 |
-| post_multiply (Cartesian) | 2.27 | 3.35 | 4.32 |
-
-**Lesson:** Euler angle addition (`delta + euler`) works well with the Cartesian Euler grid because
-the grid is designed for Euler-space arithmetic. Rotation matrix composition is only compatible with
-the Fibonacci grid, which is specifically designed for it.
-
----
-
-### Change #4 — Fibonacci ω-ball grid (`use_fibo_grid`, default `False`)
-
-**File:** `projMatcher.py::_get_so3_delta_rotmats`, `projmatching_config.py`
-
-Replaced the Cartesian Euler grid with a uniform geodesic ω-ball grid (`so3_near_identity_by_spacing`
-with `use_small_aprox=True`). This grid samples rotation vectors in an SO(3) ball of radius
-`grid_distance_degs` with approximately uniform coverage — no Euler angle singularities,
-no polar clustering.
-
-**Grid point counts:**
-
-| Settings | Cartesian | Fibonacci |
-|----------|-----------|-----------|
-| 6°/2° | 343 (7³) | 208 + 1 identity = 209 |
-| 6°/1° | 2197 (13³) | 1637 + 1 identity = 1638 |
-
-At 6°/2°: Fibonacci uses 39% fewer points with better uniform coverage.
-At 6°/1°: Fibonacci uses 25% fewer points (1638 vs 2197).
-
-**Critical bug fixed — missing identity:** The ω-ball shell centres start at ~3.3° geodesic
-distance. Without explicitly adding identity to the grid, Scenario A (where ground truth poses
-are fed as input) always returns the wrong pose with ≥3.3° error — a guaranteed regression.
-Fix: prepend `torch.eye(3)` to the cached rotation matrix tensor in `_get_so3_delta_rotmats()`.
-
-**Implementation:**
-- New `_get_so3_delta_rotmats(device)` method on `ProjectionMatcher`: returns cached `(nDelta, 3, 3)`
-  delta rotation matrices. Uses Fibonacci when `use_fibo_grid=True`, otherwise converts the
-  Cartesian Euler grid to rotation matrices.
-- `rotation_composition` auto-upgrades from `"euler_add"` to `"pre_multiply"` when
-  `use_fibo_grid=True` (prints a message; euler_add is meaningless for the rotation-matrix path).
-
-**Composition mode experiment (pre vs post) — DS2, n=500, 6°/1°:**
-
-| Perturbation \ Search | pre_multiply | post_multiply |
-|-----------------------|-------------|--------------|
-| pre (R_δ @ R_true) | Median **0.89°**, <5°: 98.8% | Median **0.85°**, <5°: 98.0% |
-| post (R_true @ R_δ) | Median **0.84°**, <5°: 98.4% | Median **0.85°**, <5°: 98.4% |
-
-**Lesson — pre_multiply ≡ post_multiply:**
-For an isotropic SO(3) ball, `{R_δ @ R_est}` and `{R_est @ R_δ}` cover the same geodesic ball
-and give identical recovery accuracy (~0.85° for both). Similarly, perturbation composition
-order has no effect on recovery accuracy. The user hypothesis that only one ordering is
-geometrically correct is disproved.
-
-The Fibonacci grid eliminates Euler polar degeneracy that was harming DS3 (D2 symmetry, particles
-near symmetry axes): P90 dropped from 4.85°→3.52°, a standout improvement.
-
-TODO: Check if we are following the definition of the grid distance — it is supposed to have a
-grid that goes from -6° to +6° (check stats for Cartesian and Fibonacci).
-
----
-
-### Change #6 — Two-stage coarse-to-fine search (`use_two_stage_search`, default `False`)
-
-**Config flags:**
-```
-use_two_stage_search=True, fine_grid_distance_degs=1.5, fine_grid_step_degs=0.5, fine_top_k=5
-```
-
-**Actual Fibonacci grid point counts** (measured, formula: `so3_grid_near_identity_fibo(use_small_aprox=True)`):
-
-| Config | Pts | Notes |
-|--------|-----|-------|
-| 6°/2° | 209 | coarse pass |
-| 6°/1° | 1638 | strong single-stage baseline |
-| 4°/0.5° | 3875 | strong single-stage baseline (covers 4° initial error) |
-| 4°/0.7° | 1486 | sweet spot single-stage for D2 |
-| 4°/1° | 488 | cheaper single-stage |
-| 1.5°/0.5° | 209 | fine pass (same count as 6°/2°!) |
-| 1.0°/0.5° | 63 | fine pass (aggressive) |
-
-> **Correction:** "2°/0.5° → ~65 pts" was wrong — 2°/0.5° gives ~488 pts.
-> The 63-pt target is hit by **1°/0.5°**; the preferred fine grid is **1.5°/0.5° (209 pts)**.
-
-**Two-stage totals** (K=5 candidates from coarse):
-
-| Coarse + Fine | Total | vs 6°/1° single |
-|---------------|-------|-----------------|
-| 6°/2° + 1.5°/0.5° | 209 + 5×209 = **1249** | 24% fewer pts |
-| 6°/2° + 1.0°/0.5° | 209 + 5×63  = **524**  | 68% fewer pts |
-
-**Implementation details:**
-- `_preprocess_particles_to_F()`: particle FFT + whitening warm-up, called once per `forward()` call
-- `_expand_rotmats()`: SO(3) composition of (B, K, 3, 3) × (nDelta, 3, 3) → (B, K*nDelta, 3, 3)
-- `_do_search()`: project + CTF + correlate + topk, reusable for coarse and fine passes
-- `_forward_two_stage()`: orchestrates both passes, confidence from coarse distribution
-- `euler_add` auto-switched to `pre_multiply` when `use_two_stage_search=True`
-
-**Results (n=500 except 6°/2° n=2000, Scen B vs GT):**
-
-| Config | Pts | DS1 med | DS2 med | DS2 P75 | DS2 P90 | DS3 med | DS3 P75 | DS3 P90 | Time/500 |
-|--------|-----|--------|--------|---------|---------|--------|---------|---------|---------|
-| **master** Cartesian 6°/2° | 343 | — | 1.64° | — | 3.79° | 1.69° | — | 4.06° | **~9.4s** |
-| fibo 4°/2° (bs=75) | 63 | — | 1.39° | — | — | 1.50° | — | — | **~3.1s** |
-| fibo 6°/2° (bs=32) | 209 | — | 1.31° | 1.88° | 2.62° | 1.31° | 1.98° | 3.52° | **~6.2s** |
-| fibo 4°/1° (bs=16) | 488 | — | 0.97° | 1.53° | 2.13° | 1.35° | 2.03° | 2.81° | **~13.4s** |
-| fibo 4°/0.7° (bs=5) | 1486 | — | 0.87° | 1.43° | 2.23° | **1.24°** | **1.93°** | **2.74°** | **~40.4s** |
-| fibo 6°/1° (bs=8) | 1638 | — | 0.89° | 1.62° | 2.67° | **1.35°** | — | — | **~43.2s** |
-| **two-stage 6°/2°+1.5°/0.5° K=5 (bs=7)** | **1249** | **0.22°** | **0.42°** | **1.25°** | 2.47° | 1.35° | 2.35° | 3.43° | **~33.2s** |
-
-Timing measured on 10K particles, 3 runs each, RTX 6000 Ada 49 GB. Per-500 = raw ÷ 20.
-Master baseline: DS2 187s/10K, DS3 200s/10K (Cartesian 6°/2°, batch_size=11).
-Note: 6°/1° (1638 pts) is slower than two-stage (1249 pts) yet less accurate on both datasets — dominated.
-4°/0.7° wins on DS3 because it concentrates coverage where it matters (≤4° initial error, 0.7° step)
-rather than wasting evaluations from 4°–6°.
-
-Two-stage gives **4× better median** on DS2 (C1) vs master, 3.6× slower.
-DS3 (D2): 4°/0.7° single-stage is better — coarse K=5 candidates can cluster in one D2 domain,
-missing poses in the other 3. DS1 (synthetic): near-perfect 0.22° recovery.
-
-**Scenario A validation (GT input → expect ~0°):**
-- DS1: 0.00° ✓ (requires CTF-corrected reference volume)
-- DS2: 0.00° ✓
-- DS3: 1.41° — fine search (0.5° step) finds a pose 1.41° from RELION GT that correlates marginally
-  better against the reference. Not a bug; single-stage still returns 0.00° ✓.
-
-**DS3 Scen B K=10 result:** Median 1.36°, P75 2.29°, P90 3.50° — identical to K=5 (1.35°/2.35°/3.43°)
-at 77% more evaluations (2299 vs 1249 pts). The D2 gap is geometric (symmetry-axis ambiguity),
-not a candidate-count issue. K=10 ruled out.
-
-**DS3 Scen B 4°/0.5° result:** Median 1.22°, P75 1.89°, P90 2.64° in ~2m (batch_size=1) vs 4°/0.7°:
-1.24°/1.93°/2.74° in ~52s (batch_size=2). Only 0.02° median gain for 2.3× wall-clock cost.
-**4°/0.7° is the sweet spot for D2 — going finer hits diminishing returns.**
-
----
-
-## DS2/DS3 benchmark results (Phase 1 — synthetic experiments)
-
-> **Note:** These experiments use artificially perturbed GT poses as input — the NN is not
-> involved. They were useful for screening algorithm changes quickly but proved to be a poor
-> predictor of real full-pipeline performance (see Phase 2 bgal results and lessons below).
-> No further experiments of this type are planned.
-
-```bash
-PYTHON=/home/rsanchez/app/miniconda3/envs/cryopares/bin/python
-BIN=/home/rsanchez/app/miniconda3/envs/cryopares/bin/cryopares_projmatching
-EMPIAR=/home/rsanchez/cryo/data/EMPIAR-download
-DATA=/home/rsanchez/cryo/data/cryopares
-
-# DS2 Scenario B — run projmatching on perturbed poses
-$BIN \
-    --reference_vol $EMPIAR/EMPIAR-10166/data/reconstruct.mrc \
-    --particles_star_fname $DATA/tests/ds2_perturbed_5deg.star \
-    --particles_dir $EMPIAR/EMPIAR-10166/data \
-    --out_fname $OUT \
-    --n_first_particles 500 --grid_distance_degs 6 --grid_step_degs 1 \
-    --batch_size 2 --gpu_id 1 \
-    --config projmatching.use_subpixel_shifts=True projmatching.zero_dc=True \
-             projmatching.spectral_whitening=True projmatching.whitening_warmup_batches=8 \
-             projmatching.fftfreq_min=0.0 projmatching.use_fibo_grid=True \
-             projmatching.rotation_composition=pre_multiply
-
-# GT comparison (post-hoc) — ALWAYS use compare_poses.py
-$PYTHON -m cryoPARES.scripts.compare_poses \
-    --starfile1 $OUT --starfile2 $DATA/tests/frealign_stack_relion3.star --sym C1
-```
-
-### Batch size constraint (XBLOCK Triton error)
-
-The compiled projection kernel materialises a `(batch_size × n_rotations × n_valid_coords × 9)` float32
-buffer. With `dynamic=True`, Triton uses a worst-case size hint of 2^36, triggering:
-```
-AssertionError: 'XBLOCK' too large. Maximum: 4096. Actual: 8192.
-```
-**Fix:** compile with `dynamic=False` (applied in `extract_central_slices_as_real.py`). With
-`dynamic=False`, Triton receives the concrete tensor shape and selects an appropriate XBLOCK.
-
----
-
-### Phase 1 — Baseline (unmodified code)
-
-Grid: 6°/2° (343 rotations), batch_size=32, compile enabled, GPU 0.
-All errors vs GT via post-hoc `compare_poses.py`.
-
-| Change | Dataset | Scenario | Median (°) | P75 (°) | P90 (°) | Shift Err (Å) | Time (s) |
-|--------|---------|----------|-----------|---------|---------|--------------|---------|
-| Baseline | DS2 | A (GT) | 1.19 | 2.43 | 4.01 | — | ~25 |
-| Baseline | DS2 | B (5° perturb) | 1.64 | 2.46 | 3.79 | 0.86 | ~25 |
-| Baseline | DS3 | A (GT) | 0.00 | 2.69 | 4.32 | 0.46 | ~30 |
-| Baseline | DS3 | B (5° perturb) | 1.69 | 2.60 | 4.06 | 0.46 | ~24 |
-
-### Phase 3 — Changes enabled (grid 6°/2°, batch_size=32, n=2000)
-
-| Change | Dataset | Scenario | Median (°) | P75 (°) | P90 (°) | Shift (Å) | Notes |
-|--------|---------|----------|-----------|---------|---------|-----------|-------|
-| baseline | DS2 | B | 1.64 | 2.46 | 3.79 | 0.86 | |
-| #1 subpixel + #2a zero_dc | DS2 | B | 1.64 | 2.46 | — | **0.70** | shift improved |
-| #2b particle-adaptive whitening | DS2 | A | **0.00** | **0.00** | **0.00** | — | |
-| #2b particle-adaptive whitening | DS2 | B | **1.32** | **1.96** | **3.16** | 0.70 | 19% |
-| #2b particle-adaptive whitening | DS3 | A | **0.00** | **2.00** | **4.02** | — | |
-| #2b particle-adaptive whitening | DS3 | B | 1.72 | 2.59 | 3.85 | — | within noise |
-| whiten + fftfreq_min=0.05 | DS2 | B | 1.41 | — | **7.33** | — | harmful |
-| whiten + fftfreq_min=0.05 | DS3 | A | 2.00 | — | 5.34 | — | harmful |
-| warmup8 | DS2 | B | 1.33 | 1.95 | 2.75 | — | same as single-batch |
-| warmup8 | DS3 | B | **1.43** | **2.37** | **4.85** | — | 17% vs single-batch |
-| fibo + pre_multiply | DS2 | B | **1.31** | 1.88 | **2.62** | — | |
-| fibo + post_multiply | DS2 | B | 1.35 | — | 2.66 | — | equivalent |
-| fibo + pre_multiply | DS3 | B | **1.31** | 1.98 | **3.52** | — | D2 P90 standout |
-
-### Finer grid experiments (6°/1°, n=500, GPU 1)
-
-At 6°/1°: Fibonacci = 1638 pts, Cartesian = 2197 pts. XBLOCK constraint requires bs=2 (Fibo)
-or bs=1 (Cartesian) without the `dynamic=False` fix.
-
-| Change | Dataset | Scenario | Median (°) | P75 (°) | P90 (°) | Shift (Å) | Time (s) |
-|--------|---------|----------|-----------|---------|---------|-----------|---------|
-| baseline (flags off), Cartesian 6°/1° | DS2 | B | 1.49 | 2.35 | 3.80 | 0.70 | ~70 |
-| all flags ON, Cartesian 6°/1° | DS2 | B | **1.00** | **1.72** | **2.78** | **0.48** | ~72 |
-
-Overall DS2 Scen B improvement: **1.64° → 1.00° = 39% reduction** vs 2° grid baseline.
-
-Fibonacci 6°/1°, all 4 composition combinations (pre vs post perturbation × pre vs post search):
-all give **~0.84–0.89°** — composition order is irrelevant for an isotropic ball.
-
-### Summary table (Scenario B vs GT, optimal batch sizes)
-
-Grid pts measured with `so3_grid_near_identity_fibo(use_small_aprox=True)` + 1 identity.
-
-| Config | Grid pts | n | DS1 med | DS2 med | DS2 P75 | DS2 P90 | DS3 med | DS3 P75 | DS3 P90 | Time/500 |
-|--------|----------|---|--------|--------|---------|---------|--------|---------|---------|---------|
-| baseline (all off) | Cartesian 343 | 2000 | — | 1.64° | — | 3.79° | 1.69° | — | 4.06° | ~9.4s |
-| all flags ON | Cartesian 343 | 2000 | — | 1.32° | — | 3.16° | 1.43° | — | 4.85° | — |
-| +warmup8 | Cartesian 343 | 2000 | — | 1.33° | — | 2.75° | 1.43° | — | 4.85° | — |
-| +fibo+pre | Fibonacci 209 | 2000 | — | 1.31° | 1.88° | 2.62° | 1.31° | 1.98° | 3.52° | **~6.4s** |
-| all flags ON | Cartesian 2197 | 500 | — | 1.00° | — | 2.78° | — | — | — | — |
-| fibo+pre | Fibonacci 488 | 500 | — | 0.97° | 1.53° | 2.13° | 1.35° | 2.03° | 2.81° | ~13.4s |
-| fibo+pre | Fibonacci 1638 | 500 | — | 0.89° | 1.62° | 2.67° | 1.38° | 2.15° | 3.18° | ~43.2s |
-| fibo+pre | Fibonacci 1486 | 500 | — | 0.87° | 1.43° | 2.23° | **1.24°** | **1.93°** | **2.74°** | ~40.8s |
-| fibo+pre | Fibonacci 3875 | 500 | — | — | — | — | 1.22° | 1.89° | 2.64° | ~2m |
-| **two-stage 6°/2°+1.5°/0.5° K=5** | **1249** | **500** | **0.22°** | **0.42°** | **1.25°** | **2.47°** | 1.35° | 2.35° | 3.43° | ~33.4s |
-
-All flags for fibo/two-stage rows: `use_subpixel_shifts=True, zero_dc=True, spectral_whitening=True, whitening_warmup_batches=8, fftfreq_min=0.0, use_fibo_grid=True, rotation_composition=pre_multiply`
-
-DS1 (synthetic, C1) two-stage Scen B = 0.22° from ~4° perturbed start — essentially perfect recovery.
-DS1 reference volume must be reconstructed **with CTF correction** (default `--correct_ctf`).
-
-### Two-stage vs 4°/0.7° head-to-head
-
-| Config | DS2 median | DS2 P90 | DS3 median | DS3 P90 | Total pts | Winner |
-|--------|-----------|---------|-----------|---------|-----------|--------|
-| 4°/0.7° single-stage | 0.87° | 2.23° | **1.24°** | **2.74°** | 1486 | DS3 |
-| two-stage 6°/2°+1.5°/0.5° | **0.42°** | 2.47° | 1.35° | 3.43° | 1249 | DS2 + fewer pts |
-
-Two-stage wins for C1 (2× better median, fewer evaluations). 4°/0.7° wins for D2 (better median
-and P90). The two-stage coarse K=5 candidates can cluster in one symmetry domain, missing better
-poses in the other D2-related domains; dense single-stage coverage avoids this.
-
----
-
-## β-galactosidase full-pipeline benchmark (Phase 2 — real experiment)
-
-End-to-end runs (NN inference + projection matching + reconstruction) on the bgal checkpoint
-(`apo_00482/version_0`, D2 symmetry) across two held-out ligand datasets.
-
 **Cartesian grid point counts:** 6°/2° = 343 pts (7×7×7 Euler grid).
 **Fibo grid point counts** (measured): 6°/2° = 208 pts; 6°/1.8° = 339 pts; 6.8°/2° = 353 pts; two-stage ~1250 pts.
 
@@ -570,7 +248,7 @@ Note on batch sizes (box ≈ 476px for apo; memory scales as `bs × n_rots × n_
 | Fibo 4°/1° | 488 | 8 |
 | Two-stage fine (5×~420) | ~2100 | 4 |
 
-### Benchmark commands
+#### Benchmark commands
 
 ```bash
 # Step 0: Shared NN inference (run once, reuse for all projmatching configs)
@@ -662,7 +340,7 @@ CUDA_VISIBLE_DEVICES=0 $BIN_DIR/cryopares_reconstruct \
   --output_mrc_fname $OUT/reconstruction.mrc
 ```
 
-### Results — lig_00892 (~57K particles)
+#### Results — lig_00892 (~57K particles)
 
 | Config | pts | Batch size | med° | %<5° | FSC@0.143 | p/min |
 |--------|-----|-----------|------|------|-----------|-------|
@@ -678,7 +356,7 @@ CUDA_VISIBLE_DEVICES=0 $BIN_DIR/cryopares_reconstruct \
 | twostage_6-2_2.1-0.7 K=5 (fibo) | ~1250 | 4 | 1.05° | 76.8% | 2.594 Å | 838 |
 | **cart_twostage_6-2_2.1-0.7 K=5 + SO(3) interp** | **~1250** | **4** | **0.98°** | **77.0%** | **2.574 Å** | **~800** |
 
-### Results — lig_00893 (~42K particles, harder)
+#### Results — lig_00893 (~42K particles, harder)
 
 | Config | pts | Batch size | med° | %<5° | FSC@0.143 | p/min |
 |--------|-----|-----------|------|------|-----------|-------|
@@ -694,57 +372,7 @@ CUDA_VISIBLE_DEVICES=0 $BIN_DIR/cryopares_reconstruct \
 | twostage_6-2_2.1-0.7 K=5 (fibo) | ~1250 | 4 | 2.18° | 65.5% | 2.948 Å | 838 |
 | **cart_twostage_6-2_2.1-0.7 K=5 + SO(3) interp** | **~1250** | **4** | **2.08°** | **65.9%** | **2.898 Å** | **~800** |
 
-### Key findings (bgal)
-
-**No regression:** `true_master_6-2` and `master_regression_6-2` are identical within noise on both
-datasets — the `improve_local_refinement` branch introduces no regression.
-
-**Subpixel+whitening alone (true_master → cart):** ~0.05–0.10° angular improvement, ~0.1 Å FSC
-improvement consistently. Small but reliable.
-
-**Fibonacci at box=476px is worse than Cartesian at matched point count.** At box=336px (DS2/DS3),
-fibo 6°/2° (208 pts) was comparable to Cartesian 6°/2° (343 pts). At box=476px the Cartesian 343-pt
-grid is denser in SO(3) coverage relative to the particle size, and fibo at 208 pts is sparser.
-Density-matching (fibo_6-1.8 at 339 pts, fibo_6.8-2 at 353 pts) closes the gap slightly but does
-not beat Cartesian in either metric. The optimal grid geometry is particle-size dependent.
-
-**`%<5°` is not discriminating here.** All single-stage configs cluster within ±0.9%.
-The meaningful variation is in the median.
-
-**Two-stage has best median on both datasets** (1.05°/2.18°), but **cart_6-2 + SO(3) interpolation
-beats two-stage on FSC for lig_00892** (2.581 vs 2.594 Å) while running at full cart speed
-(~3,500 p/min vs 838). The median gap between SO(3) interp and two-stage is 0.08°/0.07° — within
-noise on a real dataset. SO(3) interpolation is a strong result: ~23%/10% angular improvement over
-cart_6-2 at zero throughput cost.
-
-**Two-stage is still the best if absolute accuracy matters most.** Cost: ~838 p/min vs ~3,500 p/min
-for cart_6-2 + SO(3) interp.
-
-**Why fibo_4-1 underperforms on lig_00893:** On this harder dataset the initial NN error exceeds 4°
-for many particles, so the 4° ball misses the true pose. Cart_4-1 suffers the same (2.63° vs 2.49°
-for cart_6-2). Larger search radius matters more than finer step on hard data.
-
-### Lessons: what the synthetic experiments got wrong
-
-| Claim from synthetic (DS2/DS3) | Real benchmark outcome |
-|-------------------------------|----------------------|
-| For D2, 4°/0.7° single-stage > two-stage | **Reversed**: two-stage wins on both bgal D2 datasets |
-| Fibonacci at 6°/2° (209 pts) ≈ Cartesian 6°/2° (343 pts) | **Box-size dependent**: at 476px fibo 6°/2° is worse; density-matching (339 pts) needed to close the gap |
-| DS3 P90 improvement (4.85°→3.52°) shows D2 benefit of Fibonacci | Not confirmed in real pipeline; grid geometry must be re-evaluated per particle size |
-
-**Root cause:** Perturbed-pose benchmarks use a known, isotropic 5° error distribution. Real NN
-errors are correlated, model-dependent, and non-uniform across orientations. The synthetic
-benchmark cannot capture how the NN's actual error distribution interacts with grid geometry,
-especially near D2 symmetry axes where the NN may be systematically biased.
-
-**Decision:** No further synthetic experiments. Future configuration decisions will be based on
-real full-pipeline benchmarks. The next target is **PKM2 (D2) with a cryoPARES-trained model** —
-this is the actual D2 use case and will determine whether two-stage or 4°/0.7° is the right
-default for D2 symmetry.
-
----
-
-## PKM2 full-pipeline benchmark (Phase 3 — second real D2 target)
+### PKM2 full-pipeline benchmark
 
 End-to-end runs (NN inference + projection matching + reconstruction) on the PKM2 checkpoint
 (`pkm2/apo/version_0`, D2 symmetry, trained on 125K apo particles) applied to a held-out
@@ -757,7 +385,7 @@ ligand dataset.
 Note on angular medians: two values per config reflect half1 and half2 processed separately.
 The table shows the average of the two halves.
 
-### Results — lig_00909 (~254K particles, D2)
+#### Results — lig_00909 (~254K particles, D2)
 
 | Config | pts | Batch size | med° | FSC@0.143 |
 |--------|-----|-----------|------|-----------|
@@ -766,21 +394,7 @@ The table shows the average of the two halves.
 | fibo_6-1.8 | ~339 | 8 | 3.95° | 3.452 Å |
 | **cart_twostage_6-2_2.1-0.7 K=5 + SO(3) interp** | **~1250** | **4** | **2.89°** | **3.485 Å** |
 
-### Key findings (PKM2)
-
-**Two-stage wins on angular accuracy** (2.89° vs 3.37° for cart_6-2, a 14% improvement) and
-achieves the best FSC (3.485 Å), consistent with bgal.
-
-**FSC differences are small** (range 3.452–3.509 Å, ~0.06 Å spread). Angular accuracy is
-the more reliable discriminator on this dataset.
-
-**Fibonacci is again worst on angular accuracy** (3.95°) despite a marginally better FSC (3.452 Å).
-The FSC ranking does not match angular accuracy here — confirms that FSC alone is insufficient
-for evaluating projmatching quality on this dataset.
-
----
-
-## GDH full-pipeline benchmark (Phase 4 — D3 target)
+### GDH full-pipeline benchmark
 
 End-to-end runs (NN inference + projection matching + reconstruction) on the GDH checkpoint
 (`gdh/apo/version_1`, **D3 symmetry**, trained on ~112K apo particles) applied to two held-out
@@ -789,7 +403,7 @@ ligand datasets. First D3 target in the benchmark suite.
 **Datasets:** GDH lig_G1 (~277K particles) and lig_G2 (~120K particles), 356 px box, 0.999 Å/px.
 **Reference map:** `gdh/apo/reconstruction.mrc`. **Mask:** `gdh/apo/mask.mrc`.
 
-### Results — lig_G1 (~277K particles, D3)
+#### Results — lig_G1 (~277K particles, D3)
 
 | Config | pts | Batch size | med° | FSC@0.143 |
 |--------|-----|-----------|------|-----------|
@@ -799,7 +413,7 @@ ligand datasets. First D3 target in the benchmark suite.
 | fibo_6-2 | 209 | 8 | 2.96° | 2.770 Å |
 | **cart_twostage_so3interp** | **~1250** | **4** | **2.14°** | **2.645 Å** |
 
-### Results — lig_G2 (~120K particles, D3)
+#### Results — lig_G2 (~120K particles, D3)
 
 | Config | pts | Batch size | med° | FSC@0.143 |
 |--------|-----|-----------|------|-----------|
@@ -809,49 +423,13 @@ ligand datasets. First D3 target in the benchmark suite.
 | fibo_6-2 | 209 | 8 | 2.85° | 2.894 Å |
 | **cart_twostage_so3interp** | **~1250** | **4** | **1.99°** | **2.861 Å** |
 
-### Key findings (GDH)
-
-**Ranking holds on D3.** `cart_twostage_so3interp` wins on both metrics on both ligands — consistent
-with bgal and PKM2. The improvement is substantial: two-stage beats `cart_6-2_so3interp` by
-0.47–0.58° (lig_G2 breaks below 2° for the first time at 1.99°).
-
-**`cart_6-2_so3interp` is a reliable intermediate.** On lig_G1: 2.72° vs `cart_6-2` 2.88° (6%
-improvement at full speed). Consistently beats `cart_6-2` on all targets.
-
-**Fibo continues to underperform Cartesian.** Both ligands confirm the pattern from bgal and PKM2:
-fibo_6-2 (209 pts, fast) is worse than cart_6-2 (343 pts) on angular accuracy and FSC.
-
-**FSC on GDH is well-separated** (~0.17 Å between true_master and two-stage on lig_G1, ~0.06 Å on
-lig_G2), making FSC a useful discriminator unlike PKM2 where the spread was only 0.06 Å.
-
 ---
 
-## Combined cross-target summary
+## Advanced Topics
 
-Five real full-pipeline benchmarks across three molecules and two symmetries:
-bgal lig_00892 (D2, 57K, box=476px), bgal lig_00893 (D2, 42K, box=476px),
-pkm2 lig_00909 (D2, 254K, box=334px), gdh lig_G1 (D3, 277K, box=356px), gdh lig_G2 (D3, 120K, box=356px).
-All use the respective apo checkpoint and mask. PKM2 and GDH FSC values are masked.
+This section contains detailed analyses of specific features, ablation studies, and optimization work.
 
-| Config | bgal-892 med° | bgal-892 FSC | bgal-893 med° | bgal-893 FSC | pkm2-909 med° | pkm2-909 FSC | gdh-G1 med° | gdh-G1 FSC | gdh-G2 med° | gdh-G2 FSC |
-|--------|--------------|--------------|--------------|--------------|--------------|--------------|------------|------------|------------|------------|
-| true_master 6°/2° | 1.49° | 2.697 Å | 2.56° | 3.082 Å | 3.40° | 3.509 Å | 3.08° | 2.819 Å | 2.86° | 2.924 Å |
-| cart_6-2 | 1.47° | 2.667 Å | 2.49° | 2.967 Å | 3.37° | 3.493 Å | 2.88° | 2.729 Å | 2.65° | 2.890 Å |
-| cart_6-2_so3interp | 1.13° | 2.581 Å | 2.25° | 2.926 Å | 3.17° | 3.485 Å | 2.72° | 2.708 Å | 2.46° | 2.906 Å |
-| fibo 6°/2° | 1.62° | 2.637 Å | 2.69° | 3.062 Å | 3.95° | 3.452 Å | 2.96° | 2.770 Å | 2.85° | 2.894 Å |
-| **cart_twostage_so3interp** | **0.98°** | **2.574 Å** | **2.08°** | **2.898 Å** | **2.89°** | **3.485 Å** | **2.14°** | **2.645 Å** | **1.99°** | **2.861 Å** |
-
-**Summary:**
-- Two-stage + SO(3) interp is the best on angular accuracy and FSC on every target tested.
-- `cart_6-2_so3interp` (single-stage + SO3) is a consistent intermediate — 6–19% over `cart_6-2` at zero throughput cost.
-- Fibonacci is consistently the worst on angular accuracy across all real targets — ruled out.
-- PKM2 FSC spread is small (~0.06 Å); angular accuracy is the more reliable discriminator there.
-- GDH (D3) confirms D2 pattern: two-stage wins clearly, lig_G2 breaks below 2° (1.99°).
-- Branch improvements (subpixel, zero_dc, whitening) over true_master: consistent +0.02–0.23° angular improvement.
-
----
-
-## Normalization experiments (Phase 5 — single-stage correlation quality)
+### Normalization experiments (Phase 5 — single-stage correlation quality)
 
 **Goal:** Close the gap between `cart_6-2_so3interp` (1.13°/2.581 Å on bgal) and
 `cart_twostage_so3interp` (0.98°/2.574 Å) by improving the correlation quality in the
@@ -862,7 +440,7 @@ and 2 symmetries. All configs build on `cart_6-2_so3interp` as baseline
 Script: `benchmarks/run_normalization.sh` (bgal+pkm2, SLURM job 2847) +
 `benchmarks/run_normalization_gdh.sh` (gdh lig_G1+G2, SLURM job 2853).
 
-### Experiments
+#### Experiments
 
 | Label | Description | Key flag(s) |
 |-------|-------------|-------------|
@@ -876,7 +454,7 @@ Script: `benchmarks/run_normalization.sh` (bgal+pkm2, SLURM job 2847) +
 | `AB_noise_psd_perp` | A + B combined | `noise_psd_whitening=True spectral_whitening=False per_particle_spectral_norm=True` |
 | `AC_noise_psd_wiener` | A + C combined | `noise_psd_whitening=True spectral_whitening=False ctf_wiener=True ctf_wiener_epsilon=0.1` |
 
-### Results — bgal lig_00892 (~57K particles, D2, box=476px)
+#### Results — bgal lig_00892 (~57K particles, D2, box=476px)
 
 Baseline (`cart_6-2_so3interp`): **1.13° / 2.581 Å**
 
@@ -892,7 +470,7 @@ Baseline (`cart_6-2_so3interp`): **1.13° / 2.581 Å**
 | AB_noise_psd_perp | **1.11°** | 2.559 Å | **−0.02°** ✓ | −0.022 Å |
 | AC_noise_psd_wiener | 1.26° | 2.626 Å | +0.13° ✗ | +0.045 Å ✗ |
 
-### Results — PKM2 lig_00909 (~254K particles, D2, box=334px)
+#### Results — PKM2 lig_00909 (~254K particles, D2, box=334px)
 
 Baseline (`cart_6-2_so3interp`): **3.17° / 3.485 Å**
 
@@ -908,7 +486,7 @@ Baseline (`cart_6-2_so3interp`): **3.17° / 3.485 Å**
 | AB_noise_psd_perp | **3.08°** | 3.438 Å | **−0.09°** ✓ | −0.047 Å |
 | AC_noise_psd_wiener | 3.55° | 3.481 Å | +0.38° ✗ | −0.004 Å |
 
-### Results — GDH lig_G1 (~277K particles, D3, box=356px)
+#### Results — GDH lig_G1 (~277K particles, D3, box=356px)
 
 Baseline (`cart_6-2_so3interp`): **2.72° / 2.708 Å**
 
@@ -924,7 +502,7 @@ Baseline (`cart_6-2_so3interp`): **2.72° / 2.708 Å**
 | AB_noise_psd_perp | **2.72°** | 2.761 Å | 0.00° | +0.053 Å ✗ |
 | AC_noise_psd_wiener | 2.94° | 2.765 Å | +0.22° ✗ | +0.057 Å ✗ |
 
-### Results — GDH lig_G2 (~120K particles, D3, box=356px)
+#### Results — GDH lig_G2 (~120K particles, D3, box=356px)
 
 Baseline (`cart_6-2_so3interp`): **2.46° / 2.906 Å**
 
@@ -940,7 +518,7 @@ Baseline (`cart_6-2_so3interp`): **2.46° / 2.906 Å**
 | AB_noise_psd_perp | **2.51°** | **2.861 Å** | +0.05° | **−0.045 Å** ✓ |
 | AC_noise_psd_wiener | 2.73° | 2.899 Å | +0.27° ✗ | −0.007 Å |
 
-### Key findings (normalization experiments)
+#### Key findings (normalization experiments)
 
 **`A_noise_psd` (noise-PSD matched filter, SW off) is the most consistent winner.** Best or
 tied-best angular accuracy on every target; best FSC on PKM2 (−0.053 Å) and GDH lig_G1
@@ -977,40 +555,7 @@ a fundamentally different bottleneck than correlation quality.
 - `A_noise_psd_sw` (both on) is worth trying on bgal-like targets where FSC is the primary metric and the reference volume is well-matched to the data.
 - All other normalization flags: not recommended as defaults.
 
-### Implementation — Change #8a: noise-PSD matched filter
-
-**Files:** `projMatcher.py` (`_preprocess_particles_to_F`, `correlateF`, `__init__`, `align_star`),
-`projmatching_config.py` (flags `noise_psd_whitening`, `noise_psd_warmup_batches`).
-
-**How it works:**
-
-1. **Background extraction:** `background = img × (1 − rmask)` — zeros the protein interior,
-   retains only the ring outside the circular mask where no structural signal is present.
-
-2. **FFT of background:** `fbackground = FFT(background)`, shape `(B, H, W//2+1)`. The amplitude
-   spectrum captures σ_noise(freq): the noise amplitude at each Fourier bin, already modulated by
-   the CTF (noise passes through the same optics as signal). This is exactly the noise model RELION's
-   likelihood framework uses.
-
-3. **Warm-up accumulation** (same logic as `whitening_warmup_batches`): over first
-   `noise_psd_warmup_batches=8` batches, accumulate batch-mean amplitude `bg_amp.abs().mean(dim=0)`.
-   After each batch: `noise_psd_map = 1 / (running_avg + eps)`. Averaging over 8 batches cancels
-   per-defocus CTF oscillations across defocus groups.
-
-4. **Symmetric application (matched filter):**
-   - Particles (in `_preprocess_particles_to_F`): `fparts *= noise_psd_map`
-   - Projections (in `correlateF`, as `whitening_filter`): `fprojs *= noise_psd_map`
-   - Total CC weight: `(fpart × noise_psd) × conj(fproj × noise_psd) ∝ 1/σ²_noise(freq)` —
-     the optimal matched filter (noise-power-weighted cross-correlation).
-
-**Contrast with `spectral_whitening` (#2b):** SW estimates amplitude from particle data *inside* the
-mask (signal-based, not noise-based), applied asymmetrically to projections only (→ `1/σ` weight
-instead of `1/σ²`). Noise-PSD whitening uses the background ring (noise-based, symmetric → `1/σ²`).
-This is why noise-PSD works on all targets while SW showed negligible effect in the ablation.
-
----
-
-## Ablation study — 4-factor analysis on bgal lig_00892 + PKM2 lig_00909
+### Ablation study — 4-factor analysis on bgal lig_00892 + PKM2 lig_00909
 
 Factors: **SO3** = SO(3) orientation interpolation (`use_so3_interpolation`),
 **SPS** = sub-pixel shifts (`use_subpixel_shifts`), **SW** = spectral whitening (`spectral_whitening`),
@@ -1020,7 +565,7 @@ Base `abl_base` = all 4 ON (= `cart_6-2 + SO(3) interp`). Rows already done in p
 are included for completeness (`abl_no_so3` = `cart_6-2`; `true_master` = all OFF; bgal `abl_base`
 = `cart_6-2_so3interp`). Script: `benchmarks/run_ablation.sh`, submitted via SLURM gpu-priority.
 
-### bgal lig_00892 (~57K particles, D2, box=476px)
+#### bgal lig_00892 (~57K particles, D2, box=476px)
 
 | Label | SO3 | SPS | SW | ZD | med° | FSC |
 |-------|-----|-----|----|----|------|-----|
@@ -1037,7 +582,7 @@ are included for completeness (`abl_no_so3` = `cart_6-2`; `true_master` = all OF
 | `abl_no_sps_zd` | T | F | T | F | **1.13°** | 2.657 Å |
 | `abl_no_sw_zd` | T | T | F | F | 1.16° | 2.590 Å |
 
-### PKM2 lig_00909 (~254K particles, D2, box=334px)
+#### PKM2 lig_00909 (~254K particles, D2, box=334px)
 
 | Label | SO3 | SPS | SW | ZD | med° | FSC |
 |-------|-----|-----|----|----|------|-----|
@@ -1054,7 +599,7 @@ are included for completeness (`abl_no_so3` = `cart_6-2`; `true_master` = all OF
 | `abl_no_sps_zd` | T | F | T | F | **3.00°** | 3.480 Å |
 | `abl_no_sw_zd` | T | T | F | F | 3.03° | **3.411 Å** |
 
-### Key findings
+#### Key findings
 
 **SO3 is the dominant factor for angular accuracy — on bgal.** Removing it increases median from
 1.13° to 1.47° (+0.34°, i.e. 30% worse). The SO3=T/F boundary is sharp: all 6 SO3=T configs
@@ -1084,14 +629,52 @@ SO3 interpolation. If FSC matters and you drop any flag, drop SW or ZD rather th
 keep all 4 ON — the collective overhead is zero (SO3 adds only 6 extra projections per particle on
 the fine winner; SPS/SW/ZD are negligible compute).
 
----
+### SO(3) Interpolation Optimization (May 2026)
 
-## Wall-clock timing
+#### Background
+The initial SO(3) parabolic sub-step interpolation implementation (Change #7) used an on-the-fly
+approach that generated 6 axis-aligned neighbor projections per particle, adding overhead of
+**6 extra projections per particle** for every refinement.
+
+#### Optimization
+Restored the original O(1) table-based approach using precomputed neighbor index tables:
+- **Before:** 6 projections per particle (e.g., 1000 particles → 6000 extra projections)
+- **After:** 0 extra projections (neighbor lookup via precomputed index table)
+- Works for both single-stage and two-stage search
+- Fine grid changed from Fibonacci to Cartesian (enables table lookup; benchmarks showed Cartesian
+  consistently better anyway)
+
+#### Code Changes
+- Restored `_precompute_so3_interp_neighbors()`: builds (nDelta, 6) neighbor index table at init
+- Restored `_so3_interpolate_euler_winner()`: parabolic refinement via O(1) table lookup
+- Removed `_extract_cc_peaks_so3interp()`: slow on-the-fly 6-projection version
+- Changed `_get_fine_delta_rotmats()`: Fibonacci → Cartesian grid for two-stage fine search
+- Updated both forward paths to use fast table-based interpolation
+
+#### Validation Results
+
+**Regression tests (1000 particles):**
+| Target | Config | Median Δθ | Expected | Status |
+|--------|--------|-----------|----------|--------|
+| bgal lig_00892 | cart_twostage_so3interp | 1.23° | 0.8-1.5° | ✅ PASS |
+| PKM2 lig_00909 | cart_twostage_so3interp | 3.06° | ~3.17° | ✅ PASS |
+| GDH lig_G1 | cart_twostage_so3interp | 1.65° | 2.0-3.0° | ✅ PASS |
+
+**Full-size validation (PKM2 lig_00909, ~254K particles):**
+| Config | Median Δθ | Baseline | FSC@0.143 | Baseline | Status |
+|--------|-----------|----------|-----------|----------|--------|
+| cart_6-2 | 3.11° | 3.17° | 3.443 Å | 3.485 Å | ✅ PASS |
+| cart_twostage_so3interp | 2.85° | 2.89° | 3.452 Å | 3.485 Å | ✅ PASS |
+
+**Conclusion:** Zero accuracy regression with significant performance improvement (eliminated 6
+projections/particle overhead). Both configurations match documented baselines within ±0.05°/±0.05 Å.
+
+### Wall-clock timing
 
 Hardware: NVIDIA RTX 6000 Ada (49 GB). 3 runs, 10,000 particles each. Per-500 = raw ÷ 20.
 p/min = 600,000 ÷ raw_seconds.
 
-### Particles-per-minute summary
+#### Particles-per-minute summary
 
 | Config | Grid | Pts | Best bs | DS2 p/min | DS3 p/min |
 |--------|------|-----|---------|----------|----------|
@@ -1108,7 +691,7 @@ p/min = 600,000 ÷ raw_seconds.
 
 †DS3 4/1 highly variable across runs (IO jitter); ~700 p/min is conservative.
 
-### Master branch baseline (Cartesian 6°/2°, batch_size=11)
+#### Master branch baseline (Cartesian 6°/2°, batch_size=11)
 
 | Dataset | Run 1 | Run 2 | Run 3 | Median (10K) | Per 500 |
 |---------|-------|-------|-------|--------------|---------|
@@ -1117,7 +700,7 @@ p/min = 600,000 ÷ raw_seconds.
 
 *DS3 Run 1 outlier (GPU contention).
 
-### Branch optimal batch-size configs (improve_local_refinement, GPU 0)
+#### Branch optimal batch-size configs (improve_local_refinement, GPU 0)
 
 | Config | Dataset | Run 1 | Run 2 | Run 3 | Avg (10K) | Per 500 | p/min | vs sub-opt bs |
 |--------|---------|-------|-------|-------|-----------|---------|-------|--------------|
@@ -1138,7 +721,7 @@ p/min = 600,000 ÷ raw_seconds.
 - fibo 4°/2° (63 pts): ~9760 p/min DS2 — fastest branch config.
 - Two-stage (664s/10K DS2) is faster AND more accurate than fibo 6°/1° (863s/10K). 6°/1° dominated.
 
-### Speed vs accuracy comparison (optimal batch sizes)
+#### Speed vs accuracy comparison (optimal batch sizes)
 
 | Config | Dataset | Per 500 | Median err | P90 err | vs master |
 |--------|---------|---------|-----------|---------|-----------|
@@ -1157,9 +740,7 @@ p/min = 600,000 ÷ raw_seconds.
 **Key finding — no regression:** branch fibo 6°/2° is 1.5× *faster* than master (209 vs 343 pts)
 and more accurate. The accuracy improvements cost only when using denser grids or two-stage search.
 
----
-
-## Batch-size limits
+### Batch-size limits
 
 **Memory model (PyTorch 2.8 + Triton 3.4, RTX 6000 Ada 49–51 GB, box=336):**
 
@@ -1195,9 +776,558 @@ limits were re-evaluated. Re-timing at higher bs for sparse grids is pending.
 
 ---
 
-## Benchmark tooling
+## Appendix A: Synthetic Experiments (Historical, Non-Representative)
 
-### `tests/benchmarks/perturb_poses.py`
+**NOTE:** These Phase 1 synthetic experiments were proven non-representative. See the [Research progression](#research-progression) section (lines 16-21 of main doc) for why these results do not predict real full-pipeline performance. The D2 recommendation from Phase 1 (4°/0.7° single-stage beats two-stage on D2) **reversed** in Phase 2: two-stage won on both bgal ligand datasets despite them being D2. The perturbed-pose paradigm does not capture the real NN error distribution (correlated errors, model-dependent failure modes) and the interaction with FSC.
+
+**No further synthetic experiments will be run.** All future configuration decisions are based on real full-pipeline benchmarks.
+
+### Why synthetic experiments failed
+
+The perturbed-pose paradigm applies a uniform SO(3) ball of radius 5° to known-good RELION poses, creating an artificial error distribution that is:
+- **Isotropic:** uniformly distributed in all orientations
+- **Uncorrelated:** each particle's error is independent
+- **Known magnitude:** precisely 5° ball with mean ~3.75°, median ~3.97°
+
+Real NN errors are fundamentally different:
+- **Correlated:** model may systematically fail on certain views
+- **Non-uniform:** errors cluster near symmetry axes or preferred orientations
+- **Unknown distribution:** magnitude and orientation depend on training data quality, model capacity, and input SNR
+
+The synthetic benchmark cannot capture how the NN's actual error distribution interacts with:
+- Grid geometry (Cartesian vs Fibonacci)
+- Symmetry handling (D2 domain clustering in two-stage K=5)
+- FSC sensitivity (real reconstructions have resolution-dependent noise characteristics)
+
+**Conclusion:** The perturbed-pose paradigm was useful for rapid iteration during algorithm development but proved to be a poor predictor of real full-pipeline performance. The bgal/PKM2/GDH benchmarks are the only reliable source of truth.
+
+### Datasets (DS1/DS2/DS3 — for historical reference only)
+
+| ID | Source | Particles | Pixel size (Å/px) | Box | Reference volume |
+|----|--------|-----------|-------------------|-----|-----------------|
+| DS2 | EMPIAR-10166 frealign_stack (real, C1) | 238631 | 1.27 | 336 | `EMPIAR-10166/data/reconstruct.mrc` |
+| DS3 | astex-5534 PKM2 Refine3D (real, D2) | 254070 | 0.995 | 334 | `astex-5534/Refine3D/001_after2DclsEval/run_class001.mrc` |
+| DS1 | EMPIAR-10166 projectionsSamePose (synthetic) | 238631 | 1.5 | 224 | — (particle images still copying) |
+
+#### Ground-truth and perturbed star files
+
+| File | Description |
+|------|-------------|
+| `tests/frealign_stack_relion3.star` | DS2 GT (RELION 3.1 format, optics+particles blocks) |
+| `tests/ds2_perturbed_5deg.star` | DS2 perturbed, pre-composition (R_δ @ R_true), seed=42 |
+| `tests/ds2_post_perturbed_5deg.star` | DS2 perturbed, post-composition (R_true @ R_δ), seed=42 |
+| `tests/ds3_perturbed_5deg.star` | DS3 perturbed, pre-composition, seed=42 |
+| `tests/ds3_post_perturbed_5deg.star` | DS3 perturbed, post-composition, seed=42 |
+| `tests/ds1_perturbed_5deg.star` | DS1 perturbed, pre-composition, seed=42 |
+
+**Note on frealign_stack.star format**: the original `EMPIAR-10166/data/frealign_stack.star` is RELION 3.0
+format (single pandas DataFrame, no optics block). The code's `n_first_particles` path assumes RELION 3.1
+format (dict with 'optics'/'particles' keys). A bug fix was applied to `projmatching/projmatching.py` line
+290 to handle both formats. Use `frealign_stack_relion3.star` for benchmarking to avoid format issues.
+
+### DS2/DS3 benchmark results (condensed)
+
+These experiments use artificially perturbed GT poses as input — the NN is not involved. They were useful for screening algorithm changes quickly but proved to be a poor predictor of real full-pipeline performance.
+
+```bash
+PYTHON=/home/rsanchez/app/miniconda3/envs/cryopares/bin/python
+BIN=/home/rsanchez/app/miniconda3/envs/cryopares/bin/cryopares_projmatching
+EMPIAR=/home/rsanchez/cryo/data/EMPIAR-download
+DATA=/home/rsanchez/cryo/data/cryopares
+
+# DS2 Scenario B — run projmatching on perturbed poses
+$BIN \
+    --reference_vol $EMPIAR/EMPIAR-10166/data/reconstruct.mrc \
+    --particles_star_fname $DATA/tests/ds2_perturbed_5deg.star \
+    --particles_dir $EMPIAR/EMPIAR-10166/data \
+    --out_fname $OUT \
+    --n_first_particles 500 --grid_distance_degs 6 --grid_step_degs 1 \
+    --batch_size 2 --gpu_id 1 \
+    --config projmatching.use_subpixel_shifts=True projmatching.zero_dc=True \
+             projmatching.spectral_whitening=True projmatching.whitening_warmup_batches=8 \
+             projmatching.fftfreq_min=0.0 projmatching.use_fibo_grid=True \
+             projmatching.rotation_composition=pre_multiply
+
+# GT comparison (post-hoc) — ALWAYS use compare_poses.py
+$PYTHON -m cryoPARES.scripts.compare_poses \
+    --starfile1 $OUT --starfile2 $DATA/tests/frealign_stack_relion3.star --sym C1
+```
+
+**Key results (condensed):**
+- Baseline (all flags off): DS2 1.64°, DS3 1.69°
+- With particle-adaptive whitening: DS2 1.33° (19% improvement), DS3 1.43° (17%)
+- Two-stage 6°/2°+1.5°/0.5° K=5: DS2 0.42° (3× better), DS3 1.35°
+- Fibonacci 4°/0.7° single-stage: DS3 1.24° (best for D2 in synthetic)
+
+**Why these results were misleading:**
+- Two-stage won on real bgal D2 datasets (0.98°/2.08°), contradicting the DS3 4°/0.7° recommendation
+- Fibonacci grid consistently worse on all real targets (bgal, PKM2, GDH)
+- The synthetic isotropic 5° perturbation does not match real NN error patterns
+
+See [Appendix C](#appendix-c-implementation-details-for-developers) for detailed synthetic benchmark tables and batch size constraints.
+
+---
+
+## Appendix B: Development Log (Historical)
+
+**NOTE:** This was a development tracking log, preserved for historical reference only. Many items are now obsolete or completed. See the main [Real Full-Pipeline Benchmark Results](#real-full-pipeline-benchmark-results) section for current status.
+
+### Completed
+
+- [x] DS3 Scenario B with two-stage K=10 — **ruled out**: 1.36°/3.50° vs K=5 1.35°/3.43°, at 77% more evals.
+- [x] DS3 Scen B 4°/0.5° single-stage — **done**: 1.22°/2.64° P90. 4°/0.7° confirmed as sweet spot.
+- [x] Master branch timing — DS2: 187s/10K (~9.4s/500), DS3: 200s/10K (~10s/500).
+- [x] Branch best-config timing — DS2 two-stage: 664s/10K; DS3 4°/0.7°: 808s/10K.
+- [x] Batch-size investigation — memory scales with bs only (N-independent). XBLOCK issue resolved.
+- [x] Re-measure branch timings with optimal batch sizes — dense grids 2.2–2.3× faster.
+- [x] Branch 4°/2° timing — DS2: ~61.5s/10K (~9760 p/min), DS3: ~73.5s/10K (~8160 p/min).
+- [x] DS2 Scenario A with Fibonacci grid 6°/1° — **0.00° median** ✓
+- [x] DS3 Scenario B with Fibonacci grid 4°/2° — **1.50°** ✓
+- [x] DS1 Scenarios A and B — **done** (0.00° / 0.22°)
+- [x] Full-pipeline benchmark on real β-gal data — **done** (see bgal section above)
+- [x] **Benchmark Change #7 (SO(3) interpolation) on bgal** — **done.** cart_6-2+SO3 interp:
+  lig_00892 1.47°→1.13° (23%), FSC 2.667→2.581 Å; lig_00893 2.49°→2.25° (10%), FSC 2.967→2.926 Å.
+  Beats two-stage on FSC for lig_00892 at full cart speed.
+- [x] **PKM2 full-pipeline benchmark** — **done.** two-stage+SO3 wins on angular accuracy (2.89° vs
+  3.37°); fibo confirmed worse on both D2 targets. FSC anomaly: cart_6-2 slightly better FSC on pkm2.
+  See combined table above.
+- [x] **Ablation study (4 factors × bgal lig_00892 + PKM2 lig_00909)** — **done.** SO3 is the
+  dominant angular factor (bgal: 1.13°→1.47° without it); SPS is the only factor with measurable
+  FSC effect (~0.07 Å). SW and ZD contribute negligibly. See ablation section above.
+- [x] **GDH full-pipeline benchmark (D3)** — **done.** cart_twostage_so3interp best on all metrics;
+  lig_G2 breaks below 2° (1.99°). Fibo again worst. Ranking confirmed on D3.
+- [x] **Normalization experiments (Phase 5, 9 configs × 4 targets)** — **done.** `A_noise_psd`
+  (noise-PSD matched filter) is the most consistent winner: best angular accuracy on every target,
+  best FSC on PKM2 (3.432 Å, −0.053 Å) and GDH-G1. `D_phase_10` permanently ruled out (severely
+  harmful). No single-stage normalization closes the gap to `cart_twostage_so3interp`.
+
+### Cancelled (synthetic experiments — not representative of real pipeline)
+
+- ~~DS3 Scenario B with Fibonacci grid 6°/1°~~ — not worth running; synthetic results don't predict real performance
+- ~~DS3 Scenario B with Fibonacci grid 4°/0.5°~~ — already showed diminishing returns vs 4°/0.7°; cancelled
+- ~~DS3 Scenario B with Fibonacci grid 4°/0.5°~~ — already showed diminishing returns; cancelled
+- ~~Apo self-test runs for bgal full-pipeline~~ — self-test (same-dataset) less informative than cross-dataset lig_00892/893
+
+### Active / next
+
+- [ ] **Measure NN error distribution on bgal before projmatching** (GPU needed, ~10 min):
+  ```bash
+  CUDA_VISIBLE_DEVICES=1 $BIN_DIR/cryopares_infer \
+    --particles_star_fname $STAR_LIG892 --particles_dir $DIR_LIG892 \
+    --checkpoint_dir $CKPT \
+    --results_dir /home/rsanchez/cryo/data/cryopares/benchmarks/bgal/lig_00892/nn_only \
+    --data_halfset allParticles --model_halfset half1 \
+    --reference_map $REF_LIG892 --batch_size 64 \
+    --skip_localrefinement --skip_reconstruction
+
+  # Compare NN predictions vs RELION GT (no GPU needed)
+  $COMPARE \
+    --starfile1 /home/rsanchez/cryo/data/cryopares/benchmarks/bgal/lig_00892/nn_only/*/predictions.star \
+    --starfile2 $STAR_LIG892 --sym D2
+  ```
+  Key question: if median NN error < 3°, the 6°/2° grid already finds the right cell and the 2°
+  quantization floor is the true bottleneck → SO(3) interpolation (Change #7) is the right fix.
+  If median > 4°, search radius is the bottleneck.
+
+- [ ] **cart_6-2 double-step + SO(3) interp (4° grid, 4°/2° = coarser, relies on SO3 for sub-step):**
+  Use `--grid_distance_degs 4 --grid_step_degs 4` (or similar larger step) + SO(3) interp to see
+  if interpolation can recover accuracy lost from a coarser grid at faster throughput.
+
+- [ ] Merge `improve_local_refinement` to master (benchmarks complete; integration tests + daemon
+  mode validation remain).
+
+---
+
+## Appendix C: Implementation Details (For Developers)
+
+This section contains the detailed implementation notes for all changes, grid point count tables, code snippets, and benchmarking tooling.
+
+### Datasets
+
+See [Appendix A](#appendix-a-synthetic-experiments-historical-non-representative) for DS1/DS2/DS3 dataset details.
+
+### Implemented changes — implementation details & lessons
+
+All changes are gated by config flags in `projmatching_config.py` with backward-compatible defaults.
+Key files: `projMatcher.py`, `projmatchingUtils/fourierOperations.py`, `projmatching_config.py`.
+
+#### Change #1 — Sub-pixel shift refinement (`use_subpixel_shifts`, default `True`)
+
+**File:** `projMatcher.py::_extract_ccor_max`
+
+The integer CC peak location was found with `argmax` and stored as `int64`. This created a shift
+quantization floor of ~1 pixel ≈ 1–3° depending on pixel size and particle radius.
+
+**Fix:** 3-point parabolic interpolation on both row and column axes after the integer peak:
+```
+delta = (f[p-1] - f[p+1]) / (2*f[p-1] - 4*f[p] + 2*f[p+1])
+subpixel_pos = p + delta
+```
+`delta` is clamped to the border guard so boundary peaks get `delta=0`. The `pixelShiftsXY`
+tensor type changed from `int64` → `float32`. Downstream conversion in `forward()` already called
+`.float()`, so no other changes needed.
+
+**Bug encountered during implementation:** First attempt used `expand(*corrs_crop.shape[:-2], 1, W)`
+which broke `torch.compile(fullgraph=True)` because dynamic shape unpacking is not supported by
+`torch.compile`. Rewrote using explicit batch indexing: `n_idx = torch.arange(N)` followed by
+`corrs_crop[n_idx, safe_i, int_j]` — fully static shapes, compatible with `fullgraph=True`.
+
+**Lesson:** Integer-pixel CC peak location creates a quantization floor of 1–3° depending on pixel size and
+particle radius. Parabolic 3-point interpolation on both axes after the integer peak resolves this.
+The parabolic approximation is valid because the CC peak is smooth and band-limited.
+
+TODO: think if makes sense to cache n_idx = torch.arange(N)
+
+#### Change #2a — Zero DC component (`zero_dc`, default `True`)
+
+**File:** `fourierOperations.py::correlate_dft_2d`
+
+The DC bin (row `H//2`, col `0` in fftshifted rfft layout) represents the mean pixel value.
+Correlating it adds a global-offset bias term that is orientation-independent.
+
+**Fix:** Zero the DC bin in both `parts` and `projs` before the cross-product:
+```python
+dc_row = parts.shape[-2] // 2
+parts[..., dc_row, 0] = 0
+projs[..., dc_row, 0] = 0
+```
+
+#### Change #2b — Particle-adaptive spectral whitening (`spectral_whitening`, default `True`)
+
+**File:** `projMatcher.py::forward`, `fourierOperations.py::correlate_dft_2d`
+
+The raw CC is dominated by low frequencies (power spectrum ∝ 1/f²–1/f⁴). Orientation-
+discriminating signal at higher frequencies contributes negligible weight.
+
+**Design evolution (three failed attempts, one success):**
+
+1. *Reference-based whitening v1* (`1/sqrt(amp_3d(r))` from reference volume spectrum):
+   Failed on DS3 — RELION's LP-filtered reference has near-zero amplitude beyond 6Å cutoff →
+   whitening factor explodes to **6.99×** at Nyquist (vs 1.33× for DS2). DS3 regression: 2.0°.
+
+2. *Reference-based whitening v2* (masked at `fftfreq_max`): still 2.0° regression on DS3.
+   The amplitude spectrum from the reference volume does not match the actual particle spectrum
+   per-dataset (different CTF envelopes, noise floors, pixel sizes).
+
+3. *Reference-based v3* (apply to projections only, not particles): still 2.0° regression on DS3.
+
+4. **Particle-adaptive whitening (final):** estimate `1/amp` from the actual particle DFTs.
+   Applied to projections only (whitening both sides gives `1/amp²` weighting that amplifies
+   particle noise; projections-only gives `1/amp` — more robust). Absorbs per-dataset CTF
+   envelope, detector noise, and pixel-size effects automatically.
+
+**Implementation:**
+- `forward()`: lazy warm-up loop; accumulates `fparts.abs().mean(dim=0)` over first
+  `whitening_warmup_batches` batches (default 8). Whitening map is recomputed after each
+  batch and frozen once warm-up completes. Reset at each `align_star()` call.
+- `correlate_dft_2d`: accepts `whitening_filter` tensor; `projs = projs * whitening_filter`.
+- `align_star()`: resets `_whitening_amp_sum = None`, `_whitening_batches_seen = 0`.
+
+**Why 8 warm-up batches:** more diverse defocus conditions are averaged → CTF oscillations cancel →
+smoother amplitude profile. Analogous to RELION's per-optics-group noise estimation averaged
+over many particles per group. Single-batch was sufficient for DS2 but not DS3.
+
+**Lesson — particle-adaptive, not reference-based:**
+Three attempts at reference-based whitening failed on DS3: RELION's LP-filtered reference has
+near-zero amplitude beyond the resolution cutoff, causing the whitening factor to explode to 6.99×
+at Nyquist. The reference volume spectrum does not match the actual particle spectrum — they differ
+in CTF envelope, noise floor, and pixel size. Particle-adaptive whitening absorbs these differences
+automatically and works across datasets.
+
+Apply whitening to projections only, not particles: whitening both sides gives `1/amp²` which
+over-amplifies particle noise. Using 8 warm-up batches (vs 1) matters for DS3 where defocus
+diversity cancels CTF oscillations in the amplitude estimate.
+
+TODO: Think how to implement this for on-the-fly friendly runs — may need to keep updating stats
+every few 1000s of particles in case of microscope drift, but this could be computationally
+inefficient and we care about performance.
+
+#### Change #5 — Frequency band mask (`fftfreq_min`, default `0.0`)
+
+**File:** `fourierOperations.py::_mask_for_dft_2d`, `projMatcher.py::_store_reference_vol`
+
+Extended `_mask_for_dft_2d` with a `min_freq_pixels` parameter for a high-pass ring.
+`band_mask` is pre-computed at init and registered as a buffer. Applied to `fparts` in `forward()`
+when `fftfreq_min > 0`.
+
+**Result:** Harmful at `fftfreq_min=0.05` — P90 worsened from 3.16° → 7.33° (DS2 Scen B).
+Zero DC (#2a) handles the DC bias. A high-pass ring removes low-frequency structural information
+that is still orientation-discriminating above DC. **Default kept at 0.0 (disabled).**
+
+#### Change #3 — Rotation composition (`rotation_composition`, default `"euler_add"`)
+
+**File:** `projMatcher.py::forward`, `projmatching_config.py`
+
+The original Euler angle addition `delta + euler` is an approximation to rotation composition and
+is inaccurate near the tilt poles (when β ≈ 0, α and γ are degenerate). Implemented exact SO(3)
+composition via rotation matrices with two orderings:
+
+- `"pre_multiply"`: `R_total = R_delta @ R_current` (delta in lab frame)
+- `"post_multiply"`: `R_total = R_current @ R_delta` (delta in body/particle frame)
+
+**Key finding with Cartesian grid:** Both modes are **significantly worse** than `euler_add`
+(2.27–2.42° vs 1.33°). Root cause: the Cartesian Euler grid is designed for Euler-space arithmetic.
+Converted to rotation matrices and composed, the coverage pattern changes unfavorably — the
+near-identity cluster that the Cartesian grid accumulates (7 identical rot/psi values per
+tilt=0 row) vanishes when converted to matrices, leaving sparser effective search around the
+correct pose.
+
+**Cartesian grid rotation composition results (DS2 Scen B vs GT, n=2000):**
+
+| Mode | Median (°) | P75 (°) | P90 (°) |
+|------|-----------|---------|---------|
+| euler_add (baseline) | 1.33 | 1.95 | 2.75 |
+| pre_multiply (Cartesian) | 2.42 | 3.61 | 4.81 |
+| post_multiply (Cartesian) | 2.27 | 3.35 | 4.32 |
+
+**Lesson:** Euler angle addition (`delta + euler`) works well with the Cartesian Euler grid because
+the grid is designed for Euler-space arithmetic. Rotation matrix composition is only compatible with
+the Fibonacci grid, which is specifically designed for it.
+
+#### Change #4 — Fibonacci ω-ball grid (`use_fibo_grid`, default `False`)
+
+**File:** `projMatcher.py::_get_so3_delta_rotmats`, `projmatching_config.py`
+
+Replaced the Cartesian Euler grid with a uniform geodesic ω-ball grid (`so3_near_identity_by_spacing`
+with `use_small_aprox=True`). This grid samples rotation vectors in an SO(3) ball of radius
+`grid_distance_degs` with approximately uniform coverage — no Euler angle singularities,
+no polar clustering.
+
+**Grid point counts:**
+
+| Settings | Cartesian | Fibonacci |
+|----------|-----------|-----------|
+| 6°/2° | 343 (7³) | 208 + 1 identity = 209 |
+| 6°/1° | 2197 (13³) | 1637 + 1 identity = 1638 |
+
+At 6°/2°: Fibonacci uses 39% fewer points with better uniform coverage.
+At 6°/1°: Fibonacci uses 25% fewer points (1638 vs 2197).
+
+**Critical bug fixed — missing identity:** The ω-ball shell centres start at ~3.3° geodesic
+distance. Without explicitly adding identity to the grid, Scenario A (where ground truth poses
+are fed as input) always returns the wrong pose with ≥3.3° error — a guaranteed regression.
+Fix: prepend `torch.eye(3)` to the cached rotation matrix tensor in `_get_so3_delta_rotmats()`.
+
+**Implementation:**
+- New `_get_so3_delta_rotmats(device)` method on `ProjectionMatcher`: returns cached `(nDelta, 3, 3)`
+  delta rotation matrices. Uses Fibonacci when `use_fibo_grid=True`, otherwise converts the
+  Cartesian Euler grid to rotation matrices.
+- `rotation_composition` auto-upgrades from `"euler_add"` to `"pre_multiply"` when
+  `use_fibo_grid=True` (prints a message; euler_add is meaningless for the rotation-matrix path).
+
+**Composition mode experiment (pre vs post) — DS2, n=500, 6°/1°:**
+
+| Perturbation \ Search | pre_multiply | post_multiply |
+|-----------------------|-------------|--------------|
+| pre (R_δ @ R_true) | Median **0.89°**, <5°: 98.8% | Median **0.85°**, <5°: 98.0% |
+| post (R_true @ R_δ) | Median **0.84°**, <5°: 98.4% | Median **0.85°**, <5°: 98.4% |
+
+**Lesson — pre_multiply ≡ post_multiply:**
+For an isotropic SO(3) ball, `{R_δ @ R_est}` and `{R_est @ R_δ}` cover the same geodesic ball
+and give identical recovery accuracy (~0.85° for both). Similarly, perturbation composition
+order has no effect on recovery accuracy. The user hypothesis that only one ordering is
+geometrically correct is disproved.
+
+The Fibonacci grid eliminates Euler polar degeneracy that was harming DS3 (D2 symmetry, particles
+near symmetry axes): P90 dropped from 4.85°→3.52°, a standout improvement.
+
+TODO: Check if we are following the definition of the grid distance — it is supposed to have a
+grid that goes from -6° to +6° (check stats for Cartesian and Fibonacci).
+
+#### Change #6 — Two-stage coarse-to-fine search (`use_two_stage_search`, default `False`)
+
+**Config flags:**
+```
+use_two_stage_search=True, fine_grid_distance_degs=1.5, fine_grid_step_degs=0.5, fine_top_k=5
+```
+
+**Actual Fibonacci grid point counts** (measured, formula: `so3_grid_near_identity_fibo(use_small_aprox=True)`):
+
+| Config | Pts | Notes |
+|--------|-----|-------|
+| 6°/2° | 209 | coarse pass |
+| 6°/1° | 1638 | strong single-stage baseline |
+| 4°/0.5° | 3875 | strong single-stage baseline (covers 4° initial error) |
+| 4°/0.7° | 1486 | sweet spot single-stage for D2 |
+| 4°/1° | 488 | cheaper single-stage |
+| 1.5°/0.5° | 209 | fine pass (same count as 6°/2°!) |
+| 1.0°/0.5° | 63 | fine pass (aggressive) |
+
+> **Correction:** "2°/0.5° → ~65 pts" was wrong — 2°/0.5° gives ~488 pts.
+> The 63-pt target is hit by **1°/0.5°**; the preferred fine grid is **1.5°/0.5° (209 pts)**.
+
+**Two-stage totals** (K=5 candidates from coarse):
+
+| Coarse + Fine | Total | vs 6°/1° single |
+|---------------|-------|-----------------|
+| 6°/2° + 1.5°/0.5° | 209 + 5×209 = **1249** | 24% fewer pts |
+| 6°/2° + 1.0°/0.5° | 209 + 5×63  = **524**  | 68% fewer pts |
+
+**Implementation details:**
+- `_preprocess_particles_to_F()`: particle FFT + whitening warm-up, called once per `forward()` call
+- `_expand_rotmats()`: SO(3) composition of (B, K, 3, 3) × (nDelta, 3, 3) → (B, K*nDelta, 3, 3)
+- `_do_search()`: project + CTF + correlate + topk, reusable for coarse and fine passes
+- `_forward_two_stage()`: orchestrates both passes, confidence from coarse distribution
+- `euler_add` auto-switched to `pre_multiply` when `use_two_stage_search=True`
+
+**Results (n=500 except 6°/2° n=2000, Scen B vs GT):**
+
+| Config | Pts | DS1 med | DS2 med | DS2 P75 | DS2 P90 | DS3 med | DS3 P75 | DS3 P90 | Time/500 |
+|--------|-----|--------|--------|---------|---------|--------|---------|---------|---------|
+| **master** Cartesian 6°/2° | 343 | — | 1.64° | — | 3.79° | 1.69° | — | 4.06° | **~9.4s** |
+| fibo 4°/2° (bs=75) | 63 | — | 1.39° | — | — | 1.50° | — | — | **~3.1s** |
+| fibo 6°/2° (bs=32) | 209 | — | 1.31° | 1.88° | 2.62° | 1.31° | 1.98° | 3.52° | **~6.2s** |
+| fibo 4°/1° (bs=16) | 488 | — | 0.97° | 1.53° | 2.13° | 1.35° | 2.03° | 2.81° | **~13.4s** |
+| fibo 4°/0.7° (bs=5) | 1486 | — | 0.87° | 1.43° | 2.23° | **1.24°** | **1.93°** | **2.74°** | **~40.4s** |
+| fibo 6°/1° (bs=8) | 1638 | — | 0.89° | 1.62° | 2.67° | **1.35°** | — | — | **~43.2s** |
+| **two-stage 6°/2°+1.5°/0.5° K=5 (bs=7)** | **1249** | **0.22°** | **0.42°** | **1.25°** | 2.47° | 1.35° | 2.35° | 3.43° | **~33.2s** |
+
+Timing measured on 10K particles, 3 runs each, RTX 6000 Ada 49 GB. Per-500 = raw ÷ 20.
+Master baseline: DS2 187s/10K, DS3 200s/10K (Cartesian 6°/2°, batch_size=11).
+Note: 6°/1° (1638 pts) is slower than two-stage (1249 pts) yet less accurate on both datasets — dominated.
+4°/0.7° wins on DS3 because it concentrates coverage where it matters (≤4° initial error, 0.7° step)
+rather than wasting evaluations from 4°–6°.
+
+Two-stage gives **4× better median** on DS2 (C1) vs master, 3.6× slower.
+DS3 (D2): 4°/0.7° single-stage is better — coarse K=5 candidates can cluster in one D2 domain,
+missing poses in the other 3. DS1 (synthetic): near-perfect 0.22° recovery.
+
+**Scenario A validation (GT input → expect ~0°):**
+- DS1: 0.00° ✓ (requires CTF-corrected reference volume)
+- DS2: 0.00° ✓
+- DS3: 1.41° — fine search (0.5° step) finds a pose 1.41° from RELION GT that correlates marginally
+  better against the reference. Not a bug; single-stage still returns 0.00° ✓.
+
+**DS3 Scen B K=10 result:** Median 1.36°, P75 2.29°, P90 3.50° — identical to K=5 (1.35°/2.35°/3.43°)
+at 77% more evaluations (2299 vs 1249 pts). The D2 gap is geometric (symmetry-axis ambiguity),
+not a candidate-count issue. K=10 ruled out.
+
+**DS3 Scen B 4°/0.5° result:** Median 1.22°, P75 1.89°, P90 2.64° in ~2m (batch_size=1) vs 4°/0.7°:
+1.24°/1.93°/2.74° in ~52s (batch_size=2). Only 0.02° median gain for 2.3× wall-clock cost.
+**4°/0.7° is the sweet spot for D2 — going finer hits diminishing returns.**
+
+#### Change #8a: noise-PSD matched filter
+
+**Files:** `projMatcher.py` (`_preprocess_particles_to_F`, `correlateF`, `__init__`, `align_star`),
+`projmatching_config.py` (flags `noise_psd_whitening`, `noise_psd_warmup_batches`).
+
+**How it works:**
+
+1. **Background extraction:** `background = img × (1 − rmask)` — zeros the protein interior,
+   retains only the ring outside the circular mask where no structural signal is present.
+
+2. **FFT of background:** `fbackground = FFT(background)`, shape `(B, H, W//2+1)`. The amplitude
+   spectrum captures σ_noise(freq): the noise amplitude at each Fourier bin, already modulated by
+   the CTF (noise passes through the same optics as signal). This is exactly the noise model RELION's
+   likelihood framework uses.
+
+3. **Warm-up accumulation** (same logic as `whitening_warmup_batches`): over first
+   `noise_psd_warmup_batches=8` batches, accumulate batch-mean amplitude `bg_amp.abs().mean(dim=0)`.
+   After each batch: `noise_psd_map = 1 / (running_avg + eps)`. Averaging over 8 batches cancels
+   per-defocus CTF oscillations across defocus groups.
+
+4. **Symmetric application (matched filter):**
+   - Particles (in `_preprocess_particles_to_F`): `fparts *= noise_psd_map`
+   - Projections (in `correlateF`, as `whitening_filter`): `fprojs *= noise_psd_map`
+   - Total CC weight: `(fpart × noise_psd) × conj(fproj × noise_psd) ∝ 1/σ²_noise(freq)` —
+     the optimal matched filter (noise-power-weighted cross-correlation).
+
+**Contrast with `spectral_whitening` (#2b):** SW estimates amplitude from particle data *inside* the
+mask (signal-based, not noise-based), applied asymmetrically to projections only (→ `1/σ` weight
+instead of `1/σ²`). Noise-PSD whitening uses the background ring (noise-based, symmetric → `1/σ²`).
+This is why noise-PSD works on all targets while SW showed negligible effect in the ablation.
+
+### Batch size constraint (XBLOCK Triton error)
+
+The compiled projection kernel materialises a `(batch_size × n_rotations × n_valid_coords × 9)` float32
+buffer. With `dynamic=True`, Triton uses a worst-case size hint of 2^36, triggering:
+```
+AssertionError: 'XBLOCK' too large. Maximum: 4096. Actual: 8192.
+```
+**Fix:** compile with `dynamic=False` (applied in `extract_central_slices_as_real.py`). With
+`dynamic=False`, Triton receives the concrete tensor shape and selects an appropriate XBLOCK.
+
+### Phase 1 synthetic benchmark tables (condensed)
+
+Grid: 6°/2° (343 rotations), batch_size=32, compile enabled, GPU 0.
+All errors vs GT via post-hoc `compare_poses.py`.
+
+| Change | Dataset | Scenario | Median (°) | P75 (°) | P90 (°) | Shift Err (Å) | Time (s) |
+|--------|---------|----------|-----------|---------|---------|--------------|---------|
+| Baseline | DS2 | A (GT) | 1.19 | 2.43 | 4.01 | — | ~25 |
+| Baseline | DS2 | B (5° perturb) | 1.64 | 2.46 | 3.79 | 0.86 | ~25 |
+| Baseline | DS3 | A (GT) | 0.00 | 2.69 | 4.32 | 0.46 | ~30 |
+| Baseline | DS3 | B (5° perturb) | 1.69 | 2.60 | 4.06 | 0.46 | ~24 |
+
+**Phase 3 — Changes enabled (grid 6°/2°, batch_size=32, n=2000):**
+
+| Change | Dataset | Scenario | Median (°) | P75 (°) | P90 (°) | Shift (Å) | Notes |
+|--------|---------|----------|-----------|---------|---------|-----------|-------|
+| baseline | DS2 | B | 1.64 | 2.46 | 3.79 | 0.86 | |
+| #1 subpixel + #2a zero_dc | DS2 | B | 1.64 | 2.46 | — | **0.70** | shift improved |
+| #2b particle-adaptive whitening | DS2 | A | **0.00** | **0.00** | **0.00** | — | |
+| #2b particle-adaptive whitening | DS2 | B | **1.32** | **1.96** | **3.16** | 0.70 | 19% |
+| #2b particle-adaptive whitening | DS3 | A | **0.00** | **2.00** | **4.02** | — | |
+| #2b particle-adaptive whitening | DS3 | B | 1.72 | 2.59 | 3.85 | — | within noise |
+| whiten + fftfreq_min=0.05 | DS2 | B | 1.41 | — | **7.33** | — | harmful |
+| whiten + fftfreq_min=0.05 | DS3 | A | 2.00 | — | 5.34 | — | harmful |
+| warmup8 | DS2 | B | 1.33 | 1.95 | 2.75 | — | same as single-batch |
+| warmup8 | DS3 | B | **1.43** | **2.37** | **4.85** | — | 17% vs single-batch |
+| fibo + pre_multiply | DS2 | B | **1.31** | 1.88 | **2.62** | — | |
+| fibo + post_multiply | DS2 | B | 1.35 | — | 2.66 | — | equivalent |
+| fibo + pre_multiply | DS3 | B | **1.31** | 1.98 | **3.52** | — | D2 P90 standout |
+
+**Finer grid experiments (6°/1°, n=500, GPU 1):**
+
+At 6°/1°: Fibonacci = 1638 pts, Cartesian = 2197 pts. XBLOCK constraint requires bs=2 (Fibo)
+or bs=1 (Cartesian) without the `dynamic=False` fix.
+
+| Change | Dataset | Scenario | Median (°) | P75 (°) | P90 (°) | Shift (Å) | Time (s) |
+|--------|---------|----------|-----------|---------|---------|-----------|---------|
+| baseline (flags off), Cartesian 6°/1° | DS2 | B | 1.49 | 2.35 | 3.80 | 0.70 | ~70 |
+| all flags ON, Cartesian 6°/1° | DS2 | B | **1.00** | **1.72** | **2.78** | **0.48** | ~72 |
+
+Overall DS2 Scen B improvement: **1.64° → 1.00° = 39% reduction** vs 2° grid baseline.
+
+Fibonacci 6°/1°, all 4 composition combinations (pre vs post perturbation × pre vs post search):
+all give **~0.84–0.89°** — composition order is irrelevant for an isotropic ball.
+
+**Summary table (Scenario B vs GT, optimal batch sizes):**
+
+Grid pts measured with `so3_grid_near_identity_fibo(use_small_aprox=True)` + 1 identity.
+
+| Config | Grid pts | n | DS1 med | DS2 med | DS2 P75 | DS2 P90 | DS3 med | DS3 P75 | DS3 P90 | Time/500 |
+|--------|----------|---|--------|--------|---------|---------|--------|---------|---------|---------|
+| baseline (all off) | Cartesian 343 | 2000 | — | 1.64° | — | 3.79° | 1.69° | — | 4.06° | ~9.4s |
+| all flags ON | Cartesian 343 | 2000 | — | 1.32° | — | 3.16° | 1.43° | — | 4.85° | — |
+| +warmup8 | Cartesian 343 | 2000 | — | 1.33° | — | 2.75° | 1.43° | — | 4.85° | — |
+| +fibo+pre | Fibonacci 209 | 2000 | — | 1.31° | 1.88° | 2.62° | 1.31° | 1.98° | 3.52° | **~6.4s** |
+| all flags ON | Cartesian 2197 | 500 | — | 1.00° | — | 2.78° | — | — | — | — |
+| fibo+pre | Fibonacci 488 | 500 | — | 0.97° | 1.53° | 2.13° | 1.35° | 2.03° | 2.81° | ~13.4s |
+| fibo+pre | Fibonacci 1638 | 500 | — | 0.89° | 1.62° | 2.67° | 1.38° | 2.15° | 3.18° | ~43.2s |
+| fibo+pre | Fibonacci 1486 | 500 | — | 0.87° | 1.43° | 2.23° | **1.24°** | **1.93°** | **2.74°** | ~40.8s |
+| fibo+pre | Fibonacci 3875 | 500 | — | — | — | — | 1.22° | 1.89° | 2.64° | ~2m |
+| **two-stage 6°/2°+1.5°/0.5° K=5** | **1249** | **500** | **0.22°** | **0.42°** | **1.25°** | **2.47°** | 1.35° | 2.35° | 3.43° | ~33.4s |
+
+All flags for fibo/two-stage rows: `use_subpixel_shifts=True, zero_dc=True, spectral_whitening=True, whitening_warmup_batches=8, fftfreq_min=0.0, use_fibo_grid=True, rotation_composition=pre_multiply`
+
+DS1 (synthetic, C1) two-stage Scen B = 0.22° from ~4° perturbed start — essentially perfect recovery.
+DS1 reference volume must be reconstructed **with CTF correction** (default `--correct_ctf`).
+
+**Two-stage vs 4°/0.7° head-to-head:**
+
+| Config | DS2 median | DS2 P90 | DS3 median | DS3 P90 | Total pts | Winner |
+|--------|-----------|---------|-----------|---------|-----------|--------|
+| 4°/0.7° single-stage | 0.87° | 2.23° | **1.24°** | **2.74°** | 1486 | DS3 |
+| two-stage 6°/2°+1.5°/0.5° | **0.42°** | 2.47° | 1.35° | 3.43° | 1249 | DS2 + fewer pts |
+
+Two-stage wins for C1 (2× better median, fewer evaluations). 4°/0.7° wins for D2 (better median
+and P90). The two-stage coarse K=5 candidates can cluster in one symmetry domain, missing better
+poses in the other D2-related domains; dense single-stage coverage avoids this.
+
+### Benchmark tooling
+
+#### `tests/benchmarks/perturb_poses.py`
 
 Script to perturb RELION star file poses by a uniform SO(3) ball of radius `perturb_deg`.
 
@@ -1218,7 +1348,7 @@ Runtime for 238K particles: **6 seconds** (was hours).
 
 Both produce identical geodesic distance distributions (verified). Mean: 3.75°, Median: 3.97°, Max: 5.000°.
 
-### `cryoPARES/scripts/compare_poses.py`
+#### `cryoPARES/scripts/compare_poses.py`
 
 ```bash
 python -m cryoPARES.scripts.compare_poses \
@@ -1227,14 +1357,12 @@ python -m cryoPARES.scripts.compare_poses \
 Reports Mean, Median, IQR angular error in degrees, plus shift errors in Å.
 **Always use this script for GT-based metrics** — never use the inline `align_star` output.
 
-### STAR file format handling fix
+#### STAR file format handling fix
 
 `projmatching/projmatching.py` line 290: fixed to handle both RELION 3.0 (bare DataFrame) and
 RELION 3.1+ (dict with 'optics'/'particles' keys) formats.
 
----
-
-## Testing protocol
+### Testing protocol
 
 - Always use `compare_poses.py --starfile1 OUTPUT --starfile2 GT` for GT-based metrics.
 - Fix `n_first_particles=500` for comparability across experiments.
@@ -1255,113 +1383,6 @@ cryopares_projmatching ... --grid_distance_degs 6 --grid_step_degs 2 --batch_siz
            projmatching.fine_grid_distance_degs=1.5 projmatching.fine_grid_step_degs=0.5 \
            projmatching.fine_top_k=5
 ```
-
----
-
-## Pending experiments
-
-### Completed
-- [x] DS3 Scenario B with two-stage K=10 — **ruled out**: 1.36°/3.50° vs K=5 1.35°/3.43°, at 77% more evals.
-- [x] DS3 Scen B 4°/0.5° single-stage — **done**: 1.22°/2.64° P90. 4°/0.7° confirmed as sweet spot.
-- [x] Master branch timing — DS2: 187s/10K (~9.4s/500), DS3: 200s/10K (~10s/500).
-- [x] Branch best-config timing — DS2 two-stage: 664s/10K; DS3 4°/0.7°: 808s/10K.
-- [x] Batch-size investigation — memory scales with bs only (N-independent). XBLOCK issue resolved.
-- [x] Re-measure branch timings with optimal batch sizes — dense grids 2.2–2.3× faster.
-- [x] Branch 4°/2° timing — DS2: ~61.5s/10K (~9760 p/min), DS3: ~73.5s/10K (~8160 p/min).
-- [x] DS2 Scenario A with Fibonacci grid 6°/1° — **0.00° median** ✓
-- [x] DS3 Scenario B with Fibonacci grid 4°/2° — **1.50°** ✓
-- [x] DS1 Scenarios A and B — **done** (0.00° / 0.22°)
-- [x] Full-pipeline benchmark on real β-gal data — **done** (see bgal section above)
-
-### Cancelled (synthetic experiments — not representative of real pipeline)
-- ~~DS3 Scenario B with Fibonacci grid 6°/1°~~ — not worth running; synthetic results don't predict real performance
-- ~~DS3 Scenario B with Fibonacci grid 4°/0.5°~~ — already showed diminishing returns vs 4°/0.7°; cancelled
-- ~~DS3 Scenario B with Fibonacci grid 4°/0.5°~~ — already showed diminishing returns; cancelled
-- ~~Apo self-test runs for bgal full-pipeline~~ — self-test (same-dataset) less informative than cross-dataset lig_00892/893
-
-### Active / next
-- [ ] **Measure NN error distribution on bgal before projmatching** (GPU needed, ~10 min):
-  ```bash
-  CUDA_VISIBLE_DEVICES=1 $BIN_DIR/cryopares_infer \
-    --particles_star_fname $STAR_LIG892 --particles_dir $DIR_LIG892 \
-    --checkpoint_dir $CKPT \
-    --results_dir /home/rsanchez/cryo/data/cryopares/benchmarks/bgal/lig_00892/nn_only \
-    --data_halfset allParticles --model_halfset half1 \
-    --reference_map $REF_LIG892 --batch_size 64 \
-    --skip_localrefinement --skip_reconstruction
-
-  # Compare NN predictions vs RELION GT (no GPU needed)
-  $COMPARE \
-    --starfile1 /home/rsanchez/cryo/data/cryopares/benchmarks/bgal/lig_00892/nn_only/*/predictions.star \
-    --starfile2 $STAR_LIG892 --sym D2
-  ```
-  Key question: if median NN error < 3°, the 6°/2° grid already finds the right cell and the 2°
-  quantization floor is the true bottleneck → SO(3) interpolation (Change #7) is the right fix.
-  If median > 4°, search radius is the bottleneck.
-
-- [x] **Benchmark Change #7 (SO(3) interpolation) on bgal** — **done.** cart_6-2+SO3 interp:
-  lig_00892 1.47°→1.13° (23%), FSC 2.667→2.581 Å; lig_00893 2.49°→2.25° (10%), FSC 2.967→2.926 Å.
-  Beats two-stage on FSC for lig_00892 at full cart speed.
-- [ ] **cart_6-2 double-step + SO(3) interp (4° grid, 4°/2° = coarser, relies on SO3 for sub-step):**
-  Use `--grid_distance_degs 4 --grid_step_degs 4` (or similar larger step) + SO(3) interp to see
-  if interpolation can recover accuracy lost from a coarser grid at faster throughput.
-
-- [x] **PKM2 full-pipeline benchmark** — **done.** two-stage+SO3 wins on angular accuracy (2.89° vs
-  3.37°); fibo confirmed worse on both D2 targets. FSC anomaly: cart_6-2 slightly better FSC on pkm2.
-  See combined table above.
-- [x] **Ablation study (4 factors × bgal lig_00892 + PKM2 lig_00909)** — **done.** SO3 is the
-  dominant angular factor (bgal: 1.13°→1.47° without it); SPS is the only factor with measurable
-  FSC effect (~0.07 Å). SW and ZD contribute negligibly. See ablation section above.
-- [x] **GDH full-pipeline benchmark (D3)** — **done.** cart_twostage_so3interp best on all metrics;
-  lig_G2 breaks below 2° (1.99°). Fibo again worst. Ranking confirmed on D3.
-- [x] **Normalization experiments (Phase 5, 9 configs × 4 targets)** — **done.** `A_noise_psd`
-  (noise-PSD matched filter) is the most consistent winner: best angular accuracy on every target,
-  best FSC on PKM2 (3.432 Å, −0.053 Å) and GDH-G1. `D_phase_10` permanently ruled out (severely
-  harmful). No single-stage normalization closes the gap to `cart_twostage_so3interp`.
-- [ ] Merge `improve_local_refinement` to master (benchmarks complete; integration tests + daemon
-  mode validation remain).
-
----
-
-## SO(3) Interpolation Optimization (May 2026)
-
-### Background
-The initial SO(3) parabolic sub-step interpolation implementation (Change #7) used an on-the-fly
-approach that generated 6 axis-aligned neighbor projections per particle, adding overhead of
-**6 extra projections per particle** for every refinement.
-
-### Optimization
-Restored the original O(1) table-based approach using precomputed neighbor index tables:
-- **Before:** 6 projections per particle (e.g., 1000 particles → 6000 extra projections)
-- **After:** 0 extra projections (neighbor lookup via precomputed index table)
-- Works for both single-stage and two-stage search
-- Fine grid changed from Fibonacci to Cartesian (enables table lookup; benchmarks showed Cartesian
-  consistently better anyway)
-
-### Code Changes
-- Restored `_precompute_so3_interp_neighbors()`: builds (nDelta, 6) neighbor index table at init
-- Restored `_so3_interpolate_euler_winner()`: parabolic refinement via O(1) table lookup
-- Removed `_extract_cc_peaks_so3interp()`: slow on-the-fly 6-projection version
-- Changed `_get_fine_delta_rotmats()`: Fibonacci → Cartesian grid for two-stage fine search
-- Updated both forward paths to use fast table-based interpolation
-
-### Validation Results
-
-**Regression tests (1000 particles):**
-| Target | Config | Median Δθ | Expected | Status |
-|--------|--------|-----------|----------|--------|
-| bgal lig_00892 | cart_twostage_so3interp | 1.23° | 0.8-1.5° | ✅ PASS |
-| PKM2 lig_00909 | cart_twostage_so3interp | 3.06° | ~3.17° | ✅ PASS |
-| GDH lig_G1 | cart_twostage_so3interp | 1.65° | 2.0-3.0° | ✅ PASS |
-
-**Full-size validation (PKM2 lig_00909, ~254K particles):**
-| Config | Median Δθ | Baseline | FSC@0.143 | Baseline | Status |
-|--------|-----------|----------|-----------|----------|--------|
-| cart_6-2 | 3.11° | 3.17° | 3.443 Å | 3.485 Å | ✅ PASS |
-| cart_twostage_so3interp | 2.85° | 2.89° | 3.452 Å | 3.485 Å | ✅ PASS |
-
-**Conclusion:** Zero accuracy regression with significant performance improvement (eliminated 6
-projections/particle overhead). Both configurations match documented baselines within ±0.05°/±0.05 Å.
 
 ---
 

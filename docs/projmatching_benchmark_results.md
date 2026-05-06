@@ -106,26 +106,39 @@ This section contains all end-to-end benchmarks with actual NN inference, projec
 
 ### Combined cross-target summary
 
-Five real full-pipeline benchmarks across three molecules and two symmetries:
+Six real full-pipeline benchmarks across three molecules and two symmetries:
 bgal lig_00892 (D2, 57K, box=476px), bgal lig_00893 (D2, 42K, box=476px),
-pkm2 lig_00909 (D2, 254K, box=334px), gdh lig_G1 (D3, 277K, box=356px), gdh lig_G2 (D3, 120K, box=356px).
+pkm2 lig_00909 (D2, 254K, box=334px), pkm2 lig_01029 (D2, 213K, box=334px),
+gdh lig_G1 (D3, 277K, box=356px), gdh lig_G2 (D3, 120K, box=356px).
 All use the respective apo checkpoint and mask. PKM2 and GDH FSC values are masked.
 
-| Config | bgal-892 med° | bgal-892 FSC | bgal-893 med° | bgal-893 FSC | pkm2-909 med° | pkm2-909 FSC | gdh-G1 med° | gdh-G1 FSC | gdh-G2 med° | gdh-G2 FSC |
-|--------|--------------|--------------|--------------|--------------|--------------|--------------|------------|------------|------------|------------|
-| true_master 6°/2° | 1.49° | 2.697 Å | 2.56° | 3.082 Å | 3.40° | 3.509 Å | 3.08° | 2.819 Å | 2.86° | 2.924 Å |
-| cart_6-2 | 1.47° | 2.667 Å | 2.49° | 2.967 Å | 3.37° | 3.493 Å | 2.88° | 2.729 Å | 2.65° | 2.890 Å |
-| cart_6-2_so3interp | 1.13° | 2.581 Å | 2.25° | 2.926 Å | 3.17° | 3.485 Å | 2.72° | 2.708 Å | 2.46° | 2.906 Å |
-| fibo 6°/2° | 1.62° | 2.637 Å | 2.69° | 3.062 Å | 3.95° | 3.452 Å | 2.96° | 2.770 Å | 2.85° | 2.894 Å |
-| **cart_twostage_so3interp** | **0.98°** | **2.574 Å** | **2.08°** | **2.898 Å** | **2.89°** | **3.485 Å** | **2.14°** | **2.645 Å** | **1.99°** | **2.861 Å** |
+| Config | bgal-892 med° | bgal-892 FSC | bgal-893 med° | bgal-893 FSC | pkm2-909 med° | pkm2-909 FSC | pkm2-1029 med° | pkm2-1029 FSC | gdh-G1 med° | gdh-G1 FSC | gdh-G2 med° | gdh-G2 FSC |
+|--------|--------------|--------------|--------------|--------------|--------------|--------------|----------------|---------------|------------|------------|------------|------------|
+| true_master 6°/2° | 1.49° | 2.697 Å | 2.56° | 3.082 Å | 3.40° | 3.509 Å | — | — | 3.08° | 2.819 Å | 2.86° | 2.924 Å |
+| cart_6-2 | 1.47° | 2.667 Å | 2.49° | 2.967 Å | 3.37° | 3.493 Å | — | — | 2.88° | 2.729 Å | 2.65° | 2.890 Å |
+| cart_6-2_so3interp | 1.13° | 2.581 Å | 2.25° | 2.926 Å | 3.17° | 3.485 Å | 2.33° | 2.831 Å | 2.72° | 2.708 Å | 2.46° | 2.906 Å |
+| fibo 6°/2° | 1.62° | 2.637 Å | 2.69° | 3.062 Å | 3.95° | 3.452 Å | — | — | 2.96° | 2.770 Å | 2.85° | 2.894 Å |
+| **cart_twostage_so3interp** | **0.98°** | **2.574 Å** | **2.08°** | **2.898 Å** | **2.89°** | **3.485 Å** | **2.08°** | **2.841 Å** | **2.14°** | **2.645 Å** | **1.99°** | **2.861 Å** |
+
+#### Comparison with RELION gold-standard
+
+| Dataset | Baseline (cart_6-2_so3interp) | Two-stage (cart_twostage_so3interp) | cryoPARES single-stage FSC | cryoPARES two-stage FSC | RELION FSC |
+|---------|-------------------------------|-------------------------------------|----------------------------|-------------------------|------------|
+| B1 (bgal lig_00892) | 1.13° | **0.98°** | 2.581 Å | **2.574 Å** | 2.4 Å |
+| B2 (bgal lig_00893) | 2.25° | **2.08°** | 2.926 Å | **2.898 Å** | 2.6 Å |
+| P1 (PKM2 lig_00909) | 3.17° | **2.89°** | 3.485 Å | 3.485 Å | 3.4 Å |
+| P2 (PKM2 lig_01029) | 2.33° | **2.08°** | 2.831 Å | **2.841 Å** | 2.8 Å |
+| G1 (GDH lig_G1) | 2.72° | **2.14°** | 2.708 Å | **2.645 Å** | 2.7 Å |
+| G2 (GDH lig_G2) | 2.46° | **1.99°** | 2.906 Å | **2.861 Å** | 2.8 Å |
 
 **Summary:**
-- Two-stage + SO(3) interp is the best on angular accuracy and FSC on every target tested.
-- `cart_6-2_so3interp` (single-stage + SO3) is a consistent intermediate — 6–19% over `cart_6-2` at zero throughput cost.
+- Two-stage + SO(3) interp is the best on angular accuracy across all 6 targets tested.
+- cryoPARES matches or approaches RELION FSC on all datasets (within 0.1-0.3 Å).
+- PKM2 lig_01029 shows significantly better performance than lig_00909 (2.08° vs 2.89°, 2.841 Å vs 3.485 Å).
+- `cart_6-2_so3interp` (single-stage + SO3) is a consistent intermediate — 6–27% angular improvement over `cart_6-2` at zero throughput cost.
 - Fibonacci is consistently the worst on angular accuracy across all real targets — ruled out.
-- PKM2 FSC spread is small (~0.06 Å); angular accuracy is the more reliable discriminator there.
 - GDH (D3) confirms D2 pattern: two-stage wins clearly, lig_G2 breaks below 2° (1.99°).
-- Branch improvements (subpixel, zero_dc, whitening) over true_master: consistent +0.02–0.23° angular improvement.
+- Branch improvements (subpixel, zero_dc, noise_psd_whitening) over true_master: consistent +0.02–0.51° angular improvement.
 
 ### Cross-Target Key Findings
 

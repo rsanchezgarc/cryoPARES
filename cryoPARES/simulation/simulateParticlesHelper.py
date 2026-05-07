@@ -154,11 +154,13 @@ class ParticlesDataset(Dataset):
         else:
             ctf = None
 
-        return {
+        item = {
             "angles_deg": np.array([rot, tilt, psi], dtype=np.float32),
             "shift_px": np.array([dy_px, dx_px], dtype=np.float32),
-            "ctf": ctf,  # Pre-computed CTF tensor or None
         }
+        if ctf is not None:
+            item["ctf"] = ctf
+        return item
 
 # ---------------------
 # Subtraction scaling (T0 band-limited LS fit)
@@ -840,6 +842,65 @@ def run_simulation(
 # Multi-GPU sharding helper
 # ---------------------
 
+def _run_simulation_worker(
+        gpu_id: int,
+        result_queue,  # multiprocessing.Queue
+        volume: str,
+        shard_star: str,
+        output_dir: str,
+        shard_basename: str,
+        images_per_file: int,
+        batch_size: int,
+        simulation_mode: str,
+        apply_ctf: bool,
+        snr: Optional[float],
+        angle_jitter_deg: float,
+        angle_jitter_frac: float,
+        shift_jitter_A: float,
+        shift_jitter_frac: float,
+        bandpass_lo_A: float,
+        bandpass_hi_A: float,
+        sub_bp_lo_A: float,
+        sub_bp_hi_A: float,
+        sub_power_q: float,
+        px_A: float,
+        normalize_volume: bool,
+        disable_tqdm: bool,
+) -> None:
+    """Worker function executed in a separate process for each GPU shard."""
+    try:
+        device = f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu"
+        out_paths = run_simulation(
+            volume=volume,
+            in_star=shard_star,
+            output_dir=output_dir,
+            basename=shard_basename,
+            images_per_file=images_per_file,
+            batch_size=batch_size,
+            simulation_mode=simulation_mode,
+            apply_ctf=apply_ctf,
+            snr=snr,
+            num_workers=0,
+            angle_jitter_deg=angle_jitter_deg,
+            angle_jitter_frac=angle_jitter_frac,
+            shift_jitter_A=shift_jitter_A,
+            shift_jitter_frac=shift_jitter_frac,
+            bandpass_lo_A=bandpass_lo_A,
+            bandpass_hi_A=bandpass_hi_A,
+            sub_bp_lo_A=sub_bp_lo_A,
+            sub_bp_hi_A=sub_bp_hi_A,
+            sub_power_q=sub_power_q,
+            px_A=px_A,
+            device=device,
+            normalize_volume=normalize_volume,
+            disable_tqdm=disable_tqdm,
+        )
+        result_queue.put((gpu_id, out_paths, None))
+    except Exception as e:
+        import traceback
+        result_queue.put((gpu_id, None, traceback.format_exc()))
+
+
 def run_simulation_sharded(
         volume: str,
         in_star: str,
@@ -865,6 +926,8 @@ def run_simulation_sharded(
         disable_tqdm: bool = False,
         n_first_particles: Optional[int] = None,
 ) -> List[str]:
+    import multiprocessing as _mp
+
     pset_full = ParticlesStarSet(in_star)
     particles_to_shard = pset_full.particles_md
     if n_first_particles is not None:
@@ -876,33 +939,49 @@ def run_simulation_sharded(
 
     os.makedirs(output_dir, exist_ok=True)
 
-    stack_paths_all: List[str] = []
+    # Write per-GPU shard STAR files before spawning processes
+    shard_stars: List[str] = []
+    shard_basenames: List[str] = []
     start_idx = 0
     for gi, gpu_id in enumerate(gpus):
         end_idx = start_idx + shard_sizes[gi]
         if start_idx >= end_idx:
+            shard_stars.append(None)
+            shard_basenames.append(None)
+            start_idx = end_idx
             continue
 
         shard_star = os.path.join(output_dir, f".shard_{gpu_id}.star")
         particles_df = particles_to_shard.iloc[start_idx:end_idx].copy()
-
         star_dict = {"particles": particles_df}
         if hasattr(pset_full, "optics_md") and pset_full.optics_md is not None:
             star_dict["optics"] = pset_full.optics_md
         starfile.write(star_dict, shard_star, overwrite=True)
 
-        shard_basename = f"{basename}_gpu{gpu_id}"
-        out_paths = run_simulation(
+        shard_stars.append(shard_star)
+        shard_basenames.append(f"{basename}_gpu{gpu_id}")
+        start_idx = end_idx
+
+    # Spawn one process per GPU using 'spawn' context (required for CUDA)
+    ctx = _mp.get_context("spawn")
+    result_queue = ctx.Queue()
+    processes = []
+
+    for gi, gpu_id in enumerate(gpus):
+        if shard_stars[gi] is None:
+            continue
+        kwargs = dict(
+            gpu_id=gpu_id,
+            result_queue=result_queue,
             volume=volume,
-            in_star=shard_star,
+            shard_star=shard_stars[gi],
             output_dir=output_dir,
-            basename=shard_basename,
+            shard_basename=shard_basenames[gi],
             images_per_file=images_per_file,
             batch_size=batch_size,
             simulation_mode=simulation_mode,
             apply_ctf=apply_ctf,
             snr=snr,
-            num_workers=0,
             angle_jitter_deg=angle_jitter_deg,
             angle_jitter_frac=angle_jitter_frac,
             shift_jitter_A=shift_jitter_A,
@@ -913,17 +992,41 @@ def run_simulation_sharded(
             sub_bp_hi_A=sub_bp_hi_A,
             sub_power_q=sub_power_q,
             px_A=px_A,
-            device=f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu",
             normalize_volume=normalize_volume,
             disable_tqdm=disable_tqdm,
         )
+        p = ctx.Process(target=_run_simulation_worker, kwargs=kwargs)
+        p.start()
+        processes.append((gpu_id, p))
 
-        stack_paths_all.extend(out_paths)
-        try:
-            os.remove(shard_star)
-        except OSError:
-            pass
+    # Collect results; preserve GPU order for correct STAR mapping
+    results_by_gpu: dict = {}
+    errors = []
+    for _ in processes:
+        gpu_id, out_paths, tb = result_queue.get()
+        if tb is not None:
+            errors.append(f"GPU {gpu_id} failed:\n{tb}")
+        else:
+            results_by_gpu[gpu_id] = out_paths
 
-        start_idx = end_idx
+    for _, p in processes:
+        p.join()
+
+    # Clean up shard STAR files
+    for shard_star in shard_stars:
+        if shard_star is not None:
+            try:
+                os.remove(shard_star)
+            except OSError:
+                pass
+
+    if errors:
+        raise RuntimeError("Multi-GPU simulation failed:\n" + "\n".join(errors))
+
+    # Return paths in GPU order so STAR mapping matches particle order
+    stack_paths_all: List[str] = []
+    for gpu_id in gpus:
+        if gpu_id in results_by_gpu:
+            stack_paths_all.extend(results_by_gpu[gpu_id])
 
     return stack_paths_all

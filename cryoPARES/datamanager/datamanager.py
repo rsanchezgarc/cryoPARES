@@ -126,14 +126,6 @@ class DataManager(pl.LightningDataModule):
                                                      return_ori_imagen=self.return_ori_imagen,
                                                      subset_idxs=self._subset_idxs,
                                                      require_angles=partitionName in ["train", "val"])
-
-            if self.is_global_zero and self.save_train_val_partition_dir is not None:
-                dirname = osp.join(self.save_train_val_partition_dir, partitionName
-                                                        if partitionName is not None else "full")
-                os.makedirs(dirname, exist_ok=True)
-                fname = osp.join(dirname, f"{i}-particles.star")
-                if not osp.isfile(fname):
-                    mrcsDataset.saveMd(fname, overwrite=False)
             mrcsDataset.augmenter = self.augmenter if partitionName == "train" else None
             datasets.append(mrcsDataset)
             if self.only_first_dataset_for_validation and partitionName == "val":
@@ -147,11 +139,34 @@ class DataManager(pl.LightningDataModule):
                 self.train_validation_split,
                 generator=generator
             )
-            if partitionName == "train":
-                dataset = train_dataset
-            else:
-                dataset = val_dataset
+            dataset = train_dataset if partitionName == "train" else val_dataset
+            if self.is_global_zero and self.save_train_val_partition_dir is not None:
+                self._save_split_starfiles(datasets, dataset, partitionName)
+        else:
+            if self.is_global_zero and self.save_train_val_partition_dir is not None:
+                dirname = osp.join(self.save_train_val_partition_dir, "full")
+                os.makedirs(dirname, exist_ok=True)
+                for i, mrcsDataset in enumerate(datasets):
+                    fname = osp.join(dirname, f"{i}-particles.star")
+                    if not osp.isfile(fname):
+                        mrcsDataset.saveMd(fname, overwrite=False)
         return dataset
+
+    def _save_split_starfiles(self, datasets, subset, partitionName):
+        dirname = osp.join(self.save_train_val_partition_dir, partitionName)
+        os.makedirs(dirname, exist_ok=True)
+        cumulative_sizes = [0]
+        for ds in datasets:
+            cumulative_sizes.append(cumulative_sizes[-1] + len(ds))
+        subset_indices_set = set(subset.indices)
+        for i, mrcsDataset in enumerate(datasets):
+            fname = osp.join(dirname, f"{i}-particles.star")
+            if osp.isfile(fname):
+                continue
+            start = cumulative_sizes[i]
+            end = cumulative_sizes[i + 1]
+            local_indices = sorted(idx - start for idx in subset_indices_set if start <= idx < end)
+            mrcsDataset.particles.createSubset(idxs=local_indices).save(starFname=fname, overwrite=False)
 
 
     def _create_dataloader(self, partitionName: Optional[str]=None):

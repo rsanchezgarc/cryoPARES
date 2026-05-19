@@ -104,3 +104,8 @@ class Projmatching_config:
     # Noise-PSD matched filter (#8a) — symmetric whitening by 1/σ²_noise, RELION-like matched filter
     noise_psd_whitening: bool = True        # whiten particles and projections by noise PSD from background ring
     noise_psd_warmup_batches: int = 8       # batches to average when building the noise PSD estimate
+
+    # Memory-pressure reduction: process candidates in sub-batches of this size.
+    # 0 = disabled (project all nCand at once). Non-zero values (e.g. 64) reduce peak tensor
+    # size by nCand/sub_batch, which can reduce HBM cache thrashing on large grids.
+    proj_sub_batch_size: int = 0

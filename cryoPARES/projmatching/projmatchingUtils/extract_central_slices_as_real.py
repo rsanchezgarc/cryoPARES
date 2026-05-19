@@ -141,7 +141,7 @@ def _extract_central_slices_rfft_3d_multichannel_precomputed(
     samples = einops.rearrange(samples, "... hw c -> ... c hw")
 
 
-    projection_image_dfts = torch.zeros(
+    projection_image_dfts = torch.empty(
         output_shape, device=volume_rfft.device, dtype=volume_rfft.dtype
     )
     projection_image_dfts[..., freq_mask_indices[0], freq_mask_indices[1]] = samples

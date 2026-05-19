@@ -92,6 +92,7 @@ class ProjectionMatcher(nn.Module):
         # Noise-PSD matched filter (#8a) — warm-up state reset in align_star().
         self.noise_psd_whitening = main_config.projmatching.noise_psd_whitening
         self.noise_psd_warmup_batches = main_config.projmatching.noise_psd_warmup_batches
+        self.proj_sub_batch_size = main_config.projmatching.proj_sub_batch_size
         self._noise_psd_amp_sum: torch.Tensor | None = None
         self._noise_psd_batches_seen: int = 0
 
@@ -455,10 +456,15 @@ class ProjectionMatcher(nn.Module):
         # Build projection-side whitening filter.
         # noise_psd_whitening: particles pre-whitened in _preprocess_particles_to_F;
         # noise_psd_map applied here gives the full 1/σ²_noise matched-filter weight.
+        # band_mask is always included: zeroes out-of-band positions in projs (which may
+        # contain uninitialised values from torch.empty in the projection kernel).
         whitening_filter = self.whitening_map if self.spectral_whitening else None
         if self.noise_psd_whitening:
-            nf = self.noise_psd_map  # (1, H, W//2+1)
+            nf = self.noise_psd_map * self.band_mask  # bake band_mask in — no extra HBM pass
             whitening_filter = nf if whitening_filter is None else whitening_filter * nf
+        else:
+            whitening_filter = (self.band_mask if whitening_filter is None
+                                else whitening_filter * self.band_mask)
 
         return self._correlateCrossCorrelation(parts, projs,
                                                whitening_filter=whitening_filter,
@@ -660,27 +666,48 @@ class ProjectionMatcher(nn.Module):
             predRotMats:   (B, topk, 3, 3)
             pixelShiftsXY: (B, topk, 2)
         """
-        projs = self._compute_projections_from_rotmats(expanded_rotmats.reshape(-1, 3, 3))
-
-        # Always reshape (B*nCand, ...) → (B, nCand, ...) before correlateF, whether or not CTF is applied.
+        ncand = expanded_rotmats.shape[1]
         _shapeIdx = -3 if USE_TWO_FLOAT32_FOR_COMPLEX else -2
-        projs = projs.reshape(bsize, -1, *projs.shape[_shapeIdx:])
+        sub_batch = self.proj_sub_batch_size if self.proj_sub_batch_size > 0 else ncand
 
+        # Pre-compute CTF view (particle-specific, reused across sub-batches).
+        ctfs_view = None
         if self.correct_ctf and apply_ctf:
             ctfs_view = ctfs.unsqueeze(1)
             if USE_TWO_FLOAT32_FOR_COMPLEX:
                 ctfs_view = ctfs_view.unsqueeze(-1)
-            projs = self._apply_ctfF(projs, ctfs_view)
 
-        # Zero DC bin in-place on projections (no clone needed — projs is a freshly owned tensor).
-        if self.zero_dc:
-            dc_row = projs.shape[-3] // 2  # H//2 in (B, nCand, H, W//2+1[, 2])
-            if USE_TWO_FLOAT32_FOR_COMPLEX:
-                projs[..., dc_row, 0, :] = 0
-            else:
-                projs[..., dc_row, 0] = 0
+        fparts_u = fparts.unsqueeze(1)
+        all_corrs: list[torch.Tensor] = []
+        all_shifts: list[torch.Tensor] = []
 
-        perImgCorr, pixelShiftsXY = self.correlateF(fparts.unsqueeze(1), projs)
+        for i in range(0, ncand, sub_batch):
+            rotmats_chunk = expanded_rotmats[:, i:i + sub_batch]  # (B, chunk, 3, 3)
+            n_chunk = rotmats_chunk.shape[1]
+
+            projs = self._compute_projections_from_rotmats(rotmats_chunk.reshape(-1, 3, 3))
+            projs = projs.reshape(bsize, n_chunk, *projs.shape[_shapeIdx:])
+
+            if ctfs_view is not None:
+                projs = self._apply_ctfF(projs, ctfs_view)
+
+            # Zero DC bin in-place (projs is a freshly owned tensor after CTF or projection).
+            if self.zero_dc:
+                dc_row = projs.shape[-3] // 2
+                if USE_TWO_FLOAT32_FOR_COMPLEX:
+                    projs[..., dc_row, 0, :] = 0
+                else:
+                    projs[..., dc_row, 0] = 0
+
+            corrs_chunk, shifts_chunk = self.correlateF(fparts_u, projs)
+            all_corrs.append(corrs_chunk)
+            all_shifts.append(shifts_chunk)
+            del projs
+
+        # Reconstruct full (B, nCand) tensors for topk and SO3 interpolation.
+        perImgCorr = torch.cat(all_corrs, dim=1)    # (B, nCand)
+        pixelShiftsXY = torch.cat(all_shifts, dim=1)  # (B, nCand, 2)
+
         maxCorrs, maxCorrsIdxs = perImgCorr.topk(topk, sorted=True, largest=True, dim=-1)
 
         batch_range = torch.arange(bsize, device=fparts.device).unsqueeze(1)

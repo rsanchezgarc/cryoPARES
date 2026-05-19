@@ -456,7 +456,6 @@ class ProjectionMatcher(nn.Module):
             whitening_filter = nf if whitening_filter is None else whitening_filter * nf
 
         return self._correlateCrossCorrelation(parts, projs,
-                                               zero_dc=self.zero_dc,
                                                whitening_filter=whitening_filter)
 
     def _apply_ctfF(self, projs, ctf):
@@ -474,10 +473,8 @@ class ProjectionMatcher(nn.Module):
             return None
 
     def _correlateCrossCorrelation(self, parts: torch.Tensor, projs: torch.Tensor,
-                                    zero_dc: bool = False,
                                     whitening_filter: torch.Tensor | None = None):
         corrs = self.correlate_dft_2d(parts, projs,
-                                       zero_dc=zero_dc,
                                        whitening_filter=whitening_filter)
         b, options, l0, l1 = corrs.shape
         h0, h1, w0, w1 = _get_begin_end_from_max_shift(corrs.shape[-2:], self.max_shift_fraction)
@@ -620,6 +617,15 @@ class ProjectionMatcher(nn.Module):
             else:
                 fparts = fparts * self.noise_psd_map
 
+        # Zero DC bin in-place (no clone needed — fparts is a freshly allocated tensor).
+        # Callers rely on DC being zeroed here so correlate_dft_2d can skip the clone.
+        if self.zero_dc:
+            dc_row = fparts.shape[-3] // 2  # H//2 in (B, H, W//2+1[, 2])
+            if USE_TWO_FLOAT32_FOR_COMPLEX:
+                fparts[..., dc_row, 0, :] = 0
+            else:
+                fparts[..., dc_row, 0] = 0
+
         return fparts
 
     def _extract_cc_peaks(
@@ -657,6 +663,14 @@ class ProjectionMatcher(nn.Module):
             if USE_TWO_FLOAT32_FOR_COMPLEX:
                 ctfs_view = ctfs_view.unsqueeze(-1)
             projs = self._apply_ctfF(projs, ctfs_view)
+
+        # Zero DC bin in-place on projections (no clone needed — projs is a freshly owned tensor).
+        if self.zero_dc:
+            dc_row = projs.shape[-3] // 2  # H//2 in (B, nCand, H, W//2+1[, 2])
+            if USE_TWO_FLOAT32_FOR_COMPLEX:
+                projs[..., dc_row, 0, :] = 0
+            else:
+                projs[..., dc_row, 0] = 0
 
         perImgCorr, pixelShiftsXY = self.correlateF(fparts.unsqueeze(1), projs)
         maxCorrs, maxCorrsIdxs = perImgCorr.topk(topk, sorted=True, largest=True, dim=-1)
@@ -1104,10 +1118,7 @@ def _extract_ccor_max(corrs, h0, h1, w0, w1, use_subpixel: bool = False):
         fi_0 = corrs_crop[n_idx, safe_i,     int_j]
         fi_p = corrs_crop[n_idx, safe_i + 1, int_j]
         denom_i = 2 * fi_m - 4 * fi_0 + 2 * fi_p
-        safe_denom_i = torch.where(denom_i < -1e-8, denom_i, torch.full_like(denom_i, -1e-8))
-        delta_i = (fi_m - fi_p) / safe_denom_i
-        at_boundary_i = (int_i != safe_i)
-        delta_i = torch.where(at_boundary_i, torch.zeros_like(delta_i), delta_i)
+        delta_i = ((fi_m - fi_p) / denom_i.clamp(max=-1e-8)) * (int_i == safe_i).float()
         sub_i = safe_i.float() + delta_i
 
         # --- sub-pixel refinement along col axis (at row = int_i) ---
@@ -1115,10 +1126,7 @@ def _extract_ccor_max(corrs, h0, h1, w0, w1, use_subpixel: bool = False):
         fj_0 = corrs_crop[n_idx, int_i, safe_j    ]
         fj_p = corrs_crop[n_idx, int_i, safe_j + 1]
         denom_j = 2 * fj_m - 4 * fj_0 + 2 * fj_p
-        safe_denom_j = torch.where(denom_j < -1e-8, denom_j, torch.full_like(denom_j, -1e-8))
-        delta_j = (fj_m - fj_p) / safe_denom_j
-        at_boundary_j = (int_j != safe_j)
-        delta_j = torch.where(at_boundary_j, torch.zeros_like(delta_j), delta_j)
+        delta_j = ((fj_m - fj_p) / denom_j.clamp(max=-1e-8)) * (int_j == safe_j).float()
         sub_j = safe_j.float() + delta_j
     else:
         sub_i = int_i.float()

@@ -130,7 +130,6 @@ def _mask_for_dft_2d(img_shape, max_freq_pixels, min_freq_pixels, rfft, fftshift
 def correlate_dft_2d(
     parts: torch.Tensor,
     projs: torch.Tensor,
-    zero_dc: bool = False,
     whitening_filter: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Correlate fftshifted rfft discrete Fourier transforms of images.
@@ -139,11 +138,10 @@ def correlate_dft_2d(
     ----------
     parts:
         Particle DFTs, fftshifted rfft, shape (..., H, W//2+1) complex or (..., H, W//2+1, 2).
+        DC zeroing (if desired) must be applied by the caller before this function.
     projs:
         Projection DFTs, same layout as parts.
-    zero_dc:
-        If True, zero the DC bin before computing the cross-product to remove low-frequency bias.
-        DC is at row H//2, col 0 in the fftshifted rfft layout.
+        DC zeroing (if desired) must be applied by the caller before this function.
     whitening_filter:
         Optional real-valued tensor broadcastable to parts/projs shape. Applied as a multiply
         before the cross-product (spectral whitening). Pre-computed in ProjectionMatcher.__init__.
@@ -154,14 +152,6 @@ def correlate_dft_2d(
         parts = torch.view_as_complex(parts.contiguous())
     if not projs.is_complex():
         projs = torch.view_as_complex(projs.contiguous())
-
-    if zero_dc:
-        # DC bin: row H//2, col 0 in fftshifted rfft layout
-        dc_row = parts.shape[-2] // 2
-        parts = parts.clone()
-        projs = projs.clone()
-        parts[..., dc_row, 0] = 0
-        projs[..., dc_row, 0] = 0
 
     if whitening_filter is not None:
         projs = projs * whitening_filter

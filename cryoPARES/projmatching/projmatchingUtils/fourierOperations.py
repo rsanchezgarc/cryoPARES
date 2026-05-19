@@ -127,10 +127,37 @@ def _mask_for_dft_2d(img_shape, max_freq_pixels, min_freq_pixels, rfft, fftshift
 
     return mask
 
+def build_ccorr_sign_grid(H: int, W: int, device) -> torch.Tensor:
+    """Precompute the phase-ramp sign buffer for correlate_dft_2d.
+
+    Returns a (1, 1, H, W//2+1) float32 tensor of ±1 values such that:
+        irfftn(ifftshift_y(R * sign_grid))
+    equals the original:
+        ifftshift_2d(irfftn(ifftshift_y(R)))
+
+    This folds the post-irfftn ifftshift_2d into a pre-multiply, saving one
+    O(B·nCand·H·W) memory-bandwidth pass per batch.
+
+    Derivation (using the DFT shift theorem):
+      ifftshift_2d(irfftn(A)) = irfftn(A * (-1)^(ky_std + kx_std))
+    where ky_std are standard (un-shifted) frequency indices.  Converting the
+    (-1)^ky_std factor to stored (fftshifted) coordinates gives:
+      (-1)^ky_std = (-1)^ky_stored * (-1)^(H//2)
+    so sign_grid[ky_s, kx_s] = (-1)^(ky_s + kx_s + (H//2)%2).
+    Valid for all even H.
+    """
+    ky_s = torch.arange(H, device=device).view(H, 1)
+    kx_s = torch.arange(W // 2 + 1, device=device).view(1, W // 2 + 1)
+    shift_parity = (H // 2) % 2
+    sign = (((ky_s + kx_s + shift_parity) % 2) * -2 + 1).float()
+    return sign.view(1, 1, H, W // 2 + 1)
+
+
 def correlate_dft_2d(
     parts: torch.Tensor,
     projs: torch.Tensor,
     whitening_filter: torch.Tensor | None = None,
+    ccorr_sign_grid: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Correlate fftshifted rfft discrete Fourier transforms of images.
 
@@ -147,6 +174,10 @@ def correlate_dft_2d(
         before the cross-product (spectral whitening). Pre-computed in ProjectionMatcher.__init__.
         For noise_psd_whitening, particles are pre-whitened in _preprocess_particles_to_F and
         noise_psd_map is passed here for projection-side whitening — giving 1/σ²_noise weight.
+    ccorr_sign_grid:
+        Optional (1, 1, H, W//2+1) float32 buffer of ±1 values, precomputed by
+        build_ccorr_sign_grid().  When provided, folds the post-irfftn ifftshift_2d
+        into a frequency-domain pre-multiply, saving one O(B·nCand·H·W) pass.
     """
     if not parts.is_complex():
         parts = torch.view_as_complex(parts.contiguous())
@@ -157,9 +188,16 @@ def correlate_dft_2d(
         projs = projs * whitening_filter
 
     result = parts * torch.conj(projs)
-    result = torch.fft.ifftshift(result, dim=(-2,))
-    result = torch.fft.irfftn(result, dim=(-2, -1))
-    result = torch.fft.ifftshift(result, dim=(-2, -1))
+
+    if ccorr_sign_grid is not None:
+        result = result * ccorr_sign_grid          # fold out post-irfftn ifftshift_2d
+        result = torch.fft.ifftshift(result, dim=(-2,))
+        result = torch.fft.irfftn(result, dim=(-2, -1))
+        # post-irfftn ifftshift_2d is not needed
+    else:
+        result = torch.fft.ifftshift(result, dim=(-2,))
+        result = torch.fft.irfftn(result, dim=(-2, -1))
+        result = torch.fft.ifftshift(result, dim=(-2, -1))
     return torch.real(result)
 
 def _build_whitening_map_2d(

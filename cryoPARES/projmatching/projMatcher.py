@@ -32,8 +32,8 @@ from cryoPARES.projmatching.projmatchingUtils.myProgressBar import myTqdm as tqd
 
 from cryoPARES.projmatching.projmatchingUtils.filterToResolution import low_pass_filter_fname
 from cryoPARES.projmatching.projmatchingUtils.fourierOperations import (
-    correlate_dft_2d, compute_dft_3d, _real_to_fourier_2d, _build_whitening_map_2d,
-    _mask_for_dft_2d,
+    correlate_dft_2d, build_ccorr_sign_grid, compute_dft_3d, _real_to_fourier_2d,
+    _build_whitening_map_2d, _mask_for_dft_2d,
 )
 
 REPORT_ALIGNMENT_DISPLACEMENT = True
@@ -428,6 +428,11 @@ class ProjectionMatcher(nn.Module):
         )
         self.register_buffer("band_mask", band_mask)  # (1, H, W//2+1)
 
+        # Phase-ramp sign buffer: folds the post-irfftn ifftshift_2d in correlate_dft_2d
+        # into a frequency-domain pre-multiply, saving one O(B·nCand·H·W) pass.
+        ccorr_sign_grid = build_ccorr_sign_grid(img_size, img_size, device=torch.device("cpu"))
+        self.register_buffer("ccorr_sign_grid", ccorr_sign_grid)  # (1, 1, H, W//2+1)
+
     def _projectF(self, rotMats: torch.Tensor) -> torch.Tensor:
 
         return extract_central_slices_rfft_3d(
@@ -456,7 +461,8 @@ class ProjectionMatcher(nn.Module):
             whitening_filter = nf if whitening_filter is None else whitening_filter * nf
 
         return self._correlateCrossCorrelation(parts, projs,
-                                               whitening_filter=whitening_filter)
+                                               whitening_filter=whitening_filter,
+                                               ccorr_sign_grid=self.ccorr_sign_grid)
 
     def _apply_ctfF(self, projs, ctf):
         return projs * ctf
@@ -473,9 +479,11 @@ class ProjectionMatcher(nn.Module):
             return None
 
     def _correlateCrossCorrelation(self, parts: torch.Tensor, projs: torch.Tensor,
-                                    whitening_filter: torch.Tensor | None = None):
+                                    whitening_filter: torch.Tensor | None = None,
+                                    ccorr_sign_grid: torch.Tensor | None = None):
         corrs = self.correlate_dft_2d(parts, projs,
-                                       whitening_filter=whitening_filter)
+                                       whitening_filter=whitening_filter,
+                                       ccorr_sign_grid=ccorr_sign_grid)
         b, options, l0, l1 = corrs.shape
         h0, h1, w0, w1 = _get_begin_end_from_max_shift(corrs.shape[-2:], self.max_shift_fraction)
         maxcorr, maxcorrIdxs = self._extract_ccor_max(corrs.reshape(-1, *corrs.shape[-2:]),

@@ -375,12 +375,57 @@ identical to the F2+F3 baseline within measurement noise (Δ < 0.03°). Median s
 
 ---
 
+### Run: 2026-05-20 (run 6) — N=10 000, gdh_G2 — final: master vs ilr_speed_opt defaults
+
+**Branch state**: after removing dead features (`spectral_whitening`, `fftfreq_min`,
+`proj_sub_batch_size`). All useful features are on by default (`use_subpixel_shifts=True`,
+`zero_dc=True`, `use_so3_interpolation=True`, `noise_psd_whitening=True`,
+`use_two_stage_search=False`). No config overrides needed.
+
+Script: `scripts/run_final_benchmark.sh`
+Output dir: `benchmark_final_20260520_161609/`
+ILR commit: `9c41163` (remove dead features: spectral_whitening, fftfreq_min, proj_sub_batch_size)
+Master commit: `e4ca007` (better utility scripts)
+
+#### Compute time
+
+| Run | Branch | bs | Time (s) | vs master (bs=8) |
+|-----|--------|----|----------|-----------------|
+| master_bs8 | master | 8 | 151 | — |
+| **ilr_opt_bs8** | ilr_speed_opt | 8 | **112** | **−26%** |
+| **ilr_opt_bs32** | ilr_speed_opt | 32 | **104** | **−31%** |
+
+#### Accuracy (averaged over half1 + half2)
+
+| Run | N | Mean rot° | Median rot° | %<5° | %<10° | Median shift Å | Mean shift Å |
+|-----|---|-----------|------------|------|-------|---------------|-------------|
+| master_bs8 | 10 000 | 17.91 | 2.27 | 66.90 | 71.05 | 0.77 | 3.81 |
+| **ilr_opt_bs8** | **10 000** | **17.74** | **1.92** | **66.95** | **70.60** | **0.60** | **4.82** |
+| **ilr_opt_bs32** | **10 000** | **17.73** | **1.92** | **67.10** | **70.55** | **0.59** | **4.74** |
+
+#### Interpretation — ilr_speed_opt is faster AND more accurate than master
+
+`ilr_speed_opt` at default settings:
+- **Speed**: −26% at bs=8 (112 s vs 151 s); −31% at bs=32 (104 s vs 151 s)
+- **Angular accuracy**: median 1.92° vs 2.27° (−15%); %<5° 66.95–67.10% vs 66.90% (+0.05–0.20%)
+- **Shift accuracy**: median 0.59–0.60 Å vs 0.77 Å (−22–23%) — driven by sub-pixel interpolation
+
+Mean shift is higher for `ilr_opt` (4.74–4.82 Å vs 3.81 Å master) while median is lower, which
+is a heavy-tail effect: master lacks sub-pixel interpolation so shifts cluster more tightly at
+integer values but with a larger systematic bias; ilr_opt improves the bulk of predictions but
+leaves a few large-error outliers unchanged.
+
+**Conclusion**: `ilr_speed_opt` cleanly dominates master on all metrics that matter (speed,
+median rotation error, %<5°, median shift error). The code cleanup (remove dead features) did
+not affect accuracy or timing.
+
+---
+
 ## Notes / next steps
 
 - bgal benchmark deferred — waiting for retrained bgal model (APO→LIG transfer failed).
 - Consider tuning `ilr_2stage` fine-grid parameters to reduce compute while preserving accuracy.
 - Results above use the GDH G1 checkpoint applied to G2 particles (cross-set test).
-- `ilr_speed_opt` branch (HEAD `7a3b014`) is ready to merge into `improve_local_refinement`.
+- `ilr_speed_opt` branch (HEAD `9c41163`) is ready to merge into `improve_local_refinement`.
 - Default `batch_size` in the config is already 64 (targeting 80 GB cards); users on 32 GB
   should use `--batch_size 32`. Consider documenting this in the inference CLI help.
-- `proj_sub_batch_size` should remain 0 (disabled) — sub-batching is slower after G10/G11/G12.

@@ -20,30 +20,18 @@ def parse_time(run_dir: Path) -> int | None:
 
 
 def parse_compare_poses_log(log: Path) -> dict:
-    """Return stats from a compare_poses log.
-
-    The log format produced by compare_poses.py:
-        Matched N particles via rlnImageName.
-        Found N matching particles.
-
-        Analyzing angular differences with SYM symmetry:
-        Mean: X°
-        Median: X°
-        IQR: X°
-
-        Percentage of particles with angular error:
-        < 5°: X%
-        < 10°: X%
-    """
+    """Return stats from a compare_poses log."""
     stats = {}
     text = log.read_text()
 
     patterns = {
-        "n":     r"Found\s+(\d+)\s+matching\s+particles",
-        "mean":  r"Analyzing angular differences.*?\nMean:\s*([\d.]+)",
-        "median":r"Analyzing angular differences.*?\nMean:.*?\nStandard Deviation:.*?\nMedian:\s*([\d.]+)",
-        "pct5":  r"<\s*5°:\s*([\d.]+)%",
-        "pct10": r"<\s*10°:\s*([\d.]+)%",
+        "n":           r"Found\s+(\d+)\s+matching\s+particles",
+        "mean":        r"Analyzing angular differences.*?\nMean:\s*([\d.]+)",
+        "median":      r"Analyzing angular differences.*?\nMean:.*?\nStandard Deviation:.*?\nMedian:\s*([\d.]+)",
+        "pct5":        r"<\s*5°:\s*([\d.]+)%",
+        "pct10":       r"<\s*10°:\s*([\d.]+)%",
+        "shift_mean":  r"Shift errors.*?\nMean:\s*([\d.]+)",
+        "shift_median":r"Shift errors.*?\nMean:.*?\nStandard Deviation:.*?\nMedian:\s*([\d.]+)",
     }
     for key, pat in patterns.items():
         m = re.search(pat, text, re.DOTALL | re.IGNORECASE)
@@ -59,6 +47,7 @@ def collect_run(run_dir: Path) -> dict:
 
     all_n = 0
     mean_vals, median_vals, pct5_vals, pct10_vals = [], [], [], []
+    shift_mean_vals, shift_median_vals = [], []
 
     for log in sorted(run_dir.glob("compare_poses_half*.log")):
         s = parse_compare_poses_log(log)
@@ -72,15 +61,21 @@ def collect_run(run_dir: Path) -> dict:
             pct5_vals.append(s["pct5"])
         if "pct10" in s:
             pct10_vals.append(s["pct10"])
+        if "shift_mean" in s:
+            shift_mean_vals.append(s["shift_mean"])
+        if "shift_median" in s:
+            shift_median_vals.append(s["shift_median"])
 
     def avg(lst):
         return sum(lst) / len(lst) if lst else None
 
-    result["n_particles"] = all_n if all_n else None
-    result["mean_deg"]    = avg(mean_vals)
-    result["median_deg"]  = avg(median_vals)
-    result["pct5"]        = avg(pct5_vals)
-    result["pct10"]       = avg(pct10_vals)
+    result["n_particles"]   = all_n if all_n else None
+    result["mean_deg"]      = avg(mean_vals)
+    result["median_deg"]    = avg(median_vals)
+    result["pct5"]          = avg(pct5_vals)
+    result["pct10"]         = avg(pct10_vals)
+    result["shift_mean"]    = avg(shift_mean_vals)
+    result["shift_median"]  = avg(shift_median_vals)
     return result
 
 
@@ -116,8 +111,8 @@ def main():
     for r in rows:
         print(f"{r['label']:<40} {fmt(r['time_s'], '.0f'):>10}")
 
-    print("\n### Angular accuracy (degrees, averaged over half1+half2)\n")
-    header2 = f"{'Run':<40} {'N':>6} {'Mean°':>7} {'Median°':>8} {'%<5°':>7} {'%<10°':>7}"
+    print("\n### Accuracy (averaged over half1+half2)\n")
+    header2 = f"{'Run':<40} {'N':>6} {'Mean°':>7} {'Median°':>8} {'%<5°':>7} {'%<10°':>7} {'Med.Shift(Å)':>13} {'Mean.Shift(Å)':>14}"
     print(header2)
     print("-" * len(header2))
     for r in rows:
@@ -128,6 +123,8 @@ def main():
             f" {fmt(r['median_deg']):>8}"
             f" {fmt(r['pct5']):>7}"
             f" {fmt(r['pct10']):>7}"
+            f" {fmt(r['shift_median']):>13}"
+            f" {fmt(r['shift_mean']):>14}"
         )
     print()
 

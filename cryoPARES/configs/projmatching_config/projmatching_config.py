@@ -24,11 +24,8 @@ class Projmatching_config:
         'disable_compile_analyze_cc': 'Disable torch.compile optimization for cross-correlation analysis',
         'compile_analyze_cc_mode': 'Compilation mode for CC analysis: "default" or "max-autotune" (does not work with dynamic batches)',
         'float32_matmul_precision': 'PyTorch float32 matrix multiplication precision mode ("highest", "high", or "medium")',
-        'use_subpixel_shifts': 'Use parabolic sub-pixel interpolation to refine the CC peak location beyond integer-pixel resolution (Change #1)',
-        'zero_dc': 'Zero the DC component of both particle and projection DFTs before correlation, preventing low-frequency bias (Change #2a)',
-        'spectral_whitening': 'Apply particle-adaptive spectral whitening to projections: estimates the per-shell amplitude from the first particle batch and uses it to upweight high-frequency features in templates, analogous to per-shell SNR normalization in RELION (Change #2b)',
-        'whitening_warmup_batches': 'Number of particle batches to average when estimating the spectral whitening filter. More batches → smoother estimate that averages out CTF oscillations across defocus groups; 1 = single-batch (legacy behavior). Only affects the first N batches of each align_star() call.',
-        'fftfreq_min': 'High-pass cutoff frequency as fraction of Nyquist [0, 0.5]; excludes low-frequency ring from CC (Change #5)',
+        'use_subpixel_shifts': 'Use parabolic sub-pixel interpolation to refine the CC peak location beyond integer-pixel resolution',
+        'zero_dc': 'Zero the DC component of both particle and projection DFTs before correlation, preventing low-frequency bias',
         'use_two_stage_search': ('Two-pass coarse-to-fine search. Coarse pass uses grid_distance_degs/'
             'grid_step_degs; fine pass uses fine_grid_distance_degs/fine_grid_step_degs around the top '
             'fine_top_k coarse winners. '
@@ -85,12 +82,8 @@ class Projmatching_config:
 
     float32_matmul_precision: str = "high"
 
-    # Accuracy improvement flags (Change #1, #2a, #5)
-    use_subpixel_shifts: bool = True   # parabolic sub-pixel peak interpolation (Change #1)
-    zero_dc: bool = True               # zero DC component before correlation (Change #2a)
-    spectral_whitening: bool = False   # particle-adaptive spectral whitening on projections; superseded by noise_psd_whitening (Change #2b)
-    whitening_warmup_batches: int = 8  # number of batches to warm-up average the whitening filter (1 = single-batch)
-    fftfreq_min: float = 0.0           # high-pass cutoff as fraction of Nyquist; 0=disabled (benchmarks showed it hurts) (Change #5)
+    use_subpixel_shifts: bool = True   # parabolic sub-pixel peak interpolation
+    zero_dc: bool = True               # zero DC component before correlation
 
     # Two-stage coarse-to-fine search (#6)
     use_two_stage_search: bool = False   # enable two-pass search (coarse then fine); opt-in for max accuracy
@@ -101,11 +94,6 @@ class Projmatching_config:
     # SO(3) sub-step pose interpolation (#7)
     use_so3_interpolation: bool = True   # parabolic sub-step angular refinement after grid search (Change #7)
 
-    # Noise-PSD matched filter (#8a) — symmetric whitening by 1/σ²_noise, RELION-like matched filter
+    # Noise-PSD matched filter — symmetric whitening by 1/σ²_noise, RELION-like matched filter
     noise_psd_whitening: bool = True        # whiten particles and projections by noise PSD from background ring
     noise_psd_warmup_batches: int = 8       # batches to average when building the noise PSD estimate
-
-    # Memory-pressure reduction: process candidates in sub-batches of this size.
-    # 0 = disabled (project all nCand at once). Non-zero values (e.g. 64) reduce peak tensor
-    # size by nCand/sub_batch, which can reduce HBM cache thrashing on large grids.
-    proj_sub_batch_size: int = 0

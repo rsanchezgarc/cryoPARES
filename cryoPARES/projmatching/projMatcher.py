@@ -33,7 +33,7 @@ from cryoPARES.projmatching.projmatchingUtils.myProgressBar import myTqdm as tqd
 from cryoPARES.projmatching.projmatchingUtils.filterToResolution import low_pass_filter_fname
 from cryoPARES.projmatching.projmatchingUtils.fourierOperations import (
     correlate_dft_2d, build_ccorr_sign_grid, compute_dft_3d, _real_to_fourier_2d,
-    _build_whitening_map_2d, _mask_for_dft_2d,
+    _mask_for_dft_2d,
 )
 
 REPORT_ALIGNMENT_DISPLACEMENT = True
@@ -85,14 +85,10 @@ class ProjectionMatcher(nn.Module):
 
         self.use_subpixel_shifts = main_config.projmatching.use_subpixel_shifts
         self.zero_dc = main_config.projmatching.zero_dc
-        self.spectral_whitening = main_config.projmatching.spectral_whitening
-        self.fftfreq_min = main_config.projmatching.fftfreq_min
-        self.whitening_warmup_batches = main_config.projmatching.whitening_warmup_batches
 
         # Noise-PSD matched filter (#8a) — warm-up state reset in align_star().
         self.noise_psd_whitening = main_config.projmatching.noise_psd_whitening
         self.noise_psd_warmup_batches = main_config.projmatching.noise_psd_warmup_batches
-        self.proj_sub_batch_size = main_config.projmatching.proj_sub_batch_size
         self._noise_psd_amp_sum: torch.Tensor | None = None
         self._noise_psd_batches_seen: int = 0
 
@@ -123,12 +119,6 @@ class ProjectionMatcher(nn.Module):
                 )
                 self._fine_so3_interp_nb_idx = fine_nb_idx      # (nFine, 6) long, CPU
                 self._fine_so3_interp_nb_valid = fine_nb_valid  # (nFine, 6) bool, CPU
-
-        # Whitening is estimated from the first N batches of particles (lazy, warm-up averaged).
-        # Averaging over multiple batches smooths out per-defocus CTF oscillations.
-        # Reset at the start of each align_star() call so each dataset gets its own estimate.
-        self._whitening_amp_sum: torch.Tensor | None = None
-        self._whitening_batches_seen: int = 0
 
         self._store_reference_vol(reference_vol, pixel_size)
 
@@ -387,19 +377,6 @@ class ProjectionMatcher(nn.Module):
         assert self.image_shape[-2] % 2 == 0, "Only even boxsizes are allowed"
         self.half_particle_size = 0.5 * self.image_shape[-2]
 
-        # --- Compute 2D whitening map (always built, used only when spectral_whitening=True) ---
-        # Compute fftfreq_max inline (same formula as used later in _store_reference_vol)
-        _fftfreq_max = (
-            min(pixel_size / self.max_resolution_A, 0.5) if self.max_resolution_A is not None else 0.5
-        )
-        # Use the complex reference_vol (before view_as_real storage) for amplitude spectrum
-        _vol_complex = reference_vol if reference_vol.is_complex() else torch.view_as_complex(
-            reference_vol.permute([1, 2, 3, 0]).contiguous()
-        )
-        whitening_map_2d = _build_whitening_map_2d(_vol_complex, img_size=vol_shape[-1],
-                                                   fftfreq_max=_fftfreq_max)
-        self.register_buffer("whitening_map", whitening_map_2d)  # (1, H, W//2+1) complex-safe float
-
         # Prepare mask
         radius_px = self.image_shape[-2] // 2
         if self.mask_radius_angs is not None:
@@ -413,16 +390,14 @@ class ProjectionMatcher(nn.Module):
         else:
             self.fftfreq_max = 0.5
 
-        # Pre-compute band mask for fftshifted rfft DFTs (used when fftfreq_min > 0).
-        # Always built so it can be applied in forward() without branching on __init__.
+        # Band mask (low-pass at fftfreq_max): zeroes out-of-band positions in projs which may
+        # contain uninitialised values from torch.empty in the projection kernel.
         img_size = vol_shape[-1]
         max_freq_px = int(round(self.fftfreq_max * img_size))
-        min_freq_px = int(round(self.fftfreq_min * img_size)) if self.fftfreq_min > 0 else 0
-        # band_mask is computed on CPU at init; moved to device in forward() via self.to(device)
         band_mask = _mask_for_dft_2d(
             img_shape=tuple(self.image_shape),
             max_freq_pixels=max_freq_px,
-            min_freq_pixels=min_freq_px if min_freq_px > 0 else None,
+            min_freq_pixels=None,
             rfft=True,
             fftshifted=True,
             device=torch.device("cpu"),
@@ -459,13 +434,10 @@ class ProjectionMatcher(nn.Module):
         # noise_psd_map applied here gives the full 1/σ²_noise matched-filter weight.
         # band_mask is always included: zeroes out-of-band positions in projs (which may
         # contain uninitialised values from torch.empty in the projection kernel).
-        whitening_filter = self.whitening_map if self.spectral_whitening else None
         if self.noise_psd_whitening:
-            nf = self.noise_psd_map * self.band_mask  # bake band_mask in — no extra HBM pass
-            whitening_filter = nf if whitening_filter is None else whitening_filter * nf
+            whitening_filter = self.noise_psd_map * self.band_mask  # bake band_mask in — no extra HBM pass
         else:
-            whitening_filter = (self.band_mask if whitening_filter is None
-                                else whitening_filter * self.band_mask)
+            whitening_filter = self.band_mask
 
         if ctf is not None:
             # Fold CTF into the projection-side whitening filter to eliminate the separate
@@ -560,57 +532,14 @@ class ProjectionMatcher(nn.Module):
     def _preprocess_particles_to_F(self, imgs: torch.Tensor) -> torch.Tensor:
         """Convert real-space particle images to Fourier domain.
 
-        Applies circular mask, converts to rfft, optionally applies frequency band mask,
-        and runs the whitening warm-up accumulation step (if still in warm-up phase).
-        Side-effect: may update self.whitening_map.
+        Applies circular mask, converts to rfft, then noise-PSD whitening warm-up.
         Returns fparts: shape (B, H, W//2+1[, 2]).
         """
         fparts = _real_to_fourier_2d(imgs * self.rmask,
                                      view_complex_as_two_float32=USE_TWO_FLOAT32_FOR_COMPLEX)
 
-        # Apply frequency band mask (high-pass ring) when fftfreq_min > 0
-        if self.fftfreq_min > 0:
-            if USE_TWO_FLOAT32_FOR_COMPLEX:
-                fparts = fparts * self.band_mask.unsqueeze(-1)
-            else:
-                fparts = fparts * self.band_mask
-
-        # Particle-adaptive whitening warm-up: accumulate amplitude spectrum over the first
-        # `whitening_warmup_batches` batches, then freeze the map.
-        # Averaging over many batches smooths out per-defocus CTF oscillations — particles from
-        # different micrographs have different defocus values, so their CTF envelopes partially
-        # cancel when averaged, leaving a smooth amplitude profile (analogous to RELION's
-        # per-optics-group noise estimation averaged over many particles per group).
-        # Applied to projections only (not particles) to avoid amplifying particle noise.
-        if self.spectral_whitening and self._whitening_batches_seen < self.whitening_warmup_batches:
-            with torch.no_grad():
-                if USE_TWO_FLOAT32_FOR_COMPLEX:
-                    fparts_complex = torch.view_as_complex(fparts.contiguous())
-                else:
-                    fparts_complex = fparts
-                # Batch-mean amplitude; accumulate into a running sum
-                amp = fparts_complex.abs().mean(dim=0)  # (H, W//2+1)
-                if self._whitening_amp_sum is None:
-                    self._whitening_amp_sum = amp
-                else:
-                    self._whitening_amp_sum = self._whitening_amp_sum + amp
-                self._whitening_batches_seen += 1
-
-                # Recompute the whitening map after every accumulated batch so it is valid
-                # even if the run ends before whitening_warmup_batches batches are processed.
-                avg_amp = self._whitening_amp_sum / self._whitening_batches_seen
-                in_band = self.band_mask[0] > 0.1  # binary mask at fftfreq_max boundary
-                amp_in_band = avg_amp * in_band.float()
-                nonzero = amp_in_band[in_band]
-                eps = nonzero.mean() * 1e-3 + 1e-8 if nonzero.numel() > 0 else 1e-8
-                wmap = torch.where(in_band, 1.0 / (amp_in_band + eps), torch.zeros_like(avg_amp))
-                self.whitening_map = wmap.unsqueeze(0)  # (1, H, W//2+1)
-
-        # Experiment A — Symmetric noise-PSD matched filter.
-        # Estimate noise power spectrum from the particle background ring (outside rmask):
-        # FFT(background) gives σ_noise(freq). We whiten particles here by 1/σ_noise, and
-        # whiten projections by the same map in correlateF → total CC weight = 1/σ²_noise,
-        # i.e. the optimal matched filter (RELION-like frequency-dependent noise weighting).
+        # Noise-PSD matched filter: estimate σ_noise(freq) from background ring, whiten
+        # particles here by 1/σ_noise and projections in correlateF → 1/σ²_noise weight.
         if self.noise_psd_whitening:
             with torch.no_grad():
                 if self._noise_psd_batches_seen < self.noise_psd_warmup_batches:
@@ -676,44 +605,26 @@ class ProjectionMatcher(nn.Module):
         """
         ncand = expanded_rotmats.shape[1]
         _shapeIdx = -3 if USE_TWO_FLOAT32_FOR_COMPLEX else -2
-        sub_batch = self.proj_sub_batch_size if self.proj_sub_batch_size > 0 else ncand
 
-        # Pre-compute CTF view (particle-specific, reused across sub-batches).
         ctfs_view = None
         if self.correct_ctf and apply_ctf:
             ctfs_view = ctfs.unsqueeze(1)
             if USE_TWO_FLOAT32_FOR_COMPLEX:
                 ctfs_view = ctfs_view.unsqueeze(-1)
 
-        fparts_u = fparts.unsqueeze(1)
-        all_corrs: list[torch.Tensor] = []
-        all_shifts: list[torch.Tensor] = []
+        projs = self._compute_projections_from_rotmats(expanded_rotmats.reshape(-1, 3, 3))
+        projs = projs.reshape(bsize, ncand, *projs.shape[_shapeIdx:])
 
-        for i in range(0, ncand, sub_batch):
-            rotmats_chunk = expanded_rotmats[:, i:i + sub_batch]  # (B, chunk, 3, 3)
-            n_chunk = rotmats_chunk.shape[1]
+        # Zero DC bin in-place (projs is a freshly owned tensor from the projection kernel).
+        # CTF is folded into correlateF's whitening filter — no separate CTF-apply pass.
+        if self.zero_dc:
+            dc_row = projs.shape[-3] // 2
+            if USE_TWO_FLOAT32_FOR_COMPLEX:
+                projs[..., dc_row, 0, :] = 0
+            else:
+                projs[..., dc_row, 0] = 0
 
-            projs = self._compute_projections_from_rotmats(rotmats_chunk.reshape(-1, 3, 3))
-            projs = projs.reshape(bsize, n_chunk, *projs.shape[_shapeIdx:])
-
-            # Zero DC bin in-place (projs is a freshly owned tensor from the projection kernel).
-            # Do NOT apply CTF here — it is folded into correlateF's whitening filter to save
-            # one O(B·nCand·H·W//2+1) memory pass (~3.9 ms/batch at B=32, nCand=343).
-            if self.zero_dc:
-                dc_row = projs.shape[-3] // 2
-                if USE_TWO_FLOAT32_FOR_COMPLEX:
-                    projs[..., dc_row, 0, :] = 0
-                else:
-                    projs[..., dc_row, 0] = 0
-
-            corrs_chunk, shifts_chunk = self.correlateF(fparts_u, projs, ctf=ctfs_view)
-            all_corrs.append(corrs_chunk)
-            all_shifts.append(shifts_chunk)
-            del projs
-
-        # Reconstruct full (B, nCand) tensors for topk and SO3 interpolation.
-        perImgCorr = torch.cat(all_corrs, dim=1)    # (B, nCand)
-        pixelShiftsXY = torch.cat(all_shifts, dim=1)  # (B, nCand, 2)
+        perImgCorr, pixelShiftsXY = self.correlateF(fparts.unsqueeze(1), projs, ctf=ctfs_view)
 
         maxCorrs, maxCorrsIdxs = perImgCorr.topk(topk, sorted=True, largest=True, dim=-1)
 
@@ -864,9 +775,7 @@ class ProjectionMatcher(nn.Module):
                 starFnameOut
             ), f"Error, the starFnameOut {starFnameOut} already exists"
 
-        # Reset warm-up state so each call re-estimates from its own particles
-        self._whitening_amp_sum = None
-        self._whitening_batches_seen = 0
+        # Reset noise-PSD warm-up state so each call re-estimates from its own particles
         self._noise_psd_amp_sum = None
         self._noise_psd_batches_seen = 0
 

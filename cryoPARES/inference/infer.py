@@ -334,7 +334,7 @@ def distributed_inference(
         try:
             for model_key, rec in fsc_by_model.items():
                 if rec.get("half1") and rec.get("half2") and rec.get("sampling_rate"):
-                    print(f"Computing FSC, " "" if model_key is None else f" for {model_key}...")
+                    print(f"Computing FSC " "" if model_key is None else f" for {model_key}...")
                     vol1 = get_vol(rec["half1"], pixel_size=None)[0]
                     vol2 = get_vol(rec["half2"], pixel_size=None)[0]
                     mask_arr = None

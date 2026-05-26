@@ -309,20 +309,56 @@ def apply_transformation(angles, transform_matrix):
 
 
 def optimize_transformation(angles1, angles2, sym_matrices):
+    """Vectorised Nelder-Mead: precomputes all rotation matrices to avoid per-call overhead."""
+    R1 = Rotation.from_euler(RELION_EULER_CONVENTION, angles1, degrees=True).as_matrix()
+    R2 = Rotation.from_euler(RELION_EULER_CONVENTION, angles2, degrees=True).as_matrix()
+    sym = np.asarray(sym_matrices)
+
     def objective(params):
-        R_transform = Rotation.from_euler('xyz', params, degrees=True).as_matrix()
-        errors = [
-            calculate_angular_difference(
-                euler_to_matrix(angles1[i]),
-                np.dot(R_transform, euler_to_matrix(angles2[i])),
-                sym_matrices,
-            )
-            for i in range(len(angles1))
-        ]
-        return np.mean(errors)
+        R_t = Rotation.from_euler(RELION_EULER_CONVENTION, params, degrees=True).as_matrix()
+        R2t = np.einsum('ij,kjl->kil', R_t, R2)           # (N,3,3): R_t @ R2[k]
+        R_prod = np.einsum('kij,klj->kil', R2t, R1)        # (N,3,3): R2t[k] @ R1[k].T
+        R_sym = sym[:, None] @ R_prod[None]                 # (S,N,3,3)
+        traces = np.einsum('snii->sn', R_sym)               # (S,N)
+        # min angle over symmetry = arccos of max trace (arccos is decreasing)
+        min_angles = np.degrees(np.arccos(np.clip((np.max(traces, axis=0) - 1) / 2, -1.0, 1.0)))
+        return float(np.mean(min_angles))
 
     result = minimize(objective, [0, 0, 0], method='Nelder-Mead')
-    return Rotation.from_euler('xyz', result.x, degrees=True).as_matrix(), result.fun
+    return Rotation.from_euler(RELION_EULER_CONVENTION, result.x, degrees=True).as_matrix(), result.fun
+
+
+def optimize_transformation_svd(angles1, angles2, sym_matrices, n_iter=5):
+    """Find global frame alignment via Procrustes SVD + EM symmetry assignment.
+
+    O(n_iter * N) — no iterative optimiser, much faster than Nelder-Mead for large N.
+    Minimises a Frobenius-distance proxy that is equivalent to the angular metric in practice.
+    """
+    R1 = Rotation.from_euler(RELION_EULER_CONVENTION, angles1, degrees=True).as_matrix()
+    R2 = Rotation.from_euler(RELION_EULER_CONVENTION, angles2, degrees=True).as_matrix()
+    sym = np.asarray(sym_matrices)
+    sym_T = sym.transpose(0, 2, 1)  # (S,3,3) transposed
+    R_t = np.eye(3)
+
+    for _ in range(n_iter):
+        R2t = np.einsum('ij,kjl->kil', R_t, R2)            # (N,3,3)
+        R_prod = np.einsum('kij,klj->kil', R2t, R1)         # (N,3,3): R2t[k] @ R1[k].T
+        # Tr(sym[s] @ R_prod[k]) — max trace = min angle
+        traces = np.einsum('sij,kji->sk', sym, R_prod)       # (S,N)
+        best_s = np.argmax(traces, axis=0)                   # (N,)
+        # Procrustes target: T[k] = sym[best_s[k]].T @ R1[k]
+        T = np.einsum('kij,kjl->kil', sym_T[best_s], R1)    # (N,3,3)
+        M = np.einsum('kij,klj->il', T, R2)                 # (3,3): sum_k T[k] @ R2[k].T
+        U, _, Vh = np.linalg.svd(M)
+        R_t = U @ np.diag([1.0, 1.0, np.linalg.det(U @ Vh)]) @ Vh
+
+    # Final mean error
+    R2t = np.einsum('ij,kjl->kil', R_t, R2)
+    R_prod = np.einsum('kij,klj->kil', R2t, R1)
+    R_sym = sym[:, None] @ R_prod[None]
+    traces_f = np.einsum('snii->sn', R_sym)
+    min_angles = np.degrees(np.arccos(np.clip((np.max(traces_f, axis=0) - 1) / 2, -1.0, 1.0)))
+    return R_t, float(np.mean(min_angles))
 
 
 # ---------------------------------------------------------------------------
@@ -412,6 +448,9 @@ def analyze_angular_differences(starfile1: str,
                                 starfile2: str,
                                 sym: str,
                                 align_frames: bool = False,
+                                align_frames_n_particles: Optional[int] = 2000,
+                                save_transformation: Optional[str] = None,
+                                read_transformation: Optional[str] = None,
                                 plot_angular: bool = False,
                                 plot_shifts: bool = False,
                                 plot_combined: bool = False,
@@ -427,6 +466,9 @@ def analyze_angular_differences(starfile1: str,
     :param starfile2: Second starfile
     :param sym: Symmetry group (C1, C2, C3, ..., D2, D3, ..., T, O, I)
     :param align_frames: Try to find optimal alignment between reference frames
+    :param align_frames_n_particles: Number of particles used to estimate the frame alignment (None = use all). Subsampling speeds up the optimisation with negligible accuracy loss.
+    :param save_transformation: Save the frame alignment matrix to this .npy file (only used with --align_frames)
+    :param read_transformation: Load a previously saved frame alignment matrix from this .npy file instead of re-running the optimisation
     :param plot_angular: Show scatter plot of angular errors vs particle index
     :param plot_shifts: Show scatter plots of shift errors
     :param plot_combined: Show scatter plot of angular vs shift errors
@@ -470,20 +512,38 @@ def analyze_angular_differences(starfile1: str,
         shift_errors = np.linalg.norm(shift_diffs, axis=1)
 
     transform_matrix = np.eye(3)
-    if align_frames:
+    if read_transformation is not None:
+        transform_matrix = np.load(read_transformation)
+        print(f"Loaded transformation matrix from {read_transformation}")
+    elif align_frames:
         print("Optimizing reference frame alignment...")
-        transform_matrix, min_error = optimize_transformation(angles1, angles2, sym_matrices)
+        n_total = len(angles1)
+        if align_frames_n_particles is not None and n_total > align_frames_n_particles:
+            idx = np.random.default_rng().choice(n_total, align_frames_n_particles, replace=False)
+            a1_opt, a2_opt = angles1[idx], angles2[idx]
+            print(f"  Using {align_frames_n_particles} of {n_total} particles for alignment.")
+        else:
+            a1_opt, a2_opt = angles1, angles2
+        transform_matrix, min_error = optimize_transformation_svd(a1_opt, a2_opt, sym_matrices)
         print(f"Optimal alignment found with mean error: {min_error:.2f}°")
-        angles2 = np.array([apply_transformation(a, transform_matrix) for a in angles2])
+        if save_transformation is not None:
+            np.save(save_transformation, transform_matrix)
+            print(f"Saved transformation matrix to {save_transformation}")
 
-    angular_diffs = np.array([
-        calculate_angular_difference(
-            euler_to_matrix(angles1[i]),
-            euler_to_matrix(angles2[i]),
-            sym_matrices,
-        )
-        for i in range(len(angles1))
-    ])
+    if not np.allclose(transform_matrix, np.eye(3)):
+        # Vectorised application of the transform to all angles2
+        R2_all = Rotation.from_euler(RELION_EULER_CONVENTION, angles2, degrees=True).as_matrix()
+        R2_transformed = np.einsum('ij,kjl->kil', transform_matrix, R2_all)
+        angles2 = Rotation.from_matrix(R2_transformed).as_euler(RELION_EULER_CONVENTION, degrees=True)
+
+    # Vectorised angular difference computation (avoids Python loops over particles)
+    _sym = np.asarray(sym_matrices)
+    R1_mats = Rotation.from_euler(RELION_EULER_CONVENTION, angles1, degrees=True).as_matrix()
+    R2_mats = Rotation.from_euler(RELION_EULER_CONVENTION, angles2, degrees=True).as_matrix()
+    R_prod = np.einsum('kij,klj->kil', R2_mats, R1_mats)   # R2[k] @ R1[k].T, (N,3,3)
+    R_sym_all = _sym[:, None] @ R_prod[None]                 # (S,N,3,3)
+    traces_all = np.einsum('snii->sn', R_sym_all)            # (S,N)
+    angular_diffs = np.degrees(np.arccos(np.clip((np.max(traces_all, axis=0) - 1) / 2, -1.0, 1.0)))
 
     stats = {
         'mean': np.mean(angular_diffs),
@@ -492,7 +552,7 @@ def analyze_angular_differences(starfile1: str,
         'iqr': np.percentile(angular_diffs, 75) - np.percentile(angular_diffs, 25),
         'percent_below_5': np.mean(angular_diffs < 5) * 100,
         'percent_below_10': np.mean(angular_diffs < 10) * 100,
-        'transform_matrix': transform_matrix if align_frames else None,
+        'transform_matrix': transform_matrix if not np.allclose(transform_matrix, np.eye(3)) else None,
         'n_particles': len(angular_diffs),
         'shifts_available': shifts_available,
     }
@@ -531,8 +591,8 @@ def analyze_angular_differences(starfile1: str,
     else:
         print("\nShift information not available in both starfiles.")
 
-    if align_frames and stats['transform_matrix'] is not None:
-        print("\nOptimal transformation matrix:")
+    if stats['transform_matrix'] is not None:
+        print("\nTransformation matrix applied:")
         print(stats['transform_matrix'])
 
     return stats

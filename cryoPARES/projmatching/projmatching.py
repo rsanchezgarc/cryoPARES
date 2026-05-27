@@ -328,7 +328,7 @@ def projmatching_starfile(
             halfset=halfmap_subset
         )
         n_particles = len(dataset)
-        particlesStar = dataset.datasets[0].particles.copy()
+        particlesStar = dataset.particles.copy()
         try:
             confidence = torch.tensor(
                 particlesStar.particles_md.loc[:, RELION_PRED_POSE_CONFIDENCE_NAME].values,

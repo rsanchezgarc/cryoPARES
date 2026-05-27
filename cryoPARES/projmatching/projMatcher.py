@@ -491,51 +491,14 @@ class ProjectionMatcher(nn.Module):
             halfset=None,
             subset_idxs=None
     ):
-        # Auto-configure dataset pixel size and box size to match the reference volume.
-        ref_voxel_size = self.vol_voxel_size
-        ref_box_size = int(self.ori_vol_shape[0])
-        ds_cfg = main_config.datamanager.particlesdataset
-        if not np.isclose(ds_cfg.sampling_rate_angs_for_nnet, ref_voxel_size, atol=1e-2):
-            print(f"[projmatching] Auto-setting sampling_rate_angs_for_nnet="
-                  f"{ref_voxel_size:.4f} from reference volume (was {ds_cfg.sampling_rate_angs_for_nnet})")
-            ds_cfg.sampling_rate_angs_for_nnet = ref_voxel_size
-        if ds_cfg.image_size_px_for_nnet is None:
-            print(f"[projmatching] Auto-setting image_size_px_for_nnet={ref_box_size} from reference volume")
-            ds_cfg.image_size_px_for_nnet = ref_box_size
-
-        # Auto-configure dataset pixel size and box size to match the reference volume.
-        # Projmatching uses the original full-size images (BATCH_ORI_IMAGE_NAME), so
-        # sampling_rate_angs_for_nnet must equal the reference voxel size and
-        # image_size_px_for_nnet just needs to be a valid non-None value (unused by projmatching).
-        # TODO: Long-term, implement a simpler ParticlesDataset variant for standalone projmatching
-        #  that does not require NN-specific parameters (image_size_px_for_nnet,
-        #  sampling_rate_angs_for_nnet) and reads pixels at their native size/rate directly.
-        ref_voxel_size = self.vol_voxel_size
-        ref_box_size = int(self.ori_vol_shape[0])
-        ds_cfg = main_config.datamanager.particlesdataset
-        if not np.isclose(ds_cfg.sampling_rate_angs_for_nnet, ref_voxel_size, atol=1e-2):
-            print(f"[projmatching] Auto-setting sampling_rate_angs_for_nnet="
-                  f"{ref_voxel_size:.4f} from reference volume (was {ds_cfg.sampling_rate_angs_for_nnet})")
-            ds_cfg.sampling_rate_angs_for_nnet = ref_voxel_size
-        if ds_cfg.image_size_px_for_nnet is None:
-            print(f"[projmatching] Auto-setting image_size_px_for_nnet={ref_box_size} from reference volume")
-            ds_cfg.image_size_px_for_nnet = ref_box_size
-
-        from cryoPARES.datamanager.datamanager import DataManager
-        dm = DataManager(particles,
-                         symmetry="C1",
-                         particles_dir=data_rootdir,
-                         halfset=halfset,
-                         batch_size=batch_size,
-                         save_train_val_partition_dir=None,
-                         is_global_zero=True,
-                         num_augmented_copies_per_batch=1,
-                         num_dataworkers=n_cpus,
-                         return_ori_imagen=True,
-                         subset_idxs=subset_idxs
-                         )
-
-        ds = dm.create_dataset(None)
+        from cryoPARES.datamanager.rawParticlesDataset import RawParticlesRelionStarDataset
+        ds = RawParticlesRelionStarDataset(
+            particles_star_fname=particles,
+            particles_dir=data_rootdir,
+            halfset=halfset,
+            subset_idxs=subset_idxs,
+            ctf_correction=main_config.datamanager.particlesdataset.ctf_correction,
+        )
         return ds
 
     # ----------------------- Two-stage search helpers -----------------------
@@ -799,17 +762,9 @@ class ProjectionMatcher(nn.Module):
             halfset=halfset
         )
         assert len(particlesDataSet) > 0, "Error, the starfile contains no particles"
-        try:
-            pixel_size = particlesDataSet.sampling_rate
-            particle_size = particlesDataSet[0].original_image_size()
-        except AttributeError:
-            pixel_size = particlesDataSet.datasets[0].original_sampling_rate()
-            particle_size = particlesDataSet.datasets[0].original_image_size()
+        pixel_size = particlesDataSet.sampling_rate
+        particle_size = particlesDataSet.original_image_size()
 
-        # TODO: pixel_size here is sampling_rate_angs_for_nnet (the NN target rate), not the
-        #  original particle pixel size — see TODO in particlesDataset.py::sampling_rate property.
-        #  For standalone projmatching, the user must set sampling_rate_angs_for_nnet to match
-        #  the reference voxel size, even though projmatching uses the original full-size images.
         assert np.isclose(pixel_size, self.vol_voxel_size, atol=1e-2), ("Error, the pixel size of the particle images "
                                                                         f"{pixel_size} "
                                                                         "do not match the voxel size of the reference "
@@ -832,16 +787,12 @@ class ProjectionMatcher(nn.Module):
         self.to(device)
         self.mainLogger.info(f"Total number of particles: {n_particles}")
 
+        particlesStar = particlesDataSet.particles.copy()
         try:
-            particlesStar = particlesDataSet.particles.copy()
-            confidence = particlesDataSet.dataDict["confidences"].sum(-1)
-        except AttributeError:
-            particlesStar = particlesDataSet.datasets[0].particles.copy()
-            try:
-                confidence = torch.tensor(particlesStar.particles_md.loc[:, RELION_PRED_POSE_CONFIDENCE_NAME].values,
-                                          dtype=torch.float32)
-            except KeyError:
-                confidence = torch.ones(len(particlesStar.particles_md))
+            confidence = torch.tensor(particlesStar.particles_md.loc[:, RELION_PRED_POSE_CONFIDENCE_NAME].values,
+                                      dtype=torch.float32)
+        except KeyError:
+            confidence = torch.ones(len(particlesStar.particles_md))
         if "rlnImageId" in particlesStar.particles_md.columns:
             particlesStar.particles_md.drop("rlnImageId", axis=1, inplace=True)
 

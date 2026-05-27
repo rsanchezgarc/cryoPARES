@@ -1,15 +1,11 @@
 import functools
 import warnings
-from abc import ABC, abstractmethod
 from functools import cached_property
 
 import torch
 import numpy as np
 
 from scipy.spatial.transform import Rotation as R
-from sklearn.model_selection import train_test_split
-from starstack.constants import RELION_IMAGE_FNAME
-from starstack.particlesStar import ParticlesStarSet
 from torch.utils.data import Dataset
 from typing import Union, Literal, Optional, List, Tuple, Any, Dict
 
@@ -20,6 +16,8 @@ from cryoPARES.configs.mainConfig import main_config
 from cryoPARES.constants import RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES, \
     RELION_PRED_POSE_CONFIDENCE_NAME, RELION_EULER_CONVENTION, RELION_ORI_POSE_CONFIDENCE_NAME, BATCH_PARTICLES_NAME, \
     BATCH_IDS_NAME, BATCH_POSE_NAME, BATCH_MD_NAME, BATCH_ORI_IMAGE_NAME, BATCH_ORI_CTF_NAME
+from starstack.constants import RELION_IMAGE_FNAME
+from starstack.particlesStar import ParticlesStarSet
 
 warnings.filterwarnings("ignore", "Gimbal lock detected. Setting third angle to zero since it "
                                   "is not possible to uniquely determine all angles.")
@@ -28,9 +26,10 @@ warnings.filterwarnings("ignore", message="The torchvision.datapoints and torchv
 
 from cryoPARES.datamanager.augmentations import AugmenterBase
 from cryoPARES.datamanager.ctf.rfft_ctf import correct_ctf
+from cryoPARES.datamanager.rawParticlesDataset import RawParticlesDataset
 from cryoPARES.utils.torchUtils import data_to_numpy
 
-class ParticlesDataset(Dataset, ABC):
+class ParticlesDataset(RawParticlesDataset):
     #TODO: This class still has several Relion-specific features
     @inject_defaults_from_config(main_config.datamanager.particlesdataset)
     def __init__(self,
@@ -51,7 +50,13 @@ class ParticlesDataset(Dataset, ABC):
                  require_angles: bool = False
                  ):
 
-        super().__init__()
+        super().__init__(
+            halfset=halfset,
+            ctf_correction=ctf_correction,
+            subset_idxs=subset_idxs,
+            require_angles=require_angles,
+            min_maxProb=min_maxProb,
+        )
 
         # Validate required parameters
         if image_size_px_for_nnet is None:
@@ -67,14 +72,10 @@ class ParticlesDataset(Dataset, ABC):
         self.store_data_in_memory = store_data_in_memory
         self.mask_radius_angs = mask_radius_angs
         self.apply_mask_to_img = apply_mask_to_img
-        self.min_maxProb = min_maxProb
         self.reduce_symmetry_in_label = reduce_symmetry_in_label
         self.return_ori_imagen = return_ori_imagen
-        self.require_angles = require_angles
 
         self.symmetry = symmetry.upper()
-        self.halfset = halfset
-        self.subset_idxs = subset_idxs
 
         assert perImg_normalization in (item.value for item in ImgNormalizationType)
         if perImg_normalization == "none":
@@ -86,8 +87,11 @@ class ParticlesDataset(Dataset, ABC):
         else:
             ValueError(f"Error, perImg_normalization {perImg_normalization} wrong option")
 
+        # _correctCtf was already set by super().__init__; since self is a ParticlesDataset
+        # instance, self._correctCtfPhase resolves to ParticlesDataset._correctCtfPhase
+        # (which applies the phase flip to the image).  Re-assign here to make the
+        # override explicit and avoid MRO confusion.
         assert ctf_correction in (item.value for item in CtfCorrectionType)
-
         if ctf_correction == "none":
             self._correctCtf = self._correctCtfNone
         elif ctf_correction.endswith("phase_flip"):
@@ -95,18 +99,21 @@ class ParticlesDataset(Dataset, ABC):
         elif ctf_correction.endswith("ctf_multiply"):
             raise NotImplementedError("Error, ctf_multiply was not implemented")
         else:
-            ValueError(f"Error, perImg_normalization {ctf_correction} wrong option")
-
-        self.ctf_correction_do_concat = ctf_correction.startswith("concat")
-        self.ctf_correction = ctf_correction.removeprefix("concat_")
+            ValueError(f"Error, ctf_correction {ctf_correction} wrong option")
 
         if self.store_data_in_memory:
             self.memory = get_cache(cache_name=None, verbose=0)
             self._getIdx = self.memory.cache(self._getIdx, ignore=["self"], verbose=0)
 
-        self._particles = None
         self._augmenter = None
         self._image_size = None
+
+    # ── sampling_rate override: return NN target rate, not original ───────────
+
+    @property
+    def sampling_rate(self) -> float:
+        """NN-target sampling rate in Å/pixel (sampling_rate_angs_for_nnet)."""
+        return self.sampling_rate_angs_for_nnet
 
     @property
     def nnet_image_size_px(self) -> int:
@@ -115,81 +122,6 @@ class ParticlesDataset(Dataset, ABC):
             return self.particles.particle_shape[-1]
         else:
             return self.image_size_px_for_nnet
-
-    @abstractmethod
-    def load_ParticlesStarSet(self):
-        raise NotImplementedError()
-
-    def _load_ParticlesStarSet(self):
-        part_set = self.load_ParticlesStarSet()
-        self._particles = part_set
-        assert len(part_set) > 0, "Error, no particles were found in the star file"
-
-        if self.require_angles:
-            missing = [name for name in RELION_ANGLES_NAMES if name not in part_set.particles_md.columns]
-            if missing:
-                raise ValueError(
-                    f"Error, the star file is missing angle columns required for training: {missing}. "
-                    f"Training requires pre-aligned particles with poses (rlnAngleRot, rlnAngleTilt, rlnAnglePsi)."
-                )
-
-        if self.subset_idxs is not None:
-            self._particles = self._particles.createSubset(idxs=self.subset_idxs)
-
-        if self.halfset is not None:
-            if "rlnRandomSubset" not in self._particles.particles_md:
-                half1, half2 = train_test_split(self._particles.particles_md.index, test_size=0.5,
-                                              random_state=11, #Using the same seed to ensure that we always split the same way
-                                              shuffle=True)
-                self._particles.particles_md.loc[:, "rlnRandomSubset"] = 1
-                self._particles.particles_md.loc[half2, "rlnRandomSubset"] = 2
-
-            subsetNums = self._particles.particles_md["rlnRandomSubset"].values
-            _subsetNums = set(subsetNums)
-            assert min(_subsetNums) >= 1 and max(_subsetNums) <= 2
-            idxs = np.where(subsetNums == self.halfset)[0]
-            self._particles = self._particles.createSubset(idxs=idxs)
-
-
-        if self.min_maxProb is not None:
-            maxprob = self._particles.particles_md.get(RELION_ORI_POSE_CONFIDENCE_NAME)
-            if maxprob is not None:
-                idxs = np.where(maxprob >= self.min_maxProb)[0]
-                self._particles = self.particles.createSubset(idxs=idxs)
-
-        return self._particles
-
-    @property
-    def particles(self) -> ParticlesStarSet:
-        """
-        a starstack.particlesStar.ParticlesStarSet representing the loaded particles
-        """
-        if self._particles is None:
-            self._particles = self._load_ParticlesStarSet()
-        return self._particles
-
-    @property
-    def sampling_rate(self) -> float:
-        """The particle image sampling rate in A/pixels"""
-        # TODO: This returns sampling_rate_angs_for_nnet (the NN target rate) rather than the
-        #  original particle pixel size. For projmatching, which uses the original full-size images
-        #  (BATCH_ORI_IMAGE_NAME), this forces sampling_rate_angs_for_nnet to be set to match the
-        #  reference voxel size even though the NN size is irrelevant. As a workaround,
-        #  ProjectionMatcher.preprocess_particles() auto-sets these values from the reference volume.
-        #  Long-term, a simpler ParticlesDataset variant for standalone projmatching (without
-        #  NN-specific parameters) would be cleaner — see TODO in projMatcher.py::preprocess_particles.
-        if self.image_size_px_for_nnet is None:
-            return self.particles.sampling_rate
-        else:
-            return self.sampling_rate_angs_for_nnet
-
-    def original_sampling_rate(self) -> float:
-        return self.particles.sampling_rate
-
-    def original_image_size(self) -> int:
-        images_sizes = set([int(x) for x in self.particles.optics_md["rlnImageSize"].values])
-        assert len(images_sizes) == 1, "Error, several rlnImageSize contained in the starfile. Only one rlnImageSize per starfile is supported"
-        return images_sizes.pop()
 
     @property
     def augmenter(self) -> AugmenterBase:
@@ -253,7 +185,7 @@ class ParticlesDataset(Dataset, ABC):
         return img
 
     def _correctCtfPhase(self, img, md_row, optics_data):
-
+        """Apply CTF phase flip to image and return (corrected_img, ctf_envelope)."""
         ctf, wimg = correct_ctf(img, float(optics_data["rlnImagePixelSize"].item()),
                                 dfu=md_row["rlnDefocusU"], dfv=md_row["rlnDefocusV"],
                                 dfang=md_row["rlnDefocusAngle"],
@@ -269,9 +201,6 @@ class ParticlesDataset(Dataset, ABC):
             img = wimg
         ctf = ctf.real
         return img, ctf
-
-    def _correctCtfNone(self, img, md_row, optics_group_num):
-        return img, None
 
     def _getIdx(self, item: int) -> Tuple[str, torch.Tensor, Tuple[torch.Tensor,torch.Tensor,torch.Tensor],
                                          Dict[str, Any], Tuple[torch.Tensor, Optional[torch.Tensor]]]:
@@ -349,9 +278,6 @@ class ParticlesDataset(Dataset, ABC):
 
     def __getitem__(self, item):
         return self.__getitem(item)
-
-    def __len__(self):
-        return len(self.particles)
 
     def updateMd(self, ids: List[str], angles: Optional[Union[torch.Tensor, np.ndarray]] = None,
                  shifts: Optional[Union[torch.Tensor, np.ndarray]] = None,

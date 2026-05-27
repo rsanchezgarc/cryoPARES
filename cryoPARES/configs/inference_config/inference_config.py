@@ -39,7 +39,7 @@ class Inference_config:
         'check_interval_secs': 'Polling interval in seconds for parent loop in distributed processing',
     }
 
-    batch_size: int = 64
+    batch_size: int = 32
     use_cuda: bool = True
     n_cpus_if_no_cuda: int = 4
     random_seed: int = 12313

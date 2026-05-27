@@ -8,18 +8,38 @@ import warnings
 import matplotlib.pyplot as plt
 from typing import Optional
 
+import pandas as pd
+
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+MICROGRAPH_COL_CANDIDATES = ["rlnMicrographName", "rlnImageName"]
+COORD_COL_CANDIDATES = [
+    ("rlnCoordinateX", "rlnCoordinateY"),
+    ("rlnMicrographCoordinatesX", "rlnMicrographCoordinatesY"),
+]
+
+
+# ---------------------------------------------------------------------------
+# Starfile I/O
+# ---------------------------------------------------------------------------
 
 def load_starfile(filename, particles_key="particles"):
     """Load a RELION starfile and return the particles dataframe."""
     try:
         data = starfile.read(filename)
         if particles_key is None:
-            # Get the particles table (usually the last table in the file)
             particles_key = list(data.keys())[-1]
         return data[particles_key]
     except Exception as e:
         raise Exception(f"Error reading starfile {filename}: {str(e)}")
 
+
+# ---------------------------------------------------------------------------
+# Primary match strategy: rlnImageName
+# ---------------------------------------------------------------------------
 
 def extract_particle_id(image_name):
     """Extract particle number from RELION image name (e.g., '0001@/path/stack.mrcs')."""
@@ -27,102 +47,256 @@ def extract_particle_id(image_name):
     return str(int(num)) + "_" + os.path.basename(stackname)
 
 
-def match_particles(df1, df2, allow_partial=True):
+def match_particles_by_image_name(df1, df2, allow_partial=True):
     """
-    Match particles between two dataframes and sort them accordingly.
-    Returns sorted dataframes if matching is possible, otherwise raises an exception.
-    If allow_partial=True, allows partial matching and returns only matching particles.
+    Match particles between two dataframes via rlnImageName and sort them.
+    Returns (df1_sorted, df2_sorted, n_matched) or raises if no match found.
     """
-    # Extract particle IDs
+    df1 = df1.copy()
+    df2 = df2.copy()
+
     df1['particle_id'] = df1['rlnImageName'].apply(extract_particle_id)
     df2['particle_id'] = df2['rlnImageName'].apply(extract_particle_id)
 
-    # Check if particle sets are identical
     particles1 = set(df1['particle_id'])
     particles2 = set(df2['particle_id'])
 
     if allow_partial:
-        # Find common particles
-        common_particles = particles1.intersection(particles2)
-        if len(common_particles) == 0:
-            raise ValueError("No matching particles found between the two starfiles.")
+        common = particles1 & particles2
+        if not common:
+            raise ValueError("No matching particles found via rlnImageName.")
 
-        # Filter dataframes to only include common particles
-        df1_filtered = df1[df1['particle_id'].isin(common_particles)]
-        df2_filtered = df2[df2['particle_id'].isin(common_particles)]
+        df1_f = df1[df1['particle_id'].isin(common)].sort_values('particle_id').reset_index(drop=True)
+        df2_f = df2[df2['particle_id'].isin(common)].sort_values('particle_id').reset_index(drop=True)
 
-        # Sort both dataframes by particle ID
-        df1_sorted = df1_filtered.sort_values('particle_id').reset_index(drop=True)
-        df2_sorted = df2_filtered.sort_values('particle_id').reset_index(drop=True)
-
-        # Warn about partial matching
-        n_merged = len(common_particles)
-        n_df1 = len(particles1)
-        n_df2 = len(particles2)
-        if n_merged < n_df1 or n_merged < n_df2:
-            warnings.warn(f"Warning: The number of matching particles {n_merged} is less than the"
-                          f" total number of particles in the input files ({n_df1};{n_df2}). "
-                          f"Statistics will be computed on the matching subset.")
-
+        n1, n2 = len(particles1), len(particles2)
+        if len(common) < n1 or len(common) < n2:
+            warnings.warn(
+                f"Partial match via rlnImageName: {len(common)} common out of "
+                f"{n1} / {n2}. Statistics computed on the matching subset."
+            )
     else:
-        # Original strict matching logic
-        if len(particles1) != len(particles2):
+        if particles1 != particles2:
             raise ValueError(
                 f"Starfiles contain different particles.\n"
-                f"Particles only in first file: {len(particles1 - particles2)}\n"
-                f"Particles only in second file: {len(particles2 - particles1)}"
+                f"Only in first: {len(particles1 - particles2)}\n"
+                f"Only in second: {len(particles2 - particles1)}"
             )
-        sorted_particles1 = sorted(particles1)
-        sorted_particles2 = sorted(particles2)
+        df1_f = df1.sort_values('particle_id').reset_index(drop=True)
+        df2_f = df2.sort_values('particle_id').reset_index(drop=True)
 
-        if sorted_particles1 != sorted_particles2:
-            for i in range(len(sorted_particles1)):
-                raise ValueError(
-                    f"Starfiles contain different particles.\n"
-                    f"Particles first vs second:\n{sorted_particles1[i]}\n{sorted_particles2[i]}\n"
-                )
+    if not (df1_f['particle_id'] == df2_f['particle_id']).all():
+        raise ValueError("Failed to align particles after sorting by rlnImageName.")
 
-        # Sort both dataframes by particle ID
-        df1_sorted = df1.sort_values('particle_id').reset_index(drop=True)
-        df2_sorted = df2.sort_values('particle_id').reset_index(drop=True)
+    return df1_f, df2_f, len(df1_f)
 
-    # Final verification
-    if not (df1_sorted['particle_id'] == df2_sorted['particle_id']).all():
-        raise ValueError("Failed to match particles even after sorting")
 
-    return df1_sorted, df2_sorted
+# ---------------------------------------------------------------------------
+# Fallback match strategy: micrograph basename + coordinates
+# ---------------------------------------------------------------------------
 
+def _extract_micrograph_basename(series: pd.Series) -> pd.Series:
+    """
+    Normalise micrograph identifiers to a bare filename, handling:
+      - full paths, relative paths, bare names
+      - stack references:  000006@raw_data/.../Foo.mrcs  ->  Foo.mrcs
+    """
+    def _norm(val: str) -> str:
+        s = str(val)
+        if "@" in s:
+            s = s.split("@", 1)[1]
+        return os.path.basename(s)
+
+    return series.map(_norm)
+
+
+def _detect_coord_columns(df: pd.DataFrame):
+    """Return (micrograph_col, x_col, y_col) or raise."""
+    mg_col = next((c for c in MICROGRAPH_COL_CANDIDATES if c in df.columns), None)
+    if mg_col is None:
+        raise ValueError(f"No micrograph column found. Tried: {MICROGRAPH_COL_CANDIDATES}")
+
+    coord_pair = next(
+        ((x, y) for x, y in COORD_COL_CANDIDATES if x in df.columns and y in df.columns),
+        None,
+    )
+    if coord_pair is None:
+        raise ValueError(f"No coordinate columns found. Tried: {COORD_COL_CANDIDATES}")
+
+    return mg_col, coord_pair[0], coord_pair[1]
+
+
+def _prepare_coord_frame(df: pd.DataFrame, mg_col, x_col, y_col,
+                         scale: float, bin_size: float) -> pd.DataFrame:
+    out = df[[mg_col, x_col, y_col]].copy()
+    out = out.rename(columns={mg_col: "__mg", x_col: "__x_raw", y_col: "__y_raw"})
+    out["__mg_key"] = _extract_micrograph_basename(out["__mg"])
+    out["__x"] = pd.to_numeric(out["__x_raw"], errors="coerce") * scale
+    out["__y"] = pd.to_numeric(out["__y_raw"], errors="coerce") * scale
+    if out["__x"].isna().any() or out["__y"].isna().any():
+        raise ValueError("Non-numeric coordinates encountered.")
+    out["__row_id"] = np.arange(len(out), dtype=np.int64)
+    out["__bin_x"] = np.floor(out["__x"] / bin_size).astype(np.int64)
+    out["__bin_y"] = np.floor(out["__y"] / bin_size).astype(np.int64)
+    return out
+
+
+def match_particles_by_coordinates(df1, df2,
+                                   margin: float = 5.0,
+                                   scale1: float = 1.0,
+                                   scale2: float = 1.0):
+    """
+    Match particles by micrograph basename + coordinate proximity.
+
+    Returns (df1_matched, df2_matched, n_matched) where rows are aligned
+    1-to-1 by the nearest neighbour within `margin` (in the scaled space).
+
+    This is intentionally a many-to-one-safe approach: each row in df1 is
+    matched to at most one row in df2 (the first hit within the margin).
+    """
+    mg1, x1, y1 = _detect_coord_columns(df1)
+    mg2, x2, y2 = _detect_coord_columns(df2)
+
+    bin_size = max(1.0, float(margin))
+
+    a = _prepare_coord_frame(df1, mg1, x1, y1, scale1, bin_size)
+    b = _prepare_coord_frame(df2, mg2, x2, y2, scale2, bin_size)
+
+    # Sanity-check basename overlap.
+    common_mgs = set(a["__mg_key"].unique()) & set(b["__mg_key"].unique())
+    if not common_mgs:
+        raise ValueError(
+            "Coordinate fallback: no shared micrograph basenames found. "
+            "Check that both files refer to the same dataset and consider "
+            "adjusting --scale1 / --scale2."
+        )
+    warnings.warn(
+        f"Coordinate fallback: matching on {len(common_mgs)} shared micrographs "
+        f"with margin={margin} px (scale1={scale1}, scale2={scale2})."
+    )
+
+    # Expand b into the 3x3 neighbourhood of each bin.
+    b_parts = []
+    for dx in [-1, 0, 1]:
+        for dy in [-1, 0, 1]:
+            tmp = b.copy()
+            tmp["__bin_x"] += dx
+            tmp["__bin_y"] += dy
+            b_parts.append(tmp)
+    b_exp = pd.concat(b_parts, ignore_index=True)
+
+    merged = a.merge(b_exp, on=["__mg_key", "__bin_x", "__bin_y"],
+                     how="inner", suffixes=("_a", "_b"))
+
+    if merged.empty:
+        raise ValueError("Coordinate fallback: no candidate pairs found after binning.")
+
+    within = merged[
+            ((merged["__x_a"] - merged["__x_b"]).abs() <= margin)
+            & ((merged["__y_a"] - merged["__y_b"]).abs() <= margin)
+    ].copy()
+
+    if within.empty:
+        raise ValueError(
+            f"Coordinate fallback: no pairs within margin={margin} px. "
+            "Try increasing --coord_margin."
+        )
+
+    # Keep the closest match in b for each row in a.
+    within["__dist"] = np.hypot(
+        within["__x_a"] - within["__x_b"],
+        within["__y_a"] - within["__y_b"],
+    )
+    best = (
+        within.sort_values("__dist")
+        .drop_duplicates(subset="__row_id_a", keep="first")
+    )
+
+    idx1 = best["__row_id_a"].to_numpy()
+    idx2 = best["__row_id_b"].to_numpy()
+
+    df1_matched = df1.iloc[idx1].reset_index(drop=True)
+    df2_matched = df2.iloc[idx2].reset_index(drop=True)
+
+    warnings.warn(
+        f"Coordinate fallback matched {len(idx1)} particles "
+        f"(df1 had {len(df1)}, df2 had {len(df2)})."
+    )
+
+    return df1_matched, df2_matched, len(idx1)
+
+
+# ---------------------------------------------------------------------------
+# Unified match dispatcher
+# ---------------------------------------------------------------------------
+
+def match_particles(df1, df2, allow_partial=True,
+                    coord_margin: float = 5.0,
+                    scale1: float = 1.0,
+                    scale2: float = 1.0):
+    """
+    Match particles between two dataframes.
+
+    Strategy 1 (primary): rlnImageName-based exact match.
+    Strategy 2 (fallback): micrograph basename + coordinate proximity,
+        used when rlnImageName is absent in either dataframe or yields
+        zero matches.
+
+    coord_margin, scale1, scale2 are forwarded to the coordinate fallback.
+    """
+    has_image_name = (
+        'rlnImageName' in df1.columns and 'rlnImageName' in df2.columns
+    )
+
+    if has_image_name:
+        try:
+            df1_m, df2_m, n = match_particles_by_image_name(df1, df2, allow_partial)
+            print(f"Matched {n} particles via rlnImageName.")
+            return df1_m, df2_m
+        except ValueError as e:
+            warnings.warn(
+                f"rlnImageName matching failed ({e}); "
+                "falling back to coordinate-based matching."
+            )
+    else:
+        warnings.warn(
+            "rlnImageName not present in both dataframes; "
+            "using coordinate-based matching."
+        )
+
+    df1_m, df2_m, n = match_particles_by_coordinates(
+        df1, df2,
+        margin=coord_margin,
+        scale1=scale1,
+        scale2=scale2,
+    )
+    print(f"Matched {n} particles via coordinates.")
+    return df1_m, df2_m
+
+
+# ---------------------------------------------------------------------------
+# Rotation utilities
+# ---------------------------------------------------------------------------
 
 def euler_to_matrix(angles):
-    """Convert RELION Euler angles (rot, tilt, psi) to rotation matrix."""
     return Rotation.from_euler(RELION_EULER_CONVENTION, angles, degrees=True).as_matrix()
 
 
 def matrix_to_euler(matrix):
-    """Convert rotation matrix to RELION Euler angles (rot, tilt, psi)."""
     return Rotation.from_matrix(matrix).as_euler(RELION_EULER_CONVENTION, degrees=True)
 
 
 def get_symmetry_matrices(sym_group):
-    """Get symmetry matrices using scipy's rotation groups."""
     if sym_group.upper() == 'C1':
         return [np.eye(3)]
-
-    # Parse symmetry group
-    if sym_group[0].upper() in ['C', 'D']:
-        group = f"{sym_group[0].upper()}{sym_group[1:]}"
-    else:
-        group = sym_group.upper()
-
+    group = f"{sym_group[0].upper()}{sym_group[1:]}" if sym_group[0].upper() in ['C', 'D'] else sym_group.upper()
     try:
-        rot_group = Rotation.create_group(group)
-        return rot_group.as_matrix()
+        return Rotation.create_group(group).as_matrix()
     except ValueError as e:
         raise ValueError(f"Invalid symmetry group: {sym_group}. Error: {str(e)}")
 
 
 def calculate_angular_difference(R1, R2, sym_matrices):
-    """Calculate the minimum angular difference between two rotation matrices considering symmetry."""
     R_diffs = np.einsum('ijk,kl->ijl', sym_matrices, np.dot(R2, R1.T))
     traces = np.einsum('ijj->i', R_diffs)
     angles = np.arccos(np.clip((traces - 1) / 2, -1.0, 1.0))
@@ -130,82 +304,98 @@ def calculate_angular_difference(R1, R2, sym_matrices):
 
 
 def apply_transformation(angles, transform_matrix):
-    """Apply a transformation matrix to a set of Euler angles."""
     R = euler_to_matrix(angles)
-    R_transformed = np.dot(transform_matrix, R)
-    return matrix_to_euler(R_transformed)
+    return matrix_to_euler(np.dot(transform_matrix, R))
 
 
 def optimize_transformation(angles1, angles2, sym_matrices):
-    """Find the optimal transformation matrix that aligns two sets of angles."""
+    """Vectorised Nelder-Mead: precomputes all rotation matrices to avoid per-call overhead."""
+    R1 = Rotation.from_euler(RELION_EULER_CONVENTION, angles1, degrees=True).as_matrix()
+    R2 = Rotation.from_euler(RELION_EULER_CONVENTION, angles2, degrees=True).as_matrix()
+    sym = np.asarray(sym_matrices)
 
     def objective(params):
-        # Convert optimization parameters to rotation matrix
-        R_transform = Rotation.from_euler('xyz', params, degrees=True).as_matrix()
+        R_t = Rotation.from_euler(RELION_EULER_CONVENTION, params, degrees=True).as_matrix()
+        R2t = np.einsum('ij,kjl->kil', R_t, R2)           # (N,3,3): R_t @ R2[k]
+        R_prod = np.einsum('kij,klj->kil', R2t, R1)        # (N,3,3): R2t[k] @ R1[k].T
+        R_sym = sym[:, None] @ R_prod[None]                 # (S,N,3,3)
+        traces = np.einsum('snii->sn', R_sym)               # (S,N)
+        # min angle over symmetry = arccos of max trace (arccos is decreasing)
+        min_angles = np.degrees(np.arccos(np.clip((np.max(traces, axis=0) - 1) / 2, -1.0, 1.0)))
+        return float(np.mean(min_angles))
 
-        # Apply transformation to all angles in set 2
-        total_error = 0
-        for i in range(len(angles1)):
-            R1 = euler_to_matrix(angles1[i])
-            R2 = euler_to_matrix(angles2[i])
-            R2_transformed = np.dot(R_transform, R2)
-            error = calculate_angular_difference(R1, R2_transformed, sym_matrices)
-            total_error += error
+    result = minimize(objective, [0, 0, 0], method='Nelder-Mead')
+    return Rotation.from_euler(RELION_EULER_CONVENTION, result.x, degrees=True).as_matrix(), result.fun
 
-        return total_error / len(angles1)
 
-    # Initial guess: identity transformation
-    initial_guess = [0, 0, 0]
+def optimize_transformation_svd(angles1, angles2, sym_matrices, n_iter=5):
+    """Find global frame alignment via Procrustes SVD + EM symmetry assignment.
 
-    # Optimize
-    result = minimize(objective, initial_guess, method='Nelder-Mead')
+    O(n_iter * N) — no iterative optimiser, much faster than Nelder-Mead for large N.
+    Minimises a Frobenius-distance proxy that is equivalent to the angular metric in practice.
+    """
+    R1 = Rotation.from_euler(RELION_EULER_CONVENTION, angles1, degrees=True).as_matrix()
+    R2 = Rotation.from_euler(RELION_EULER_CONVENTION, angles2, degrees=True).as_matrix()
+    sym = np.asarray(sym_matrices)
+    sym_T = sym.transpose(0, 2, 1)  # (S,3,3) transposed
+    R_t = np.eye(3)
 
-    # Convert optimal parameters to rotation matrix
-    optimal_transform = Rotation.from_euler('xyz', result.x, degrees=True).as_matrix()
+    for _ in range(n_iter):
+        R2t = np.einsum('ij,kjl->kil', R_t, R2)            # (N,3,3)
+        R_prod = np.einsum('kij,klj->kil', R2t, R1)         # (N,3,3): R2t[k] @ R1[k].T
+        # Tr(sym[s] @ R_prod[k]) — max trace = min angle
+        traces = np.einsum('sij,kji->sk', sym, R_prod)       # (S,N)
+        best_s = np.argmax(traces, axis=0)                   # (N,)
+        # Procrustes target: T[k] = sym[best_s[k]].T @ R1[k]
+        T = np.einsum('kij,kjl->kil', sym_T[best_s], R1)    # (N,3,3)
+        M = np.einsum('kij,klj->il', T, R2)                 # (3,3): sum_k T[k] @ R2[k].T
+        U, _, Vh = np.linalg.svd(M)
+        R_t = U @ np.diag([1.0, 1.0, np.linalg.det(U @ Vh)]) @ Vh
 
-    return optimal_transform, result.fun
+    # Final mean error
+    R2t = np.einsum('ij,kjl->kil', R_t, R2)
+    R_prod = np.einsum('kij,klj->kil', R2t, R1)
+    R_sym = sym[:, None] @ R_prod[None]
+    traces_f = np.einsum('snii->sn', R_sym)
+    min_angles = np.degrees(np.arccos(np.clip((np.max(traces_f, axis=0) - 1) / 2, -1.0, 1.0)))
+    return R_t, float(np.mean(min_angles))
 
+
+# ---------------------------------------------------------------------------
+# Plotting
+# ---------------------------------------------------------------------------
 
 def plot_angular_errors(angular_errors, output_prefix=None):
-    """Create scatter plot of angular errors vs particle index"""
     plt.figure(figsize=(10, 6))
     plt.scatter(range(len(angular_errors)), angular_errors, alpha=0.6, s=20)
     plt.xlabel('Particle Index')
     plt.ylabel('Angular Error (degrees)')
     plt.title('Angular Errors per Particle')
     plt.grid(True, alpha=0.3)
-
-    # Add horizontal lines for mean and median
-    mean_error = np.mean(angular_errors)
-    median_error = np.median(angular_errors)
-    plt.axhline(y=mean_error, color='red', linestyle='--', alpha=0.7, label=f'Mean: {mean_error:.2f}°')
-    plt.axhline(y=median_error, color='orange', linestyle='--', alpha=0.7, label=f'Median: {median_error:.2f}°')
+    mean_e = np.mean(angular_errors)
+    med_e = np.median(angular_errors)
+    plt.axhline(y=mean_e, color='red', linestyle='--', alpha=0.7, label=f'Mean: {mean_e:.2f}°')
+    plt.axhline(y=med_e, color='orange', linestyle='--', alpha=0.7, label=f'Median: {med_e:.2f}°')
     plt.legend()
-
     if output_prefix:
         plt.savefig(f'{output_prefix}_angular_errors.png', dpi=300, bbox_inches='tight')
     plt.show()
 
 
 def plot_shift_errors(shift_errors, shift_x_errors, shift_y_errors, output_prefix=None):
-    """Create scatter plots for shift errors"""
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
 
-    # Plot 1: Shift magnitude vs particle index
     axes[0].scatter(range(len(shift_errors)), shift_errors, alpha=0.6, s=20, color='blue')
     axes[0].set_xlabel('Particle Index')
     axes[0].set_ylabel('Shift Error Magnitude (Å)')
     axes[0].set_title('Shift Error Magnitude per Particle')
     axes[0].grid(True, alpha=0.3)
-
-    # Add mean and median lines
-    mean_shift = np.mean(shift_errors)
-    median_shift = np.median(shift_errors)
-    axes[0].axhline(y=mean_shift, color='red', linestyle='--', alpha=0.7, label=f'Mean: {mean_shift:.2f}Å')
-    axes[0].axhline(y=median_shift, color='orange', linestyle='--', alpha=0.7, label=f'Median: {median_shift:.2f}Å')
+    mean_s = np.mean(shift_errors)
+    med_s = np.median(shift_errors)
+    axes[0].axhline(y=mean_s, color='red', linestyle='--', alpha=0.7, label=f'Mean: {mean_s:.2f}Å')
+    axes[0].axhline(y=med_s, color='orange', linestyle='--', alpha=0.7, label=f'Median: {med_s:.2f}Å')
     axes[0].legend()
 
-    # Plot 2: X vs Y shift errors
     axes[1].scatter(shift_x_errors, shift_y_errors, alpha=0.6, s=20, color='green')
     axes[1].set_xlabel('X Shift Error (Å)')
     axes[1].set_ylabel('Y Shift Error (Å)')
@@ -214,58 +404,61 @@ def plot_shift_errors(shift_errors, shift_x_errors, shift_y_errors, output_prefi
     axes[1].axhline(y=0, color='black', linestyle='-', alpha=0.3)
     axes[1].axvline(x=0, color='black', linestyle='-', alpha=0.3)
 
-    # Plot 3: Vector field representation (arrows showing shift direction)
-    # Sample every nth particle to avoid overcrowding
-    n_arrows = min(100, len(shift_x_errors))  # Max 100 arrows
+    n_arrows = min(100, len(shift_x_errors))
     step = max(1, len(shift_x_errors) // n_arrows)
-    indices = range(0, len(shift_x_errors), step)
-
-    x_pos = [i for i in indices]
-    y_pos = [0] * len(x_pos)  # All at y=0 baseline
-    u = [shift_x_errors[i] for i in indices]
-    v = [shift_y_errors[i] for i in indices]
-
-    axes[2].quiver(x_pos, y_pos, u, v, angles='xy', scale_units='xy', scale=1, alpha=0.7, width=0.003)
+    idxs = range(0, len(shift_x_errors), step)
+    axes[2].quiver(
+        list(idxs), [0] * len(list(idxs)),
+        [shift_x_errors[i] for i in idxs],
+        [shift_y_errors[i] for i in idxs],
+        angles='xy', scale_units='xy', scale=1, alpha=0.7, width=0.003,
+    )
     axes[2].set_xlabel('Particle Index')
     axes[2].set_ylabel('Shift Error (Å)')
     axes[2].set_title('Shift Error Vectors (sampled)')
     axes[2].grid(True, alpha=0.3)
 
     plt.tight_layout()
-
     if output_prefix:
         plt.savefig(f'{output_prefix}_shift_errors.png', dpi=300, bbox_inches='tight')
     plt.show()
 
 
 def plot_combined_errors(angular_errors, shift_errors, output_prefix=None):
-    """Create scatter plot of angular vs shift errors"""
     plt.figure(figsize=(8, 6))
     plt.scatter(angular_errors, shift_errors, alpha=0.6, s=20, color='purple')
     plt.xlabel('Angular Error (degrees)')
     plt.ylabel('Shift Error Magnitude (Å)')
     plt.title('Angular vs Shift Errors')
     plt.grid(True, alpha=0.3)
-
-    # Calculate and display correlation
-    correlation = np.corrcoef(angular_errors, shift_errors)[0, 1]
-    plt.text(0.05, 0.95, f'Correlation: {correlation:.3f}',
-             transform=plt.gca().transAxes, bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-
+    corr = np.corrcoef(angular_errors, shift_errors)[0, 1]
+    plt.text(0.05, 0.95, f'Correlation: {corr:.3f}',
+             transform=plt.gca().transAxes,
+             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
     if output_prefix:
         plt.savefig(f'{output_prefix}_combined_errors.png', dpi=300, bbox_inches='tight')
     plt.show()
 
 
+# ---------------------------------------------------------------------------
+# Main analysis function
+# ---------------------------------------------------------------------------
+
 def analyze_angular_differences(starfile1: str,
                                 starfile2: str,
                                 sym: str,
                                 align_frames: bool = False,
+                                align_frames_n_particles: Optional[int] = 2000,
+                                save_transformation: Optional[str] = None,
+                                read_transformation: Optional[str] = None,
                                 plot_angular: bool = False,
                                 plot_shifts: bool = False,
                                 plot_combined: bool = False,
                                 plot_all: bool = False,
-                                save_plots: Optional[str] = None):
+                                save_plots: Optional[str] = None,
+                                coord_margin: float = 5.0,
+                                scale1: float = 1.0,
+                                scale2: float = 1.0):
     """
     Compare angular assignments between two RELION starfiles.
 
@@ -273,66 +466,85 @@ def analyze_angular_differences(starfile1: str,
     :param starfile2: Second starfile
     :param sym: Symmetry group (C1, C2, C3, ..., D2, D3, ..., T, O, I)
     :param align_frames: Try to find optimal alignment between reference frames
+    :param align_frames_n_particles: Number of particles used to estimate the frame alignment (None = use all). Subsampling speeds up the optimisation with negligible accuracy loss.
+    :param save_transformation: Save the frame alignment matrix to this .npy file (only used with --align_frames)
+    :param read_transformation: Load a previously saved frame alignment matrix from this .npy file instead of re-running the optimisation
     :param plot_angular: Show scatter plot of angular errors vs particle index
     :param plot_shifts: Show scatter plots of shift errors
     :param plot_combined: Show scatter plot of angular vs shift errors
     :param plot_all: Show all scatter plots
-    :param save_plots: Save plots with this prefix (e.g., "experiment1" -> "experiment1_angular_errors.png")
+    :param save_plots: Save plots with this prefix
+    :param coord_margin: Coordinate match margin in pixels (fallback strategy)
+    :param scale1: Multiply starfile1 coordinates by this factor (fallback strategy)
+    :param scale2: Multiply starfile2 coordinates by this factor (fallback strategy)
     """
     symmetry = sym.upper()
-    # Load starfiles
+
     df1 = load_starfile(starfile1)
     df2 = load_starfile(starfile2)
 
-    # Match and sort particles (allowing partial matching)
-    df1, df2 = match_particles(df1, df2, allow_partial=True)
+    df1, df2 = match_particles(
+        df1, df2,
+        allow_partial=True,
+        coord_margin=coord_margin,
+        scale1=scale1,
+        scale2=scale2,
+    )
 
-    # Get symmetry matrices
     sym_matrices = get_symmetry_matrices(symmetry)
 
-    # Extract Euler angles
     angles1 = df1[['rlnAngleRot', 'rlnAngleTilt', 'rlnAnglePsi']].values
     angles2 = df2[['rlnAngleRot', 'rlnAngleTilt', 'rlnAnglePsi']].values
 
-    # Extract shifts if available
-    shifts_available = all(col in df1.columns and col in df2.columns
-                           for col in ['rlnOriginXAngst', 'rlnOriginYAngst'])
+    shifts_available = all(
+        col in df1.columns and col in df2.columns
+        for col in ['rlnOriginXAngst', 'rlnOriginYAngst']
+    )
 
-    shift_x_errors = []
-    shift_y_errors = []
-    shift_errors = []
+    shift_x_errors = shift_y_errors = shift_errors = []
 
     if shifts_available:
         shifts1 = df1[['rlnOriginXAngst', 'rlnOriginYAngst']].values
         shifts2 = df2[['rlnOriginXAngst', 'rlnOriginYAngst']].values
-
-        # Calculate shift errors
         shift_diffs = shifts1 - shifts2
         shift_x_errors = shift_diffs[:, 0]
         shift_y_errors = shift_diffs[:, 1]
         shift_errors = np.linalg.norm(shift_diffs, axis=1)
 
-    # If requested, try to align reference frames
     transform_matrix = np.eye(3)
-    if align_frames:
+    if read_transformation is not None:
+        transform_matrix = np.load(read_transformation)
+        print(f"Loaded transformation matrix from {read_transformation}")
+    elif align_frames:
         print("Optimizing reference frame alignment...")
-        transform_matrix, min_error = optimize_transformation(angles1, angles2, sym_matrices)
+        n_total = len(angles1)
+        if align_frames_n_particles is not None and n_total > align_frames_n_particles:
+            idx = np.random.default_rng().choice(n_total, align_frames_n_particles, replace=False)
+            a1_opt, a2_opt = angles1[idx], angles2[idx]
+            print(f"  Using {align_frames_n_particles} of {n_total} particles for alignment.")
+        else:
+            a1_opt, a2_opt = angles1, angles2
+        transform_matrix, min_error = optimize_transformation_svd(a1_opt, a2_opt, sym_matrices)
         print(f"Optimal alignment found with mean error: {min_error:.2f}°")
+        if save_transformation is not None:
+            np.save(save_transformation, transform_matrix)
+            print(f"Saved transformation matrix to {save_transformation}")
 
-        # Apply transformation to second set of angles
-        angles2 = np.array([apply_transformation(ang, transform_matrix) for ang in angles2])
+    if not np.allclose(transform_matrix, np.eye(3)):
+        # Vectorised application of the transform to all angles2
+        R2_all = Rotation.from_euler(RELION_EULER_CONVENTION, angles2, degrees=True).as_matrix()
+        R2_transformed = np.einsum('ij,kjl->kil', transform_matrix, R2_all)
+        angles2 = Rotation.from_matrix(R2_transformed).as_euler(RELION_EULER_CONVENTION, degrees=True)
 
-    # Calculate angular differences
-    angular_diffs = []
-    for i in range(len(angles1)):
-        R1 = euler_to_matrix(angles1[i])
-        R2 = euler_to_matrix(angles2[i])
-        diff = calculate_angular_difference(R1, R2, sym_matrices)
-        angular_diffs.append(diff)
+    # Vectorised angular difference computation (avoids Python loops over particles)
+    _sym = np.asarray(sym_matrices)
+    R1_mats = Rotation.from_euler(RELION_EULER_CONVENTION, angles1, degrees=True).as_matrix()
+    R2_mats = Rotation.from_euler(RELION_EULER_CONVENTION, angles2, degrees=True).as_matrix()
+    R_prod = np.einsum('kij,klj->kil', R2_mats, R1_mats)   # R2[k] @ R1[k].T, (N,3,3)
+    R_sym_all = _sym[:, None] @ R_prod[None]                 # (S,N,3,3)
+    traces_all = np.einsum('snii->sn', R_sym_all)            # (S,N)
+    angular_diffs = np.degrees(np.arccos(np.clip((np.max(traces_all, axis=0) - 1) / 2, -1.0, 1.0)))
 
-    angular_diffs = np.array(angular_diffs)
-
-    # Calculate statistics
     stats = {
         'mean': np.mean(angular_diffs),
         'std': np.std(angular_diffs),
@@ -340,9 +552,9 @@ def analyze_angular_differences(starfile1: str,
         'iqr': np.percentile(angular_diffs, 75) - np.percentile(angular_diffs, 25),
         'percent_below_5': np.mean(angular_diffs < 5) * 100,
         'percent_below_10': np.mean(angular_diffs < 10) * 100,
-        'transform_matrix': transform_matrix if align_frames else None,
+        'transform_matrix': transform_matrix if not np.allclose(transform_matrix, np.eye(3)) else None,
         'n_particles': len(angular_diffs),
-        'shifts_available': shifts_available
+        'shifts_available': shifts_available,
     }
 
     if shifts_available:
@@ -353,17 +565,13 @@ def analyze_angular_differences(starfile1: str,
             'shift_iqr': np.percentile(shift_errors, 75) - np.percentile(shift_errors, 25),
         })
 
-    # Generate plots based on user request
     if plot_all or plot_angular:
         plot_angular_errors(angular_diffs, save_plots)
-
     if shifts_available and (plot_all or plot_shifts):
         plot_shift_errors(shift_errors, shift_x_errors, shift_y_errors, save_plots)
-
     if shifts_available and (plot_all or plot_combined):
         plot_combined_errors(angular_diffs, shift_errors, save_plots)
 
-    # Print statistics
     print(f"Found {stats['n_particles']} matching particles.")
     print(f"\nAnalyzing angular differences with {symmetry} symmetry:")
     print(f"Mean: {stats['mean']:.2f}°")
@@ -383,8 +591,8 @@ def analyze_angular_differences(starfile1: str,
     else:
         print("\nShift information not available in both starfiles.")
 
-    if align_frames and stats['transform_matrix'] is not None:
-        print("\nOptimal transformation matrix:")
+    if stats['transform_matrix'] is not None:
+        print("\nTransformation matrix applied:")
         print(stats['transform_matrix'])
 
     return stats

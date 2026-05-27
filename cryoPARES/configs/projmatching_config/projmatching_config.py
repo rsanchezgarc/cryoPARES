@@ -61,7 +61,7 @@ class Projmatching_config:
         'halfmap_subset': 'Select half-map subset (1 or 2) for half-map validation',
     }
 
-    grid_distance_degs: float = 6.0 #maximum angular distance from the original pose. Grid will go from -grid_distance_degs to grid_distance_degs
+    grid_distance_degs: float = 4.0 #maximum angular distance from the original pose. Grid will go from -grid_distance_degs to grid_distance_degs
     grid_step_degs: float = 2.0
     max_batch_rotations: int = 10000  # max product of (batch_size × n_rotations) per forward pass; align_star auto-reduces batch_size to respect this limit
     max_resolution_A: float = 6.

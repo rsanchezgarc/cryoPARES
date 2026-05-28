@@ -1,0 +1,660 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Projection Matching Accuracy Improvement Ideas &mdash; CryoPARES 0.1.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=01f34227"></script>
+      <script src="_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            CryoPARES
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="training_guide.html">Training Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="training_guide.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="training_guide.html#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="training_guide.html#quick-start">Quick Start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="training_guide.html#training-parameters">Training Parameters</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#essential-parameters">Essential Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#data-configuration-parameters">Data Configuration Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#optimizer-configuration">Optimizer Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#model-architecture-parameters">Model Architecture Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#data-augmentation-parameters">Data Augmentation Parameters</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="training_guide.html#monitoring-training-with-tensorboard">Monitoring Training with TensorBoard</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#launching-tensorboard">Launching TensorBoard</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#key-metrics-to-monitor">Key Metrics to Monitor</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="training_guide.html#training-loss-loss">1. Training Loss (<code class="docutils literal notranslate"><span class="pre">loss</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="training_guide.html#validation-loss-val-loss">2. Validation Loss (<code class="docutils literal notranslate"><span class="pre">val_loss</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="training_guide.html#angular-error-geo-degs-val-geo-degs">3. Angular Error (<code class="docutils literal notranslate"><span class="pre">geo_degs</span></code>, <code class="docutils literal notranslate"><span class="pre">val_geo_degs</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="training_guide.html#median-angular-error-val-median-geo-degs">4. Median Angular Error (<code class="docutils literal notranslate"><span class="pre">val_median_geo_degs</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="training_guide.html#learning-rate-lr">5. Learning Rate (<code class="docutils literal notranslate"><span class="pre">lr</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="training_guide.html#visualization-rotation-matrices">6. Visualization: Rotation Matrices</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#example-tensorboard-monitoring-session">Example TensorBoard Monitoring Session</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="training_guide.html#overfitting-and-underfitting">Overfitting and Underfitting</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#what-is-overfitting">What is Overfitting?</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#what-is-underfitting">What is Underfitting?</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#the-sweet-spot">The Sweet Spot</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="training_guide.html#data-preprocessing">Data Preprocessing</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#image-size-and-sampling-rate">Image Size and Sampling Rate</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#masking">Masking</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#ctf-correction">CTF Correction</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="training_guide.html#advanced-training-options">Advanced Training Options</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#continue-training">Continue Training</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#fine-tuning">Fine-tuning</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#half-set-training">Half-Set Training</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#simulated-pre-training">Simulated Pre-training</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#model-compilation">Model Compilation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#debugging-overfitting-on-small-batches">Debugging: Overfitting on Small Batches</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="training_guide.html#troubleshooting-training-issues">Troubleshooting Training Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#training-is-very-slow">Training is very slow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#out-of-memory-errors">Out of memory errors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#too-many-open-files-error">“Too many open files” error</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#loss-is-nan">Loss is NaN</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#model-not-improving">Model not improving</a></li>
+<li class="toctree-l3"><a class="reference internal" href="training_guide.html#validation-loss-jumps-around">Validation loss jumps around</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="training_guide.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="configuration_guide.html">Configuration Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="configuration_guide.html#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="configuration_guide.html#configuration-system-overview">Configuration System Overview</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="configuration_guide.html#configuration-sources-in-order-of-precedence">Configuration Sources (in order of precedence)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="configuration_guide.html#using-config-overrides">Using Config Overrides</a></li>
+<li class="toctree-l3"><a class="reference internal" href="configuration_guide.html#using-yaml-config-files">Using YAML Config Files</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="configuration_guide.html#viewing-available-options">Viewing Available Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="configuration_guide.html#configuration-hierarchy">Configuration Hierarchy</a></li>
+<li class="toctree-l2"><a class="reference internal" href="configuration_guide.html#reading-configuration-files">Reading Configuration Files</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="configuration_guide.html#configuration-file-locations">Configuration File Locations</a></li>
+<li class="toctree-l3"><a class="reference internal" href="configuration_guide.html#how-to-read-configuration-files">How to Read Configuration Files</a></li>
+<li class="toctree-l3"><a class="reference internal" href="configuration_guide.html#example-finding-training-parameters">Example: Finding Training Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="configuration_guide.html#example-finding-nested-parameters">Example: Finding Nested Parameters</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="configuration_guide.html#quick-parameter-reference">Quick Parameter Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="configuration_guide.html#saving-and-loading-configurations">Saving and Loading Configurations</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="configuration_guide.html#exporting-current-configuration">Exporting Current Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="configuration_guide.html#reusing-a-configuration">Reusing a Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="configuration_guide.html#overriding-loaded-config">Overriding Loaded Config</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="configuration_guide.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="cli.html">Command-Line Interface</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#cryopares-train"><code class="docutils literal notranslate"><span class="pre">cryopares_train</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#usage">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#parameters">Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#configuration-overrides">Configuration Overrides</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#view-all-config-options">View All Config Options</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#examples">Examples</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#important-notes">Important Notes</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#cryopares-infer"><code class="docutils literal notranslate"><span class="pre">cryopares_infer</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id1">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id2">Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id3">Configuration Overrides</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id4">Examples</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#output-files">Output Files</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id5">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#cryopares-projmatching"><code class="docutils literal notranslate"><span class="pre">cryopares_projmatching</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id6">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id7">Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#example">Example</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#cryopares-reconstruct"><code class="docutils literal notranslate"><span class="pre">cryopares_reconstruct</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id8">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id9">Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id10">Example</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#cryopares-postprocess"><code class="docutils literal notranslate"><span class="pre">cryopares_postprocess</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id11">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#cryopares-postprocess-bfactor"><code class="docutils literal notranslate"><span class="pre">cryopares_postprocess</span> <span class="pre">bfactor</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="cli.html#id12">Parameters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="cli.html#outputs">Outputs</a></li>
+<li class="toctree-l4"><a class="reference internal" href="cli.html#id13">Examples</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#compactify-checkpoint"><code class="docutils literal notranslate"><span class="pre">compactify_checkpoint</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id14">Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#required-arguments">Required Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#optional-arguments">Optional Arguments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#id15">Examples</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#what-s-included">What’s Included</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#size-reduction">Size Reduction</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#using-compactified-checkpoints">Using Compactified Checkpoints</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#utility-scripts">Utility Scripts</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#gmm-histogram-analysis">GMM Histogram Analysis</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#fsc-computation">FSC Computation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#pose-comparison">Pose Comparison</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#learning-curve-visualization">Learning Curve Visualization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#star-file-histograms">STAR File Histograms</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#id16">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="troubleshooting.html">Troubleshooting Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="troubleshooting.html#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="troubleshooting.html#installation-issues">Installation Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#pip-install-fails-with-dependency-conflicts">pip install fails with dependency conflicts</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#importerror-no-module-named-cryopares">ImportError: No module named ‘cryoPARES’</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#cuda-version-mismatch">CUDA version mismatch</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="troubleshooting.html#configuration-issues">Configuration Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#type-mismatch-errors-when-using-config">Type mismatch errors when using –config</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="troubleshooting.html#file-system-issues">File System Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#too-many-open-files-error">“Too many open files” error</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#permission-denied-when-writing-outputs">Permission denied when writing outputs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#particle-files-not-found">Particle files not found</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="troubleshooting.html#memory-issues">Memory Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#out-of-memory-oom-during-training">Out of memory (OOM) during training</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#out-of-memory-during-inference">Out of memory during inference</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#ram-exhausted-when-loading-data">RAM exhausted when loading data</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="troubleshooting.html#training-issues">Training Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#loss-becomes-nan">Loss becomes NaN</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#training-doesn-t-improve">Training doesn’t improve</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#validation-loss-higher-than-training-loss">Validation loss higher than training loss</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#training-crashes-with-killed">Training crashes with “Killed”</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#checkpoints-not-saving">Checkpoints not saving</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="troubleshooting.html#inference-issues">Inference Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#predicted-poses-are-random">Predicted poses are random</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#reconstruction-is-blurry">Reconstruction is blurry</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#no-particles-passed-confidence-threshold">“No particles passed confidence threshold”</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#inference-slower-than-expected">Inference slower than expected</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="troubleshooting.html#data-issues">Data Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#ctf-parameters-missing">CTF parameters missing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#orientation-columns-missing">Orientation columns missing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#particles-are-poorly-centered">Particles are poorly centered</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#different-sampling-rate-in-data-vs-reference">Different sampling rate in data vs. reference</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="troubleshooting.html#performance-issues">Performance Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#training-is-very-slow">Training is very slow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#inference-is-very-slow">Inference is very slow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#data-loading-is-bottleneck">Data loading is bottleneck</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="troubleshooting.html#cuda-gpu-issues">CUDA/GPU Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#cuda-out-of-memory-but-gpu-seems-empty">“CUDA out of memory” but GPU seems empty</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#multiple-gpus-not-being-used">Multiple GPUs not being used</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#gpu-slower-than-expected">GPU slower than expected</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="troubleshooting.html#output-quality-issues">Output Quality Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#reconstruction-has-artifacts">Reconstruction has artifacts</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#fsc-is-lower-than-expected">FSC is lower than expected</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#reconstructed-map-has-wrong-hand">Reconstructed map has wrong hand</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="troubleshooting.html#getting-more-help">Getting More Help</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#enable-debug-mode">Enable Debug Mode</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#check-logs">Check Logs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="troubleshooting.html#report-issues">Report Issues</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="troubleshooting.html#see-also">See Also</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="api/index.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api/index.html#core-modules">Core Modules</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/training.html">Training API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api/training.html#module-cryoPARES.train.train">Main Training Module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/training.html#module-cryoPARES.train.runTrainOnePartition">Training Execution</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="api/inference.html">Inference API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api/inference.html#single-inferencer">Single Inferencer</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/inference.html#module-cryoPARES.inference.infer">Distributed Inference</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/inference.html#daemon-mode">Daemon Mode</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="api/projection_matching.html">Projection Matching API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api/projection_matching.html#projection-matcher">Projection Matcher</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/projection_matching.html#command-line-interface">Command-Line Interface</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="api/reconstruction.html">Reconstruction API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api/reconstruction.html#module-cryoPARES.reconstruction.reconstructor">Reconstructor</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/reconstruction.html#module-cryoPARES.reconstruction.reconstruct">Command-Line Interface</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="api/data_management.html">Data Management API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api/data_management.html#module-cryoPARES.datamanager.datamanager">Data Manager</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/data_management.html#module-cryoPARES.datamanager.particlesDataset">Particles Dataset</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/data_management.html#module-cryoPARES.datamanager.augmentations">Augmentations</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/data_management.html#module-cryoPARES.datamanager.ctf.rfft_ctf">CTF Correction</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="api/models.html">Models API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api/models.html#module-cryoPARES.models.model">PyTorch Lightning Model</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/models.html#module-cryoPARES.models.image2sphere.image2sphere">Image2Sphere Network</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/models.html#image-encoders">Image Encoders</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/models.html#module-cryoPARES.models.directionalNormalizer.directionalNormalizer">Directional Normalizer</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="api/utils.html">Utilities API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api/utils.html#checkpoint-management">Checkpoint Management</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/utils.html#module-cryoPARES.utils.paths">Path Utilities</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/utils.html#module-cryoPARES.utils.torchUtils">PyTorch Utilities</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/utils.html#module-cryoPARES.utils.reconstructionUtils">Reconstruction Utilities</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/utils.html#geometry-utilities">Geometry Utilities</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Additional Resources</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference external" href="https://github.com/rsanchezgarc/cryoPARES">GitHub Repository</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://www.biorxiv.org/content/10.1101/2025.03.04.641536v2">Paper</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">CryoPARES</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Projection Matching Accuracy Improvement Ideas</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/projmatching_accuracy_improvements.md.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="projection-matching-accuracy-improvement-ideas">
+<h1>Projection Matching Accuracy Improvement Ideas<a class="headerlink" href="#projection-matching-accuracy-improvement-ideas" title="Link to this heading"></a></h1>
+<p>Analysis of bottlenecks in <code class="docutils literal notranslate"><span class="pre">cryoPARES/projmatching/projMatcher.py</span></code> and potential solutions.
+The code improves NN pose estimates (~7°) to ~3° but plateaus there even with fine 1° grids.</p>
+<p>Previously tried with no improvement: rotation matrix composition, Fibonacci grid, normalized CC.</p>
+<hr class="docutils" />
+<section id="testing-protocol">
+<h2>Testing Protocol<a class="headerlink" href="#testing-protocol" title="Link to this heading"></a></h2>
+<p>All changes must be validated through systematic A/B benchmarks before being promoted to default.</p>
+<section id="datasets">
+<h3>Datasets<a class="headerlink" href="#datasets" title="Link to this heading"></a></h3>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>#</p></th>
+<th class="head"><p>Particles</p></th>
+<th class="head"><p>Reference volume</p></th>
+<th class="head"><p>Type</p></th>
+<th class="head"><p>Symmetry</p></th>
+<th class="head"><p>Ground truth</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>1</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">EMPIAR-10166/data/projectionsSamePose/proj_0.star</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">EMPIAR-10166/data/reconstruct.mrc</span></code></p></td>
+<td><p>Synthetic</p></td>
+<td><p>C1</p></td>
+<td><p>Exact known poses in star file</p></td>
+</tr>
+<tr class="row-odd"><td><p>2</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">EMPIAR-10166/data/frealign_stack.star</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">EMPIAR-10166/data/reconstruct.mrc</span></code></p></td>
+<td><p>Real, full size</p></td>
+<td><p>C1</p></td>
+<td><p>Frealign/RELION consensus poses</p></td>
+</tr>
+<tr class="row-even"><td><p>3</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">astex-5534/Refine3D/001_after2DclsEval/run_data.star</span></code></p></td>
+<td><p>Reference vol in same directory</p></td>
+<td><p>Real, PKM2</p></td>
+<td><p><strong>D2</strong></p></td>
+<td><p>RELION consensus poses</p></td>
+</tr>
+</tbody>
+</table>
+<p>All paths are under <code class="docutils literal notranslate"><span class="pre">~/cryo/data/EMPIAR-download/</span></code>.
+For dataset 3, locate the reference <code class="docutils literal notranslate"><span class="pre">.mrc</span></code> in <code class="docutils literal notranslate"><span class="pre">astex-5534/Refine3D/</span></code> before running.</p>
+</section>
+<section id="two-test-scenarios">
+<h3>Two test scenarios<a class="headerlink" href="#two-test-scenarios" title="Link to this heading"></a></h3>
+<p><strong>Scenario A — Recovery from exact ground truth poses (regression test):</strong>
+Feed projmatching the exact ground truth poses. The code must not degrade them.
+Any change that raises the median error vs baseline in Scenario A is a regression. Code that
+improves the baseline is promissing.</p>
+<p><strong>Scenario B — Refinement from perturbed poses (real-world simulation):</strong>
+Perturb ground truth poses by 4–6° random rotation per particle, feed those as input.
+Measure angular error after projmatching vs original ground truth.
+This is the real use case: NN predicts with ~4–7° error, projmatching should recover.</p>
+</section>
+<section id="pose-perturbation-helper">
+<h3>Pose perturbation helper<a class="headerlink" href="#pose-perturbation-helper" title="Link to this heading"></a></h3>
+<p><strong>New file:</strong> <code class="docutils literal notranslate"><span class="pre">tests/benchmarks/perturb_poses.py</span></code></p>
+<p>Reads a star file, applies a random rotation (uniformly sampled from an SO3 ball of radius <code class="docutils literal notranslate"><span class="pre">perturb_deg</span></code>) to each particle’s pose, saves a new star file.</p>
+<p>Key implementation note: perturbation must use <strong>rotation matrix composition</strong>, not Euler angle addition:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">scipy.spatial.transform</span><span class="w"> </span><span class="kn">import</span> <span class="n">Rotation</span>
+<span class="n">R_current</span> <span class="o">=</span> <span class="n">Rotation</span><span class="o">.</span><span class="n">from_euler</span><span class="p">(</span><span class="s2">&quot;ZYZ&quot;</span><span class="p">,</span> <span class="n">current_euler_angles</span><span class="p">,</span> <span class="n">degrees</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">R_delta</span> <span class="o">=</span> <span class="n">Rotation</span><span class="o">.</span><span class="n">random</span><span class="p">(</span><span class="n">n_particles</span><span class="p">)</span>  <span class="c1"># or sample from SO3 ball of given radius</span>
+<span class="n">R_perturbed</span> <span class="o">=</span> <span class="n">R_delta</span> <span class="o">*</span> <span class="n">R_current</span>
+<span class="n">perturbed_eulers</span> <span class="o">=</span> <span class="n">R_perturbed</span><span class="o">.</span><span class="n">as_euler</span><span class="p">(</span><span class="s2">&quot;ZYZ&quot;</span><span class="p">,</span> <span class="n">degrees</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="error-metrics">
+<h3>Error metrics<a class="headerlink" href="#error-metrics" title="Link to this heading"></a></h3>
+<ul class="simple">
+<li><p><strong>Median angular error (degrees)</strong> — primary metric; already printed by <code class="docutils literal notranslate"><span class="pre">align_star</span></code></p></li>
+<li><p>75th and 90th percentile angular error — tracks outlier fraction</p></li>
+<li><p>Median shift error (Å)</p></li>
+<li><p><strong>Dataset 3 (D2):</strong> always use <code class="docutils literal notranslate"><span class="pre">rotation_error_with_sym(symmetry=&quot;D2&quot;)</span></code> — already supported</p></li>
+</ul>
+</section>
+<section id="comparison-protocol">
+<h3>Comparison protocol<a class="headerlink" href="#comparison-protocol" title="Link to this heading"></a></h3>
+<ul class="simple">
+<li><p>Fix <code class="docutils literal notranslate"><span class="pre">n_first_particles=500</span></code>, <code class="docutils literal notranslate"><span class="pre">grid_distance_degs=6</span></code>, <code class="docutils literal notranslate"><span class="pre">grid_step_degs=1</span></code> for all runs</p></li>
+<li><p>Enable one change at a time; always compare against the current-default baseline</p></li>
+<li><p>Report Scenario A and B results side-by-side</p></li>
+</ul>
+</section>
+</section>
+<hr class="docutils" />
+<section id="proposed-changes">
+<h2>Proposed Changes<a class="headerlink" href="#proposed-changes" title="Link to this heading"></a></h2>
+<section id="sub-pixel-shift-refinement-untried-high-confidence">
+<h3>1. Sub-pixel shift refinement ★ (untried, high confidence)<a class="headerlink" href="#sub-pixel-shift-refinement-untried-high-confidence" title="Link to this heading"></a></h3>
+<p><strong>File:</strong> <code class="docutils literal notranslate"><span class="pre">projMatcher.py:503–512</span></code> — <code class="docutils literal notranslate"><span class="pre">_extract_ccor_max</span></code>
+<strong>Config flag:</strong> <code class="docutils literal notranslate"><span class="pre">use_subpixel_shifts:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">True</span></code></p>
+<p><strong>Problem:</strong> Shifts are found at integer pixel accuracy (<code class="docutils literal notranslate"><span class="pre">dtype=torch.int64</span></code>). Consequence:</p>
+<ul class="simple">
+<li><p>1.5 Å/px, 80 Å particle radius → 1 pixel ≈ <strong>1.1°</strong></p></li>
+<li><p>4.0 Å/px, 80 Å radius → 1 pixel ≈ <strong>2.9°</strong></p></li>
+</ul>
+<p>This integer-pixel floor likely explains why sub-1° improvement stops happening regardless of the angular grid.</p>
+<p><strong>Fix:</strong> 3-point parabolic sub-pixel interpolation on both shift axes after finding the integer peak:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># For a 1D peak at index p with values f[p-1], f[p], f[p+1]:</span>
+<span class="n">delta</span> <span class="o">=</span> <span class="p">(</span><span class="n">f</span><span class="p">[</span><span class="n">p</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">f</span><span class="p">[</span><span class="n">p</span><span class="o">+</span><span class="mi">1</span><span class="p">])</span> <span class="o">/</span> <span class="p">(</span><span class="mi">2</span><span class="o">*</span><span class="n">f</span><span class="p">[</span><span class="n">p</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="mi">4</span><span class="o">*</span><span class="n">f</span><span class="p">[</span><span class="n">p</span><span class="p">]</span> <span class="o">+</span> <span class="mi">2</span><span class="o">*</span><span class="n">f</span><span class="p">[</span><span class="n">p</span><span class="o">+</span><span class="mi">1</span><span class="p">])</span>
+<span class="n">subpixel_pos</span> <span class="o">=</span> <span class="n">p</span> <span class="o">+</span> <span class="n">delta</span>
+</pre></div>
+</div>
+<ul class="simple">
+<li><p>Change <code class="docutils literal notranslate"><span class="pre">dtype=torch.int64</span></code> → <code class="docutils literal notranslate"><span class="pre">dtype=torch.float32</span></code> in the shift tensor</p></li>
+<li><p>Guard: skip correction if the peak is at the boundary of the valid shift region</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">forward()</span></code> already calls <code class="docutils literal notranslate"><span class="pre">.float()</span></code> on shifts — no downstream changes needed</p></li>
+</ul>
+<p><strong>Risk:</strong> Low. The CC peak is smooth and band-limited, making parabolic fitting reliable. Well-established in image registration literature.</p>
+</section>
+<hr class="docutils" />
+<section id="raw-cc-dominated-by-low-frequencies-untried">
+<h3>2. Raw CC dominated by low frequencies (untried)<a class="headerlink" href="#raw-cc-dominated-by-low-frequencies-untried" title="Link to this heading"></a></h3>
+<p><strong>File:</strong> <code class="docutils literal notranslate"><span class="pre">fourierOperations.py:135</span></code></p>
+<p><strong>Problem:</strong> <code class="docutils literal notranslate"><span class="pre">result</span> <span class="pre">=</span> <span class="pre">parts</span> <span class="pre">*</span> <span class="pre">conj(projs)</span></code> weights each frequency by its power. Cryo-EM images have a steeply falling power spectrum (~1/f² to 1/f⁴), so the CC score is dominated by large-scale blobs (DC–1/20 Å⁻¹) where all orientations look similar. The orientation-discriminating signal at higher frequencies contributes negligible weight.</p>
+<p><strong>Key distinction from NCC (already tried):</strong> NCC normalizes the total amplitude but does not change the per-frequency weighting. That is why NCC had no effect. The changes below rebalance frequency contributions.</p>
+<section id="a-zero-dc-trivial-nearly-free">
+<h4>2a. Zero DC (trivial, nearly free)<a class="headerlink" href="#a-zero-dc-trivial-nearly-free" title="Link to this heading"></a></h4>
+<p><strong>Config flag:</strong> <code class="docutils literal notranslate"><span class="pre">zero_dc:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">True</span></code></p>
+<p>Set the DC bin to 0 before correlating. Removes background mean bias. Single-line change in <code class="docutils literal notranslate"><span class="pre">correlate_dft_2d</span></code>.</p>
+</section>
+<section id="b-spectral-whitening">
+<h4>2b. Spectral whitening<a class="headerlink" href="#b-spectral-whitening" title="Link to this heading"></a></h4>
+<p><strong>Config flag:</strong> <code class="docutils literal notranslate"><span class="pre">spectral_whitening:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">False</span></code></p>
+<p>Pre-multiply each Fourier product by <code class="docutils literal notranslate"><span class="pre">1</span> <span class="pre">/</span> <span class="pre">sqrt(ref_power_spectrum(|freq|)</span> <span class="pre">+</span> <span class="pre">ε)</span></code>. This makes all frequency shells contribute equally to the correlation score.</p>
+<p>Implementation:</p>
+<ol class="arabic simple">
+<li><p>In <code class="docutils literal notranslate"><span class="pre">_store_reference_vol()</span></code>: compute the 1D radially-averaged amplitude spectrum of <code class="docutils literal notranslate"><span class="pre">reference_vol</span></code> in Fourier space and store as a buffer</p></li>
+<li><p>Build a 2D whitening map by evaluating at each pixel’s <code class="docutils literal notranslate"><span class="pre">|freq|</span></code></p></li>
+<li><p>In <code class="docutils literal notranslate"><span class="pre">correlate_dft_2d</span></code>: accept optional <code class="docutils literal notranslate"><span class="pre">whitening_filter</span></code> argument; multiply both <code class="docutils literal notranslate"><span class="pre">parts</span></code> and <code class="docutils literal notranslate"><span class="pre">projs</span></code> by it before taking the cross-product</p></li>
+</ol>
+<p>The whitening map is computed once at init — no per-batch overhead beyond one extra element-wise multiply.</p>
+<p><strong>Risk:</strong> Medium. Whitening amplifies noise beyond the resolution limit. Always combine with the existing <code class="docutils literal notranslate"><span class="pre">fftfreq_max</span></code> mask.</p>
+</section>
+</section>
+<hr class="docutils" />
+<section id="euler-angle-addition-is-not-rotation-composition-tried-had-problems">
+<h3>3. Euler angle addition is not rotation composition (tried, had problems)<a class="headerlink" href="#euler-angle-addition-is-not-rotation-composition-tried-had-problems" title="Link to this heading"></a></h3>
+<p><strong>File:</strong> <code class="docutils literal notranslate"><span class="pre">projMatcher.py:295–303</span></code>
+<strong>Config flag:</strong> <code class="docutils literal notranslate"><span class="pre">rotation_composition_mode:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">&quot;euler_add&quot;</span></code> | <code class="docutils literal notranslate"><span class="pre">&quot;pre_multiply&quot;</span></code> | <code class="docutils literal notranslate"><span class="pre">&quot;post_multiply&quot;</span></code></p>
+<p><strong>Problem:</strong></p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">expanded_eulerDegs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_so3_delta</span><span class="p">(</span><span class="o">...</span><span class="p">)</span> <span class="o">+</span> <span class="n">eulerDegs</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Adding Euler angles does not compose rotations. The error is O(sin(δ) × sin(β₀)) and is significant for grid ranges ≥ 3°, particularly near the pole (small β₀) where α and γ become degenerate.</p>
+<p><strong>Why it failed before:</strong> The previous attempt likely used only one composition order, or the Cartesian grid’s near-duplicate entries near identity caused the composed search grid to not cover the intended angular neighborhood.</p>
+<p><strong>Proposed fix:</strong> Compose rotation matrices. Two orderings must both be tested:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">R_total</span> <span class="pre">=</span> <span class="pre">R_delta</span> <span class="pre">&#64;</span> <span class="pre">R_current</span></code> — delta applied in lab frame (pre-multiply)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">R_total</span> <span class="pre">=</span> <span class="pre">R_current</span> <span class="pre">&#64;</span> <span class="pre">R_delta</span></code> — delta applied in body frame (post-multiply)</p></li>
+</ul>
+<p><strong>Implementation:</strong></p>
+<ol class="arabic simple">
+<li><p>Add <code class="docutils literal notranslate"><span class="pre">_get_so3_delta_rotmats(device)</span></code>: convert the Cartesian Euler grid to rotation matrices, cache</p></li>
+<li><p>In <code class="docutils literal notranslate"><span class="pre">forward()</span></code>: add conditional branch for each composition mode</p></li>
+<li><p>After finding best poses, index directly into <code class="docutils literal notranslate"><span class="pre">expanded_rotmats</span></code> (avoid Euler round-trip)</p></li>
+</ol>
+<p><strong>Critical requirement:</strong> Do not change the default (<code class="docutils literal notranslate"><span class="pre">euler_add</span></code>) without a clear improvement on <strong>both</strong> Scenario A and B across all datasets.</p>
+</section>
+<hr class="docutils" />
+<section id="non-uniform-so3-grid-wastes-sampling-points-tried-had-problems">
+<h3>4. Non-uniform SO3 grid wastes sampling points (tried, had problems)<a class="headerlink" href="#non-uniform-so3-grid-wastes-sampling-points-tried-had-problems" title="Link to this heading"></a></h3>
+<p><strong>File:</strong> <code class="docutils literal notranslate"><span class="pre">projMatcher.py:122–144</span></code>, <code class="docutils literal notranslate"><span class="pre">grids.py:96–110</span></code>
+<strong>Config flag:</strong> <code class="docutils literal notranslate"><span class="pre">use_fibo_grid:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">False</span></code></p>
+<p><strong>Problem:</strong> <code class="docutils literal notranslate"><span class="pre">so3_near_identity_grid_cartesianprod</span></code> creates n³ points from independent Euler angle ranges. Near identity (small β), α and γ are nearly degenerate — the grid wastes the majority of points sampling the same in-plane rotation. A <code class="docutils literal notranslate"><span class="pre">13³=2197</span></code> point grid (for 6°/1° settings) may effectively cover only ~100–150 distinct rotations.</p>
+<p><strong>Better alternative already in the codebase:</strong> <code class="docutils literal notranslate"><span class="pre">so3_grid_near_identity_fibo(use_small_aprox=True,</span> <span class="pre">output=&quot;matrix&quot;)</span></code> at <code class="docutils literal notranslate"><span class="pre">grids.py:142</span></code>. Uses tangent-space rotation vector sampling with a Fibonacci sphere — uniform geodesic coverage, no Euler singularities, no near-duplicate entries.</p>
+<p><strong>Why it failed before:</strong> The Cartesian grid’s accidental over-representation of the identity (due to duplicates) may have compensated for the wrong Euler addition. Once Change 3 is fixed, the Fibonacci grid may behave correctly.</p>
+<p><strong>Caveat:</strong> The Fibonacci grid may produce a different number of points and different distribution than the Cartesian grid. Verify the count and coverage before enabling. Check for regressions in <code class="docutils literal notranslate"><span class="pre">tests/test_projmatching_distrib.py</span></code>.</p>
+<p><strong>Only test after Change 3 is resolved.</strong></p>
+</section>
+<hr class="docutils" />
+<section id="frequency-band-masking-easy-related-to-2">
+<h3>5. Frequency band masking (easy, related to #2)<a class="headerlink" href="#frequency-band-masking-easy-related-to-2" title="Link to this heading"></a></h3>
+<p><strong>File:</strong> <code class="docutils literal notranslate"><span class="pre">fourierOperations.py</span></code>
+<strong>Config flag:</strong> <code class="docutils literal notranslate"><span class="pre">fftfreq_min:</span> <span class="pre">float</span> <span class="pre">=</span> <span class="pre">0.0</span></code></p>
+<p>A <code class="docutils literal notranslate"><span class="pre">_mask_for_dft_2d</span></code> helper already exists at <code class="docutils literal notranslate"><span class="pre">fourierOperations.py:89</span></code> but is never used in the correlation path. Adding a minimum frequency cutoff (high-pass ring) removes dominant low-frequency content without requiring full spectral whitening.</p>
+<p>Apply band mask <code class="docutils literal notranslate"><span class="pre">fftfreq_min</span> <span class="pre">&lt;</span> <span class="pre">|freq|</span> <span class="pre">&lt;</span> <span class="pre">fftfreq_max</span></code> to both <code class="docutils literal notranslate"><span class="pre">parts</span></code> and <code class="docutils literal notranslate"><span class="pre">projs</span></code> before correlating.</p>
+<p><strong>Risk:</strong> Low. Simple extension of existing infrastructure.</p>
+</section>
+<hr class="docutils" />
+<section id="multi-scale-coarse-to-fine-refinement-architectural">
+<h3>6. Multi-scale coarse-to-fine refinement (architectural)<a class="headerlink" href="#multi-scale-coarse-to-fine-refinement-architectural" title="Link to this heading"></a></h3>
+<p><strong>Problem:</strong> Single-pass grid search with fine step is expensive. For 6°/1° settings, the Cartesian grid has <code class="docutils literal notranslate"><span class="pre">13³</span> <span class="pre">=</span> <span class="pre">2197</span></code> points (most redundant); the Fibonacci grid has ~150 points. Both are searched exhaustively.</p>
+<p><strong>Fix:</strong> Two-pass approach:</p>
+<ol class="arabic simple">
+<li><p>Coarse pass: 3° steps over ±6° → keep top-K candidates per particle</p></li>
+<li><p>Fine pass: 0.5° steps over ±2° → search around each candidate → keep best</p></li>
+</ol>
+<p>Achieves fine-grid accuracy at lower cost. Already partially supported via <code class="docutils literal notranslate"><span class="pre">top_k_poses_localref</span></code> — could be exposed as a two-stage calling convention at the <code class="docutils literal notranslate"><span class="pre">align_star</span></code> level without changes to the core pipeline.</p>
+</section>
+<hr class="docutils" />
+<section id="fft-upsampling-for-sub-pixel-shifts-alternative-to-1">
+<h3>7. FFT upsampling for sub-pixel shifts (alternative to #1)<a class="headerlink" href="#fft-upsampling-for-sub-pixel-shifts-alternative-to-1" title="Link to this heading"></a></h3>
+<p>Instead of parabolic interpolation, upsample the CC map in the region around the integer peak using FFT zero-padding (the CC map is band-limited, so upsampling is exact in theory).</p>
+<p><strong>Advantage over parabolic:</strong> More accurate for non-Gaussian peaks.
+<strong>Disadvantage:</strong> Harder to implement efficiently in batched GPU code. Change #1 (parabolic) is much simpler and usually sufficient.</p>
+</section>
+</section>
+<hr class="docutils" />
+<section id="summary">
+<h2>Summary<a class="headerlink" href="#summary" title="Link to this heading"></a></h2>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>#</p></th>
+<th class="head"><p>Change</p></th>
+<th class="head"><p>Tried</p></th>
+<th class="head"><p>Risk</p></th>
+<th class="head"><p>Likely impact</p></th>
+<th class="head"><p>Order</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>1</p></td>
+<td><p>Sub-pixel shift</p></td>
+<td><p>No</p></td>
+<td><p>Low</p></td>
+<td><p><strong>High</strong></p></td>
+<td><p>1st</p></td>
+</tr>
+<tr class="row-odd"><td><p>2a</p></td>
+<td><p>Zero DC</p></td>
+<td><p>No</p></td>
+<td><p>Trivial</p></td>
+<td><p>Medium</p></td>
+<td><p>1st (bundle)</p></td>
+</tr>
+<tr class="row-even"><td><p>2b</p></td>
+<td><p>Spectral whitening</p></td>
+<td><p>No</p></td>
+<td><p>Medium</p></td>
+<td><p><strong>High</strong></p></td>
+<td><p>2nd</p></td>
+</tr>
+<tr class="row-odd"><td><p>3</p></td>
+<td><p>Rotation composition</p></td>
+<td><p>Yes — failed</p></td>
+<td><p>Medium</p></td>
+<td><p>High if correct</p></td>
+<td><p>3rd</p></td>
+</tr>
+<tr class="row-even"><td><p>4</p></td>
+<td><p>Fibonacci grid</p></td>
+<td><p>Yes — failed</p></td>
+<td><p>Medium</p></td>
+<td><p>Medium (after #3)</p></td>
+<td><p>4th</p></td>
+</tr>
+<tr class="row-odd"><td><p>5</p></td>
+<td><p>Frequency band mask</p></td>
+<td><p>No</p></td>
+<td><p>Low</p></td>
+<td><p>Medium</p></td>
+<td><p>2nd (bundle)</p></td>
+</tr>
+<tr class="row-even"><td><p>6</p></td>
+<td><p>Multi-scale search</p></td>
+<td><p>No</p></td>
+<td><p>Low</p></td>
+<td><p>Speed/accuracy tradeoff</p></td>
+<td><p>Later</p></td>
+</tr>
+<tr class="row-odd"><td><p>7</p></td>
+<td><p>FFT upsampling</p></td>
+<td><p>No</p></td>
+<td><p>Medium</p></td>
+<td><p>Medium (alt to #1)</p></td>
+<td><p>Skip if #1 works</p></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Recommended “fast+safe” default:</strong> Sub-pixel shifts + zero DC (changes 1 + 2a)
+<strong>Recommended “accurate” mode (behind config):</strong> + spectral whitening + Fibonacci grid (once validated)</p>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Ruben Sanchez-Garcia.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

@@ -604,6 +604,10 @@ def main():
         os.unlink(temp_config_path)
 
     ConfigOverrideSystem.update_config_from_configstrings(main_config, config_args, verbose=True)
+
+    from cryoPARES.utils.systemUtils import setup_torch_env
+    setup_torch_env(main_config.inference.float32_matmul_precision)
+
     distributed_inference(**vars(args))
 
 

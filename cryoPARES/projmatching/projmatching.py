@@ -212,7 +212,7 @@ def projmatching_starfile(
         filter_resolution_angst: Optional[float] = None,
         n_jobs: int = 1,
         num_dataworkers: int = 1,
-        batch_size: int = 1024,
+        batch_size: int = 32,
         use_cuda: bool = True,
         verbose: bool = False,
         float32_matmul_precision: Literal["highest", "high", "medium"] = "high",
@@ -287,10 +287,16 @@ def projmatching_starfile(
         # Particle subsampling
         if n_first_particles is not None:
             star_data = starfile.read(particles_star_fname)
-            particles_df = star_data["particles"][:n_first_particles]
-            optics_df = star_data["optics"]
-            star_in_limited = os.path.join(tmpdir, f"input_particles_{os.path.basename(particles_star_fname)}")
-            starfile.write({"optics": optics_df, "particles": particles_df}, star_in_limited)
+            if isinstance(star_data, dict):
+                particles_df = star_data["particles"][:n_first_particles]
+                optics_df = star_data["optics"]
+                star_in_limited = os.path.join(tmpdir, f"input_particles_{os.path.basename(particles_star_fname)}")
+                starfile.write({"optics": optics_df, "particles": particles_df}, star_in_limited)
+            else:
+                # Old RELION 3.0 single-block format — DataFrame directly
+                particles_df = star_data[:n_first_particles]
+                star_in_limited = os.path.join(tmpdir, f"input_particles_{os.path.basename(particles_star_fname)}")
+                starfile.write(particles_df, star_in_limited)
             particles_star_fname = star_in_limited
 
 
@@ -322,7 +328,7 @@ def projmatching_starfile(
             halfset=halfmap_subset
         )
         n_particles = len(dataset)
-        particlesStar = dataset.datasets[0].particles.copy()
+        particlesStar = dataset.particles.copy()
         try:
             confidence = torch.tensor(
                 particlesStar.particles_md.loc[:, RELION_PRED_POSE_CONFIDENCE_NAME].values,
@@ -422,6 +428,10 @@ def main():
     args, config_args = parser.parse_args()
     config_args = convert_config_args_to_absolute_paths(config_args)
     ConfigOverrideSystem.update_config_from_configstrings(main_config, config_args, verbose=True)
+
+    from cryoPARES.utils.systemUtils import setup_torch_env
+    setup_torch_env(main_config.projmatching.float32_matmul_precision)
+
     projmatching_starfile(**vars(args))
 
 

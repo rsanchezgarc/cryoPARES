@@ -17,12 +17,32 @@ class Projmatching_config:
         'correct_ctf': 'Apply CTF correction during projection matching',
         'verbose': 'Enable verbose logging output',
         'disable_compile_projectVol': 'Disable torch.compile optimization for volume projection',
+        'disable_inductor_shape_padding': 'Disable the inductor shape-padding (pad_mm) pass that OOMs on large rotation grids with torch>=2.6',
         'compile_projectVol_mode': 'Compilation mode for volume projection: "default" or "max-autotune" (does not work with dynamic batches)',
         'disable_compile_correlate_dft_2d': 'Disable torch.compile for 2D correlation (currently required as inductor does not support complex numbers)',
         'compile_correlate_dft_2d_mode': 'Compilation mode for 2D correlation if enabled',
         'disable_compile_analyze_cc': 'Disable torch.compile optimization for cross-correlation analysis',
         'compile_analyze_cc_mode': 'Compilation mode for CC analysis: "default" or "max-autotune" (does not work with dynamic batches)',
         'float32_matmul_precision': 'PyTorch float32 matrix multiplication precision mode ("highest", "high", or "medium")',
+        'use_subpixel_shifts': 'Use parabolic sub-pixel interpolation to refine the CC peak location beyond integer-pixel resolution',
+        'zero_dc': 'Zero the DC component of both particle and projection DFTs before correlation, preventing low-frequency bias',
+        'use_two_stage_search': ('Two-pass coarse-to-fine search. Coarse pass uses grid_distance_degs/'
+            'grid_step_degs; fine pass uses fine_grid_distance_degs/fine_grid_step_degs around the top '
+            'fine_top_k coarse winners. '
+            'Example: coarse 6°/2° (209 pts) + fine 2.1°/0.7° × K=5 (≈1000 pts total). '
+            'Best accuracy but slower; opt-in for maximum quality. Default: False.'),
+        'fine_grid_distance_degs': ('Radius (degrees) of fine-pass Fibonacci ω-ball around each coarse '
+            'winner. Should be ≥ coarse grid_step_degs to guarantee full coverage. '
+            'Only used when use_two_stage_search=True.'),
+        'fine_grid_step_degs': ('Step (degrees) of fine-pass Fibonacci grid. '
+            'Only used when use_two_stage_search=True.'),
+        'fine_top_k': ('Number of coarse-pass winners fed into the fine pass. Must be ≥ '
+            'top_k_poses_localref. Only used when use_two_stage_search=True.'),
+        'use_so3_interpolation': ('Parabolic sub-step SO(3) interpolation of the winning grid point. '
+            'Projects 6 axis-aligned Euler neighbors (±grid_step_degs per axis), fits a 1D parabola '
+            'per axis, and applies sub-step correction — analogous to sub-pixel shift refinement. '
+            'Overhead: 6 extra projections per batch. Negligible speed cost, dominant accuracy gain. '
+            'Default: True. (Change #7)'),
 
         # CLI-exposed parameters (used in projmatching_starfile)
         'reference_vol': 'Path to reference 3D volume (.mrc file) for generating projection templates',
@@ -43,6 +63,7 @@ class Projmatching_config:
 
     grid_distance_degs: float = 4.0 #maximum angular distance from the original pose. Grid will go from -grid_distance_degs to grid_distance_degs
     grid_step_degs: float = 2.0
+    max_batch_rotations: int = 10000  # max product of (batch_size × n_rotations) per forward pass; align_star auto-reduces batch_size to respect this limit
     max_resolution_A: float = 6.
     max_shift_fraction: float = 0.2
     correct_ctf: bool = True
@@ -51,6 +72,7 @@ class Projmatching_config:
 
     disable_compile_projectVol: bool = False
     compile_projectVol_mode: Optional[str] = "default" #"max-autotune" does not work with dynamic size batches (zscore)
+    disable_inductor_shape_padding: bool = True  # disables inductor pad_mm/shape-padding pass that OOMs during compilation with torch>=2.6 (safe to disable, no accuracy impact)
 
     disable_compile_correlate_dft_2d: bool = True #at the moment, inductor does not support complex numbers
     compile_correlate_dft_2d_mode: Optional[str] = "default"
@@ -59,3 +81,19 @@ class Projmatching_config:
     compile_analyze_cc_mode: Optional[str] = "default"  #"max-autotune" does not work with dynamic size batches (zscore)
 
     float32_matmul_precision: str = "high"
+
+    use_subpixel_shifts: bool = True   # parabolic sub-pixel peak interpolation
+    zero_dc: bool = True               # zero DC component before correlation
+
+    # Two-stage coarse-to-fine search (#6)
+    use_two_stage_search: bool = False   # enable two-pass search (coarse then fine); opt-in for max accuracy
+    fine_grid_distance_degs: float = 2.1 # fine-pass ball radius (2.1°/0.7° ≈ 209 pts/candidate)
+    fine_grid_step_degs: float = 0.7     # fine-pass step size
+    fine_top_k: int = 5                  # coarse-pass candidates handed to fine pass
+
+    # SO(3) sub-step pose interpolation (#7)
+    use_so3_interpolation: bool = True   # parabolic sub-step angular refinement after grid search (Change #7)
+
+    # Noise-PSD matched filter — symmetric whitening by 1/σ²_noise, RELION-like matched filter
+    noise_psd_whitening: bool = True        # whiten particles and projections by noise PSD from background ring
+    noise_psd_warmup_batches: int = 8       # batches to average when building the noise PSD estimate

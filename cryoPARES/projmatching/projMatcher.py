@@ -31,7 +31,10 @@ from cryoPARES.projmatching.projmatchingUtils.loggers import getWorkerLogger
 from cryoPARES.projmatching.projmatchingUtils.myProgressBar import myTqdm as tqdm
 
 from cryoPARES.projmatching.projmatchingUtils.filterToResolution import low_pass_filter_fname
-from cryoPARES.projmatching.projmatchingUtils.fourierOperations import correlate_dft_2d, compute_dft_3d, _real_to_fourier_2d
+from cryoPARES.projmatching.projmatchingUtils.fourierOperations import (
+    correlate_dft_2d, build_ccorr_sign_grid, compute_dft_3d, _real_to_fourier_2d,
+    _mask_for_dft_2d,
+)
 
 REPORT_ALIGNMENT_DISPLACEMENT = True
 USE_TWO_FLOAT32_FOR_COMPLEX = True
@@ -80,10 +83,61 @@ class ProjectionMatcher(nn.Module):
         self.max_shift_fraction = main_config.projmatching.max_shift_fraction
         self.mask_radius_angs = mask_radius_angs
 
+        self.use_subpixel_shifts = main_config.projmatching.use_subpixel_shifts
+        self.zero_dc = main_config.projmatching.zero_dc
+
+        # Noise-PSD matched filter (#8a) — warm-up state reset in align_star().
+        self.noise_psd_whitening = main_config.projmatching.noise_psd_whitening
+        self.noise_psd_warmup_batches = main_config.projmatching.noise_psd_warmup_batches
+        self._noise_psd_amp_sum: torch.Tensor | None = None
+        self._noise_psd_batches_seen: int = 0
+
+        # SO(3) sub-step interpolation (#7): precomputed neighbor tables for fast O(1) lookup.
+        self.use_so3_interpolation = main_config.projmatching.use_so3_interpolation
+        if self.use_so3_interpolation:
+            # Coarse stage (used in single-stage and two-stage coarse)
+            nb_idx, nb_valid = _precompute_so3_interp_neighbors(
+                self.grid_distance_degs, self.grid_step_degs
+            )
+            self._so3_interp_nb_idx = nb_idx      # (nCoarse, 6) long, CPU
+            self._so3_interp_nb_valid = nb_valid  # (nCoarse, 6) bool, CPU
+
+        # Two-stage coarse-to-fine search
+        self.use_two_stage_search = main_config.projmatching.use_two_stage_search
+        self.fine_grid_distance_degs = main_config.projmatching.fine_grid_distance_degs
+        self.fine_grid_step_degs = main_config.projmatching.fine_grid_step_degs
+        self.fine_top_k = main_config.projmatching.fine_top_k
+        if self.use_two_stage_search:
+            assert self.fine_top_k >= self.top_k_poses_localref, (
+                f"fine_top_k ({self.fine_top_k}) must be >= top_k_poses_localref "
+                f"({self.top_k_poses_localref})"
+            )
+            # Fine-stage SO(3) interpolation neighbor tables
+            if self.use_so3_interpolation:
+                fine_nb_idx, fine_nb_valid = _precompute_so3_interp_neighbors(
+                    self.fine_grid_distance_degs, self.fine_grid_step_degs
+                )
+                self._fine_so3_interp_nb_idx = fine_nb_idx      # (nFine, 6) long, CPU
+                self._fine_so3_interp_nb_valid = fine_nb_valid  # (nFine, 6) bool, CPU
+
         self._store_reference_vol(reference_vol, pixel_size)
+
+        # Noise PSD buffer (image_shape known after _store_reference_vol).
+        if self.noise_psd_whitening:
+            H, W_half = self.image_shape[-2], self.image_shape[-2] // 2 + 1
+            self.register_buffer("noise_psd_map", torch.ones(1, H, W_half))
+
         self.verbose = verbose
         self.correct_ctf = correct_ctf
         self.mainLogger = getWorkerLogger(self.verbose)
+
+        if main_config.projmatching.disable_inductor_shape_padding:
+            try:
+                import torch._inductor.config as _inductor_cfg
+                _inductor_cfg.shape_padding = False
+            except Exception:
+                pass
+
         if USE_TWO_FLOAT32_FOR_COMPLEX:
             if main_config.projmatching.disable_compile_projectVol:
                 from cryoPARES.projmatching.projmatchingUtils.extract_central_slices_as_real import \
@@ -119,6 +173,63 @@ class ProjectionMatcher(nn.Module):
     def device(self):
         return self.reference_vol.device
 
+    def _get_so3_delta_rotmats(self, device: torch.device) -> torch.Tensor:
+        """Return the coarse Cartesian delta grid as rotation matrices (nDelta, 3, 3). Cached."""
+        if (not hasattr(self, "_so3_delta_rotmats_cache") or
+                self._so3_delta_rotmats_cache.device != device):
+            euler_grid = self._get_so3_delta(device)  # (nDelta, 3) in degrees
+            self._so3_delta_rotmats_cache = get_rotmat(euler_grid, device=device)
+        return self._so3_delta_rotmats_cache
+
+    def _get_fine_delta_rotmats(self, device: torch.device) -> torch.Tensor:
+        """Return fine-pass delta grid as rotation matrices (nFine, 3, 3).
+
+        Uses Cartesian Euler grid (same structure as coarse grid) to enable fast SO(3)
+        interpolation via precomputed neighbor tables. Benchmarks show Cartesian consistently
+        outperforms Fibonacci on all real targets. Cached on self.
+        """
+        if (not hasattr(self, "_fine_delta_rotmats_cache") or
+                self._fine_delta_rotmats_cache.device != device):
+            # Use Cartesian grid for fine stage (enables neighbor table lookup)
+            euler_grid = self._get_so3_delta_fine(device)  # (nFine, 3) in degrees
+            self._fine_delta_rotmats_cache = get_rotmat(euler_grid, device=device)
+        return self._fine_delta_rotmats_cache
+
+    def _get_so3_delta_fine(self, device: torch.device) -> torch.Tensor:
+        """Return fine-stage Cartesian Euler delta grid (nFine, 3) in degrees. Cached."""
+        if (not hasattr(self, "_so3_delta_fine_cache") or
+                self._so3_delta_fine_cache.device != device):
+            n_angles = math.ceil(self.fine_grid_distance_degs * 2 / self.fine_grid_step_degs)
+            if n_angles % 2 == 0:
+                n_angles += 1
+            euler_grid = so3_near_identity_grid_cartesianprod(
+                self.fine_grid_distance_degs, n_angles,
+                transposed=False, degrees=True, remove_duplicates=False
+            )
+            self._so3_delta_fine_cache = euler_grid.to(device, dtype=torch.float32)
+        return self._so3_delta_fine_cache
+
+    # ── Coarse-stage composition functions (set dynamically in __init__) ────────
+
+    def _compose_coarse_euler_add(self, rotmats: torch.Tensor) -> torch.Tensor:
+        """Expand input poses over the Cartesian delta grid via Euler angle addition.
+
+        Args:
+            rotmats: (B, topK, 3, 3) — input rotation matrices
+        Returns:
+            (B, topK*nCoarse, 3, 3) — all candidate rotation matrices
+        """
+        bsize = rotmats.size(0)
+        eulerDegs = get_eulers(rotmats)                    # (B, topK, 3)
+        euler_delta = self._get_so3_delta(rotmats.device)  # (nCoarse, 3)
+        expanded = (euler_delta.unsqueeze(0).unsqueeze(0) +
+                    eulerDegs.unsqueeze(2))                 # (B, topK, nCoarse, 3)
+        return get_rotmat(
+            expanded.reshape(-1, 3), device=rotmats.device
+        ).reshape(bsize, -1, 3, 3)
+
+    # ── Delta-grid helpers ───────────────────────────────────────────────────
+
     def _get_so3_delta(self, device: torch.device, as_rotmats=False):
         """
         Build a cached SO(3) delta grid (degrees) around (0,0,0) using
@@ -142,6 +253,85 @@ class ProjectionMatcher(nn.Module):
                 self._so3_delta_is_rotmat = False
 
         return self._so3_delta
+
+    # ----------------------- Batch-size helpers -----------------------
+
+    @staticmethod
+    def _count_rotations(distance_deg: float, step_deg: float, fibo: bool = False) -> int:
+        """Return the number of SO(3) grid points without allocating GPU tensors."""
+        if fibo:
+            from cryoPARES.geometry.grids import so3_grid_near_identity_fibo
+            rotmats, _ = so3_grid_near_identity_fibo(
+                distance_deg=distance_deg,
+                spacing_deg=step_deg,
+                use_small_aprox=True,
+                output="matrix",
+            )
+            return len(rotmats) + 1  # +1 for prepended identity
+        else:
+            n_angles = math.ceil(distance_deg * 2 / step_deg)
+            n_angles = n_angles if n_angles % 2 == 1 else n_angles + 1
+            grid = so3_near_identity_grid_cartesianprod(
+                distance_deg, n_angles, transposed=False, degrees=True, remove_duplicates=False
+            )
+            return len(grid)
+
+    def _check_batch_size(self, batch_size: int, device: str) -> None:
+        """Warn if batch_size is too large (OOM risk) or too small (throughput penalty).
+
+        Memory model: the compiled projection kernel materialises a
+            (batch_size × n_rotations × n_valid_coords × 9) float32 buffer
+        where n_valid_coords ≈ π/4 × H × (H//2+1) is the number of rfft grid points
+        within the Nyquist sphere. This dominates peak GPU memory.
+
+        For a GPU with V GB of VRAM:
+            safe_bs = floor(0.85 × V / (n_rots × n_valid × 9 × 4 bytes))
+
+        Memory scales with BOTH batch_size and n_rotations.
+        """
+        if not torch.cuda.is_available():
+            return
+
+        try:
+            dev = torch.device(device)
+            if dev.type != "cuda":
+                return
+            gpu_idx = dev.index if dev.index is not None else torch.cuda.current_device()
+            total_vram_gb = torch.cuda.get_device_properties(gpu_idx).total_memory / 1e9
+        except Exception:
+            return  # can't query GPU properties; skip
+
+        import math
+        H = self.image_shape[-2]
+        n_valid = int(math.pi / 4 * H * (H // 2 + 1))   # rfft pts within Nyquist sphere
+
+        if self.use_two_stage_search:
+            n_fine = self._count_rotations(self.fine_grid_distance_degs,
+                                           self.fine_grid_step_degs, fibo=False)
+            n_rots = self.fine_top_k * n_fine      # fine pass materialises the largest buffer
+        else:
+            n_rots = self._count_rotations(self.grid_distance_degs, self.grid_step_degs)
+
+        gb_per_batch = n_rots * n_valid * 9 * 4 / 1e9     # GB per batch element
+
+        safe_bs    = max(1, int(total_vram_gb * 0.85 / gb_per_batch))
+        underuse_bs = max(1, safe_bs // 8)  # below 12.5 % of safe capacity is wasteful
+
+        est_peak_gb = batch_size * gb_per_batch
+        if batch_size > safe_bs:
+            print(
+                f"[projmatching] WARNING: batch_size={batch_size} may exhaust GPU memory "
+                f"({total_vram_gb:.0f} GB, estimated peak {est_peak_gb:.1f} GB). "
+                f"Recommended: --batch_size {safe_bs}."
+            )
+        elif batch_size < underuse_bs:
+            safe_peak_gb = safe_bs * gb_per_batch
+            print(
+                f"[projmatching] NOTE: batch_size={batch_size} uses only "
+                f"{est_peak_gb:.1f}/{total_vram_gb:.0f} GB GPU memory. "
+                f"Consider --batch_size {safe_bs} ({safe_peak_gb:.1f} GB) "
+                f"for better GPU throughput."
+            )
 
     # ----------------------- Fourier-specific core -----------------------
 
@@ -200,6 +390,25 @@ class ProjectionMatcher(nn.Module):
         else:
             self.fftfreq_max = 0.5
 
+        # Band mask (low-pass at fftfreq_max): zeroes out-of-band positions in projs which may
+        # contain uninitialised values from torch.empty in the projection kernel.
+        img_size = vol_shape[-1]
+        max_freq_px = int(round(self.fftfreq_max * img_size))
+        band_mask = _mask_for_dft_2d(
+            img_shape=tuple(self.image_shape),
+            max_freq_pixels=max_freq_px,
+            min_freq_pixels=None,
+            rfft=True,
+            fftshifted=True,
+            device=torch.device("cpu"),
+        )
+        self.register_buffer("band_mask", band_mask)  # (1, H, W//2+1)
+
+        # Phase-ramp sign buffer: folds the post-irfftn ifftshift_2d in correlate_dft_2d
+        # into a frequency-domain pre-multiply, saving one O(B·nCand·H·W) pass.
+        ccorr_sign_grid = build_ccorr_sign_grid(img_size, img_size, device=torch.device("cpu"))
+        self.register_buffer("ccorr_sign_grid", ccorr_sign_grid)  # (1, 1, H, W//2+1)
+
     def _projectF(self, rotMats: torch.Tensor) -> torch.Tensor:
 
         return extract_central_slices_rfft_3d(
@@ -218,8 +427,28 @@ class ProjectionMatcher(nn.Module):
         projs = projs.permute([0, 2, 3, 1]).contiguous()
         return projs
 
-    def correlateF(self, parts: torch.Tensor, projs: torch.Tensor):
-        return self._correlateCrossCorrelation(parts, projs)
+    def correlateF(self, parts: torch.Tensor, projs: torch.Tensor,
+                   ctf: torch.Tensor | None = None):
+        # Build projection-side whitening filter.
+        # noise_psd_whitening: particles pre-whitened in _preprocess_particles_to_F;
+        # noise_psd_map applied here gives the full 1/σ²_noise matched-filter weight.
+        # band_mask is always included: zeroes out-of-band positions in projs (which may
+        # contain uninitialised values from torch.empty in the projection kernel).
+        if self.noise_psd_whitening:
+            whitening_filter = self.noise_psd_map * self.band_mask  # bake band_mask in — no extra HBM pass
+        else:
+            whitening_filter = self.band_mask
+
+        if ctf is not None:
+            # Fold CTF into the projection-side whitening filter to eliminate the separate
+            # O(B·nCand·H·W//2+1) CTF-apply pass (~3.9 ms/batch at B=32, nCand=343).
+            # ctf may have a trailing size-1 dim (USE_TWO_FLOAT32_FOR_COMPLEX padding); squeeze it.
+            ctf_real = ctf.squeeze(-1) if ctf.shape[-1] == 1 else ctf
+            whitening_filter = ctf_real if whitening_filter is None else whitening_filter * ctf_real
+
+        return self._correlateCrossCorrelation(parts, projs,
+                                               whitening_filter=whitening_filter,
+                                               ccorr_sign_grid=self.ccorr_sign_grid)
 
     def _apply_ctfF(self, projs, ctf):
         return projs * ctf
@@ -235,27 +464,23 @@ class ProjectionMatcher(nn.Module):
         else:
             return None
 
-    def _correlateCrossCorrelation(self, parts: torch.Tensor, projs: torch.Tensor):
-        corrs = self.correlate_dft_2d(parts, projs)
+    def _correlateCrossCorrelation(self, parts: torch.Tensor, projs: torch.Tensor,
+                                    whitening_filter: torch.Tensor | None = None,
+                                    ccorr_sign_grid: torch.Tensor | None = None):
+        corrs = self.correlate_dft_2d(parts, projs,
+                                       whitening_filter=whitening_filter,
+                                       ccorr_sign_grid=ccorr_sign_grid)
         b, options, l0, l1 = corrs.shape
         h0, h1, w0, w1 = _get_begin_end_from_max_shift(corrs.shape[-2:], self.max_shift_fraction)
         maxcorr, maxcorrIdxs = self._extract_ccor_max(corrs.reshape(-1, *corrs.shape[-2:]),
-                                                      h0, h1, w0, w1)
+                                                      h0, h1, w0, w1,
+                                                      use_subpixel=self.use_subpixel_shifts)
 
         del corrs
         return maxcorr.reshape(b, options), maxcorrIdxs.reshape(b, options, 2)
 
-    # ----------------------- Shared helpers originally in base -----------------------
-
-    def _compute_projections_from_euleres(self, so3_degs_grid: torch.Tensor):
-        so3_degs_grid = so3_degs_grid.to(self.reference_vol.device)
-        rotMats = get_rotmat(so3_degs_grid, device=so3_degs_grid.device)
-        projs = self.projectF(rotMats)
-        return projs, so3_degs_grid
-
     def _compute_projections_from_rotmats(self, rotMats: torch.Tensor):
-        projs = self.projectF(rotMats)
-        return projs
+        return self.projectF(rotMats)
 
     def preprocess_particles(
             self,
@@ -266,74 +491,241 @@ class ProjectionMatcher(nn.Module):
             halfset=None,
             subset_idxs=None
     ):
-        # Auto-configure dataset pixel size and box size to match the reference volume.
-        ref_voxel_size = self.vol_voxel_size
-        ref_box_size = int(self.ori_vol_shape[0])
-        ds_cfg = main_config.datamanager.particlesdataset
-        if not np.isclose(ds_cfg.sampling_rate_angs_for_nnet, ref_voxel_size, atol=1e-2):
-            print(f"[projmatching] Auto-setting sampling_rate_angs_for_nnet="
-                  f"{ref_voxel_size:.4f} from reference volume (was {ds_cfg.sampling_rate_angs_for_nnet})")
-            ds_cfg.sampling_rate_angs_for_nnet = ref_voxel_size
-        if ds_cfg.image_size_px_for_nnet is None:
-            print(f"[projmatching] Auto-setting image_size_px_for_nnet={ref_box_size} from reference volume")
-            ds_cfg.image_size_px_for_nnet = ref_box_size
-
-        from cryoPARES.datamanager.datamanager import DataManager
-        dm = DataManager(particles,
-                         symmetry="C1",
-                         particles_dir=data_rootdir,
-                         halfset=halfset,
-                         batch_size=batch_size,
-                         save_train_val_partition_dir=None,
-                         is_global_zero=True,
-                         num_augmented_copies_per_batch=1,
-                         num_dataworkers=n_cpus,
-                         return_ori_imagen=True,
-                         subset_idxs=subset_idxs
-                         )
-
-        ds = dm.create_dataset(None)
+        from cryoPARES.datamanager.rawParticlesDataset import RawParticlesRelionStarDataset
+        ds = RawParticlesRelionStarDataset(
+            particles_star_fname=particles,
+            particles_dir=data_rootdir,
+            halfset=halfset,
+            subset_idxs=subset_idxs,
+            ctf_correction=main_config.datamanager.particlesdataset.ctf_correction,
+        )
         return ds
 
-    def forward(self, imgs, ctfs, rotmats):
-        assert imgs.shape[1:] == self.rmask.shape, (f"Error, particle images and reference maps must have "
-                                                    f"same shape ({imgs.shape[1:], self.rmask.shape}). Make sure that "
-                                                    f"you are using the same box size and sampling rate for the particles"
-                                                    f"and the reference volume.")
+    # ----------------------- Two-stage search helpers -----------------------
+
+    def _preprocess_particles_to_F(self, imgs: torch.Tensor) -> torch.Tensor:
+        """Convert real-space particle images to Fourier domain.
+
+        Applies circular mask, converts to rfft, then noise-PSD whitening warm-up.
+        Returns fparts: shape (B, H, W//2+1[, 2]).
+        """
         fparts = _real_to_fourier_2d(imgs * self.rmask,
                                      view_complex_as_two_float32=USE_TWO_FLOAT32_FOR_COMPLEX)
 
-        eulerDegs = get_eulers(rotmats)
-        expanded_eulerDegs = (self._get_so3_delta(eulerDegs.device).unsqueeze(0).unsqueeze(0) +
-                              eulerDegs.unsqueeze(2)) #BxTopKxRotsx3
-        bsize = expanded_eulerDegs.size(0)
-        n_input_angles = expanded_eulerDegs.size(2)
-        expanded_eulerDegs = expanded_eulerDegs.reshape(bsize, -1, 3)  # unrolling all the input angles into one dim
-        # TODO: Remove duplicate angles if n_input_angles > 1. Duplicates may happen if several topK poses were provided as input. Affects speed
-        # Also, for large batches, there could be redundant angles (to a certain precision)
-        projs = self._compute_projections_from_euleres(expanded_eulerDegs.reshape(-1, 3))[0]
+        # Noise-PSD matched filter: estimate σ_noise(freq) from background ring, whiten
+        # particles here by 1/σ_noise and projections in correlateF → 1/σ²_noise weight.
+        if self.noise_psd_whitening:
+            with torch.no_grad():
+                if self._noise_psd_batches_seen < self.noise_psd_warmup_batches:
+                    # FFT of background (outside mask) — always compute in complex (not two-float32)
+                    background = imgs * (1.0 - self.rmask)  # (B, H, W) — outside-mask region
+                    fbackground = _real_to_fourier_2d(background, view_complex_as_two_float32=False)  # (B, H, W//2+1) complex
+                    bg_amp = fbackground.abs().mean(dim=0)  # (H, W//2+1) batch-mean amplitude
 
+                    if self._noise_psd_amp_sum is None:
+                        self._noise_psd_amp_sum = bg_amp
+                    else:
+                        self._noise_psd_amp_sum = self._noise_psd_amp_sum + bg_amp
+                    self._noise_psd_batches_seen += 1
 
-        if self.correct_ctf:
-            ctfs = ctfs.unsqueeze(1)
+                    avg_amp = self._noise_psd_amp_sum / self._noise_psd_batches_seen
+                    in_band = self.band_mask[0] > 0.1
+                    amp_in_band = avg_amp * in_band.float()
+                    nonzero = amp_in_band[in_band]
+                    eps = nonzero.mean() * 1e-3 + 1e-8 if nonzero.numel() > 0 else 1e-8
+                    nmap = torch.where(in_band, 1.0 / (amp_in_band + eps), torch.zeros_like(avg_amp))
+                    self.noise_psd_map = nmap.unsqueeze(0)  # (1, H, W//2+1)
+
+            # Apply noise-PSD whitening to particles (particle side of the symmetric matched filter).
             if USE_TWO_FLOAT32_FOR_COMPLEX:
-                _shapeIdx = -3
-                ctfs = ctfs.unsqueeze(-1)
+                fparts = fparts * self.noise_psd_map.unsqueeze(-1)
             else:
-                _shapeIdx = -2
-            projs = self._apply_ctfF(projs.reshape(bsize, -1, *projs.shape[_shapeIdx:]), ctfs)
-        del ctfs
-        perImgCorr, pixelShiftsXY = self.correlateF(fparts.unsqueeze(1), projs)
-        maxCorrs, maxCorrsIdxs = perImgCorr.topk(self.top_k_poses_localref, sorted=True, largest=True, dim=-1)
+                fparts = fparts * self.noise_psd_map
 
-        batch_idxs_range = torch.arange(pixelShiftsXY.size(0)).unsqueeze(1)
-        pixelShiftsXY = pixelShiftsXY[batch_idxs_range, maxCorrsIdxs]
-        predEulers = expanded_eulerDegs[
-            batch_idxs_range, maxCorrsIdxs]  #TODO: Try to minimize euler->rotmat conversions
-        predRotMats = get_rotmat(predEulers)
+        # Zero DC bin in-place (no clone needed — fparts is a freshly allocated tensor).
+        # Callers rely on DC being zeroed here so correlate_dft_2d can skip the clone.
+        if self.zero_dc:
+            dc_row = fparts.shape[-3] // 2  # H//2 in (B, H, W//2+1[, 2])
+            if USE_TWO_FLOAT32_FOR_COMPLEX:
+                fparts[..., dc_row, 0, :] = 0
+            else:
+                fparts[..., dc_row, 0] = 0
+
+        return fparts
+
+    def _extract_cc_peaks(
+            self,
+            fparts: torch.Tensor,
+            ctfs: torch.Tensor,
+            expanded_rotmats: torch.Tensor,
+            bsize: int,
+            topk: int,
+            apply_ctf: bool = True,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Project all candidates, correlate with particles, return top-k. No SO3 refinement.
+
+        Args:
+            fparts:           (B, H, W//2+1[, 2]) — Fourier-domain particle images
+            ctfs:             (B, H, W//2+1[, 2]) — CTF envelopes
+            expanded_rotmats: (B, nCand, 3, 3)    — all candidate rotation matrices
+            bsize:            batch size B
+            topk:             number of winners to return
+
+        Returns:
+            corrs_full:    (B, nCand) — full correlation array (for confidence scoring)
+            maxCorrs:      (B, topk)
+            predRotMats:   (B, topk, 3, 3)
+            pixelShiftsXY: (B, topk, 2)
+        """
+        ncand = expanded_rotmats.shape[1]
+        _shapeIdx = -3 if USE_TWO_FLOAT32_FOR_COMPLEX else -2
+
+        ctfs_view = None
+        if self.correct_ctf and apply_ctf:
+            ctfs_view = ctfs.unsqueeze(1)
+            if USE_TWO_FLOAT32_FOR_COMPLEX:
+                ctfs_view = ctfs_view.unsqueeze(-1)
+
+        projs = self._compute_projections_from_rotmats(expanded_rotmats.reshape(-1, 3, 3))
+        projs = projs.reshape(bsize, ncand, *projs.shape[_shapeIdx:])
+
+        # Zero DC bin in-place (projs is a freshly owned tensor from the projection kernel).
+        # CTF is folded into correlateF's whitening filter — no separate CTF-apply pass.
+        if self.zero_dc:
+            dc_row = projs.shape[-3] // 2
+            if USE_TWO_FLOAT32_FOR_COMPLEX:
+                projs[..., dc_row, 0, :] = 0
+            else:
+                projs[..., dc_row, 0] = 0
+
+        perImgCorr, pixelShiftsXY = self.correlateF(fparts.unsqueeze(1), projs, ctf=ctfs_view)
+
+        maxCorrs, maxCorrsIdxs = perImgCorr.topk(topk, sorted=True, largest=True, dim=-1)
+
+        batch_range = torch.arange(bsize, device=fparts.device).unsqueeze(1)
+        pixelShiftsXY_topk = pixelShiftsXY[batch_range, maxCorrsIdxs]   # (B, topk, 2)
+        predRotMats = expanded_rotmats[batch_range, maxCorrsIdxs]         # (B, topk, 3, 3)
+
+        return perImgCorr, maxCorrs, predRotMats, pixelShiftsXY_topk
+
+
+    def _forward_two_stage(
+            self,
+            fparts: torch.Tensor,
+            ctfs: torch.Tensor,
+            rotmats: torch.Tensor,
+            bsize: int,
+            apply_ctf: bool = True,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Two-stage coarse-to-fine search.
+
+        Stage 1 (coarse): Cartesian 6°/2° grid → top fine_top_k winners.
+        Stage 2 (fine):   Cartesian fine grid around each coarse winner → best pose,
+                          with O(1) table-based SO(3) parabolic sub-step refinement.
+        Confidence is computed against the coarse correlation distribution.
+        """
+        coarse_expanded = self._compose_coarse_euler_add(rotmats)      # (B, nCoarse, 3, 3)
+        coarse_corrs_full, _, coarse_rotmats, _ = self._extract_cc_peaks(
+            fparts, ctfs, coarse_expanded, bsize, topk=self.fine_top_k, apply_ctf=apply_ctf
+        )
+        del coarse_expanded
+
+        fine_delta = self._get_fine_delta_rotmats(rotmats.device)      # (nFine, 3, 3)
+        fine_expanded = (fine_delta[None, None] @
+                         coarse_rotmats.unsqueeze(2)).reshape(bsize, -1, 3, 3)
+
+        # Extract top-k winners from fine stage (or top-1 if using SO3 interpolation)
+        topk = 1 if self.use_so3_interpolation else self.top_k_poses_localref
+        fine_corrs_grid, fine_corrs, fine_rotmats, fine_shifts = self._extract_cc_peaks(
+            fparts, ctfs, fine_expanded, bsize, topk=topk, apply_ctf=apply_ctf
+        )
+        del fine_expanded, ctfs
+
+        # Apply O(1) table-based SO3 parabolic sub-step refinement to fine-stage winner
+        if self.use_so3_interpolation:
+            # fine_corrs_grid: (B, nCoarse_topk * nFine)
+            # Reshape to (B, nCoarse_topk, nFine) for per-coarse-winner processing
+            nFine = fine_delta.size(0)
+            fine_corrs_reshaped = fine_corrs_grid.reshape(bsize, self.fine_top_k, nFine)  # (B, K, nFine)
+
+            # Find best coarse winner and its local fine winner
+            coarse_winner_idx = fine_corrs_reshaped.max(dim=-1)[0].argmax(dim=-1)  # (B,) which coarse
+            batch_range = torch.arange(bsize, device=fparts.device)
+            fine_corrs_local = fine_corrs_reshaped[batch_range, coarse_winner_idx]  # (B, nFine)
+            fine_winner_idx = fine_corrs_local.argmax(dim=-1)  # (B,) which fine
+
+            # Get winner Euler angles and apply parabolic refinement
+            winner_euler = get_eulers(fine_rotmats[:, 0])  # (B, 3) degrees
+
+            # Parabolic refinement via precomputed neighbor table (ZERO extra projections)
+            nb_idx = self._fine_so3_interp_nb_idx.to(fparts.device)
+            nb_valid = self._fine_so3_interp_nb_valid.to(fparts.device)
+            delta_euler = _so3_interpolate_euler_winner(
+                fine_corrs_local, fine_winner_idx, nb_idx, nb_valid, self.fine_grid_step_degs
+            )  # (B, 3) degrees - sub-step correction
+
+            # Add sub-step correction to winner Euler angles and convert back to rotmat
+            refined_euler = winner_euler + delta_euler  # (B, 3) degrees
+            fine_rotmats = get_rotmat(refined_euler, device=fparts.device).unsqueeze(1)  # (B, 1, 3, 3)
+
+            # Keep winner's correlation and shift
+            fine_corrs = fine_corrs[:, :1]  # (B, 1)
+            fine_shifts = fine_shifts[:, :1]  # (B, 1, 2)
+
+        mean_corr = coarse_corrs_full.mean(-1, keepdims=True)
+        std_corr  = coarse_corrs_full.std(-1, keepdims=True)
+        comparedWeight = torch.distributions.Normal(mean_corr, std_corr + 1e-6).cdf(fine_corrs)
+        predShiftsAngsXY = -(fine_shifts.float() - self.half_particle_size) * self.vol_voxel_size
+        return fine_corrs, fine_rotmats, predShiftsAngsXY, comparedWeight
+
+    # ----------------------- Main forward -----------------------
+
+    def forward(self, imgs, ctfs, rotmats):
+        assert imgs.shape[1:] == self.rmask.shape, (
+            f"Error, particle images and reference maps must have same shape "
+            f"({imgs.shape[1:], self.rmask.shape}). Make sure that you are using the same "
+            f"box size and sampling rate for the particles and the reference volume."
+        )
+        fparts = self._preprocess_particles_to_F(imgs)
+        bsize = rotmats.size(0)
+
+        if self.use_two_stage_search:
+            return self._forward_two_stage(fparts, ctfs, rotmats, bsize)
+
+        # Single-stage: Cartesian euler_add grid
+        expanded_rotmats = self._compose_coarse_euler_add(rotmats)
+
+        # Extract top-k winners (or top-1 if using SO3 interpolation)
+        topk = 1 if self.use_so3_interpolation else self.top_k_poses_localref
+        perImgCorr, maxCorrs, predRotMats, pixelShiftsXY = self._extract_cc_peaks(
+            fparts, ctfs, expanded_rotmats, bsize, topk=topk
+        )
+        del ctfs
+
+        # Apply O(1) table-based SO3 parabolic sub-step refinement to the winner
+        if self.use_so3_interpolation:
+            # Get winner index and Euler angles
+            winner_idx = perImgCorr.argmax(dim=-1)  # (B,)
+            winner_euler = get_eulers(predRotMats[:, 0])  # (B, 3) degrees
+
+            # Parabolic refinement via precomputed neighbor table (ZERO extra projections)
+            nb_idx = self._so3_interp_nb_idx.to(fparts.device)
+            nb_valid = self._so3_interp_nb_valid.to(fparts.device)
+            delta_euler = _so3_interpolate_euler_winner(
+                perImgCorr, winner_idx, nb_idx, nb_valid, self.grid_step_degs
+            )  # (B, 3) degrees - sub-step correction
+
+            # Add sub-step correction to winner Euler angles and convert back to rotmat
+            refined_euler = winner_euler + delta_euler  # (B, 3) degrees
+            predRotMats = get_rotmat(refined_euler, device=fparts.device).unsqueeze(1)  # (B, 1, 3, 3)
+
+            # Keep winner's correlation and shift
+            maxCorrs = maxCorrs[:, :1]  # (B, 1)
+            pixelShiftsXY = pixelShiftsXY[:, :1]  # (B, 1, 2)
+
         mean_corr = perImgCorr.mean(-1, keepdims=True)
-        std_corr = perImgCorr.std(-1, keepdims=True)
-        comparedWeight = torch.distributions.Normal(mean_corr, std_corr + 1e-6).cdf(maxCorrs)  # 1-P(I_i > All_images)
+        std_corr  = perImgCorr.std(-1, keepdims=True)
+        comparedWeight = torch.distributions.Normal(mean_corr, std_corr + 1e-6).cdf(maxCorrs)
         predShiftsAngsXY = -(pixelShiftsXY.float() - self.half_particle_size) * self.vol_voxel_size
         return maxCorrs, predRotMats, predShiftsAngsXY, comparedWeight
 
@@ -357,7 +749,11 @@ class ProjectionMatcher(nn.Module):
                 starFnameOut
             ), f"Error, the starFnameOut {starFnameOut} already exists"
 
-        n_cpus = n_cpus if n_cpus > 0 else 1
+        # Reset noise-PSD warm-up state so each call re-estimates from its own particles
+        self._noise_psd_amp_sum = None
+        self._noise_psd_batches_seen = 0
+
+        n_cpus = max(0, n_cpus)  # 0 = inline loading in main process (no subprocess spawn)
         particlesDataSet = self.preprocess_particles(
             particles,
             data_rootdir,
@@ -366,12 +762,8 @@ class ProjectionMatcher(nn.Module):
             halfset=halfset
         )
         assert len(particlesDataSet) > 0, "Error, the starfile contains no particles"
-        try:
-            pixel_size = particlesDataSet.sampling_rate
-            particle_size = particlesDataSet[0].original_image_size()
-        except AttributeError:
-            pixel_size = particlesDataSet.datasets[0].original_sampling_rate()
-            particle_size = particlesDataSet.datasets[0].original_image_size()
+        pixel_size = particlesDataSet.sampling_rate
+        particle_size = particlesDataSet.original_image_size()
 
         assert np.isclose(pixel_size, self.vol_voxel_size, atol=1e-2), ("Error, the pixel size of the particle images "
                                                                         f"{pixel_size} "
@@ -395,18 +787,16 @@ class ProjectionMatcher(nn.Module):
         self.to(device)
         self.mainLogger.info(f"Total number of particles: {n_particles}")
 
+        particlesStar = particlesDataSet.particles.copy()
         try:
-            particlesStar = particlesDataSet.particles.copy()
-            confidence = particlesDataSet.dataDict["confidences"].sum(-1)
-        except AttributeError:
-            particlesStar = particlesDataSet.datasets[0].particles.copy()
-            try:
-                confidence = torch.tensor(particlesStar.particles_md.loc[:, RELION_PRED_POSE_CONFIDENCE_NAME].values,
-                                          dtype=torch.float32)
-            except KeyError:
-                confidence = torch.ones(len(particlesStar.particles_md))
+            confidence = torch.tensor(particlesStar.particles_md.loc[:, RELION_PRED_POSE_CONFIDENCE_NAME].values,
+                                      dtype=torch.float32)
+        except KeyError:
+            confidence = torch.ones(len(particlesStar.particles_md))
         if "rlnImageId" in particlesStar.particles_md.columns:
             particlesStar.particles_md.drop("rlnImageId", axis=1, inplace=True)
+
+        self._check_batch_size(batch_size, device)
 
         dl = DataLoader(
             particlesDataSet,
@@ -476,8 +866,8 @@ class ProjectionMatcher(nn.Module):
                 ang_err = torch.rad2deg(rotation_error_with_sym(r1, r2, symmetry="C1"))
                 shift_error = np.sqrt(((shiftsXYangs - base_shifts) ** 2).sum(-1))
 
-                print(f"Median Ang   Error degs (top-{k + 1}):", np.median(ang_err.numpy()))
-                print(f"Median Shift Error Angs (top-{k + 1}):", np.median(shift_error))
+                print(f"Median Ang   Displacement degs (top-{k + 1}):", np.median(ang_err.numpy()))
+                print(f"Median Shift Displacement Angs (top-{k + 1}):", np.median(shift_error))
                 ######## END of Debug code
 
             particles_md.loc[idds_list, angles_names] = eulerdegs
@@ -493,6 +883,110 @@ class ProjectionMatcher(nn.Module):
         gc.collect()
         torch.cuda.empty_cache()
         return finalParticlesStar
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SO(3) sub-step interpolation helpers (Change #7)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _precompute_so3_interp_neighbors(
+        grid_distance_degs: float,
+        grid_step_degs: float,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Build axis-aligned neighbor index tables for Cartesian SO(3) parabolic interpolation.
+
+    For the Cartesian Euler grid (n_angles³ points), each grid point has up to 6 axis-aligned
+    neighbors (rot±, tilt±, psi±). This function precomputes their flat indices and a validity
+    mask once at init, so the hot interpolation path only does cheap index lookups.
+
+    Args:
+        grid_distance_degs: half-width of the search ball (degrees).
+        grid_step_degs:     angular step between grid points (degrees).
+
+    Returns:
+        neighbor_idx:   (nDelta, 6) long — flat indices of the 6 neighbors in order
+                        (rot+, rot-, tilt+, tilt-, psi+, psi-). Boundary entries are
+                        clamped to the point itself; check neighbor_valid before using.
+        neighbor_valid: (nDelta, 6) bool — True where the neighbor lies inside the grid.
+    """
+    n_angles = math.ceil(grid_distance_degs * 2 / grid_step_degs)
+    if n_angles % 2 == 0:
+        n_angles += 1
+    nDelta = n_angles ** 3
+
+    flat_idx = torch.arange(nDelta, dtype=torch.long)
+    rot_i  = flat_idx // (n_angles * n_angles)
+    tilt_j = (flat_idx // n_angles) % n_angles
+    psi_l  = flat_idx % n_angles
+
+    strides     = [n_angles * n_angles, n_angles, 1]
+    axis_coords = [rot_i, tilt_j, psi_l]
+
+    neighbor_idx   = torch.zeros(nDelta, 6, dtype=torch.long)
+    neighbor_valid = torch.zeros(nDelta, 6, dtype=torch.bool)
+
+    for ax, (stride, coord) in enumerate(zip(strides, axis_coords)):
+        col_p = 2 * ax      # positive-step neighbor column
+        col_m = 2 * ax + 1  # negative-step neighbor column
+
+        valid_p = coord < n_angles - 1
+        neighbor_valid[:, col_p] = valid_p
+        neighbor_idx[:, col_p] = torch.where(valid_p, flat_idx + stride, flat_idx)
+
+        valid_m = coord > 0
+        neighbor_valid[:, col_m] = valid_m
+        neighbor_idx[:, col_m] = torch.where(valid_m, flat_idx - stride, flat_idx)
+
+    return neighbor_idx, neighbor_valid
+
+
+def _so3_interpolate_euler_winner(
+        perImgCorr: torch.Tensor,       # (B, nDelta)
+        winner_idx: torch.Tensor,        # (B,) long
+        neighbor_idx: torch.Tensor,      # (nDelta, 6) long
+        neighbor_valid: torch.Tensor,    # (nDelta, 6) bool
+        grid_step_degs: float,
+) -> torch.Tensor:                       # (B, 3) delta Euler angles in degrees
+    """Parabolic sub-step refinement of the winning Cartesian Euler grid point.
+
+    For each of the 3 Euler axes independently, fits a 1D parabola through the CC values at
+    the winner and its two axis-aligned neighbors and returns the sub-step offset to the
+    parabola peak. Identical in spirit to the sub-pixel shift refinement in _extract_ccor_max.
+
+    Corrections are clamped to ±step/2 and zeroed wherever a neighbor is missing (boundary)
+    or the CC surface is not concave along that axis (no well-defined local maximum).
+
+    Only meaningful for the Cartesian euler_add path (structured axis-aligned grid).
+    """
+    B = winner_idx.shape[0]
+    batch_range = torch.arange(B, device=perImgCorr.device)
+
+    cc_0 = perImgCorr[batch_range, winner_idx]  # (B,)
+
+    nb_idx   = neighbor_idx[winner_idx]    # (B, 6)
+    nb_valid = neighbor_valid[winner_idx]  # (B, 6)
+
+    delta_euler = torch.zeros(B, 3, device=perImgCorr.device, dtype=perImgCorr.dtype)
+
+    for ax in range(3):
+        col_p, col_m = 2 * ax, 2 * ax + 1
+
+        cc_p = perImgCorr[batch_range, nb_idx[:, col_p]]  # (B,)
+        cc_m = perImgCorr[batch_range, nb_idx[:, col_m]]  # (B,)
+
+        # Parabolic interpolation: same formula as _extract_ccor_max
+        # delta = (cc_m - cc_p) / (2*cc_m - 4*cc_0 + 2*cc_p)  in grid-step units
+        denom = 2.0 * cc_m - 4.0 * cc_0 + 2.0 * cc_p          # (B,)
+        safe_denom = torch.where(denom < -1e-8, denom, torch.full_like(denom, -1e-8))
+        delta_ax = (cc_m - cc_p) / safe_denom * grid_step_degs  # (B,) in degrees
+
+        delta_ax = delta_ax.clamp(-grid_step_degs * 0.5, grid_step_degs * 0.5)
+
+        # Only apply where both neighbors exist AND the surface is concave (denom < 0)
+        apply = nb_valid[:, col_p] & nb_valid[:, col_m] & (denom < -1e-8)
+        delta_euler[:, ax] = torch.where(apply, delta_ax, torch.zeros_like(delta_ax))
+
+    return delta_euler
 
 
 @lru_cache(1)
@@ -511,15 +1005,49 @@ def _get_begin_end_from_max_shift(image_shape, max_shift):
 
     return h0, h1, w0, w1
 
-def _extract_ccor_max(corrs, h0, h1, w0, w1):
-    pixelShiftsXY = torch.empty(corrs.shape[:-2] + (2,), device=corrs.device, dtype=torch.int64)
+def _extract_ccor_max(corrs, h0, h1, w0, w1, use_subpixel: bool = False):
+    # corrs is always (N, H, W) — reshaped by _correlateCrossCorrelation before this call
     if h0 > 0:
-        corrs = corrs[..., h0:h1, w0:w1]
-    maxCorrsJ, maxIndxJ = corrs.max(-1)
+        corrs_crop = corrs[..., h0:h1, w0:w1]
+    else:
+        corrs_crop = corrs
+    maxCorrsJ, maxIndxJ = corrs_crop.max(-1)
     perImgCorr, maxIndxI = maxCorrsJ.max(-1)
-    pixelShiftsXY[..., 1] = h0 + maxIndxI
-    pixelShiftsXY[..., 0] = w0 + torch.gather(maxIndxJ, -1, maxIndxI.unsqueeze(-1)).squeeze(-1)
+    int_i = maxIndxI  # integer peak row in cropped array, shape (N,)
+    int_j = torch.gather(maxIndxJ, -1, maxIndxI.unsqueeze(-1)).squeeze(-1)  # shape (N,)
 
+    if use_subpixel:
+        H = corrs_crop.shape[-2]
+        W = corrs_crop.shape[-1]
+        N = corrs_crop.shape[0]
+        n_idx = torch.arange(N, device=corrs.device)  # (N,)
+
+        # Clamp to interior so ±1 neighbours always exist
+        safe_i = int_i.clamp(1, H - 2)
+        safe_j = int_j.clamp(1, W - 2)
+
+        # --- sub-pixel refinement along row axis (at col = int_j) ---
+        fi_m = corrs_crop[n_idx, safe_i - 1, int_j]  # (N,)
+        fi_0 = corrs_crop[n_idx, safe_i,     int_j]
+        fi_p = corrs_crop[n_idx, safe_i + 1, int_j]
+        denom_i = 2 * fi_m - 4 * fi_0 + 2 * fi_p
+        delta_i = ((fi_m - fi_p) / denom_i.clamp(max=-1e-8)) * (int_i == safe_i).float()
+        sub_i = safe_i.float() + delta_i
+
+        # --- sub-pixel refinement along col axis (at row = int_i) ---
+        fj_m = corrs_crop[n_idx, int_i, safe_j - 1]  # (N,)
+        fj_0 = corrs_crop[n_idx, int_i, safe_j    ]
+        fj_p = corrs_crop[n_idx, int_i, safe_j + 1]
+        denom_j = 2 * fj_m - 4 * fj_0 + 2 * fj_p
+        delta_j = ((fj_m - fj_p) / denom_j.clamp(max=-1e-8)) * (int_j == safe_j).float()
+        sub_j = safe_j.float() + delta_j
+    else:
+        sub_i = int_i.float()
+        sub_j = int_j.float()
+
+    pixelShiftsXY = torch.empty(corrs.shape[:-2] + (2,), device=corrs.device, dtype=torch.float32)
+    pixelShiftsXY[..., 1] = h0 + sub_i
+    pixelShiftsXY[..., 0] = w0 + sub_j
     return perImgCorr, pixelShiftsXY
 
 def extract_ccor_max(corrs, max_shift_fraction):
@@ -539,7 +1067,7 @@ def align_star(
         return_top_k_poses: int = 1,
         filter_resolution_angst: Optional[float] = None,
         num_dataworkers: int = 1,
-        batch_size: int = 1024,
+        batch_size: int = 32,
         use_cuda: bool = True,
         verbose: bool = True,
         float32_matmul_precision: Literal["highest", "high", "medium"] = "high",

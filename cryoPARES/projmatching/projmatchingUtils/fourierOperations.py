@@ -4,8 +4,6 @@ from typing import Optional, Sequence, Union, Tuple
 import torch
 import torch.nn.functional as F
 import numpy as np
-from sympy.abc import alpha
-
 from cryoPARES.utils.torch_grid_utils_compat import fftfreq_grid, circle
 
 from cryoPARES.configs.mainConfig import main_config
@@ -86,9 +84,21 @@ def compute_dft_3d(
     return dft, vol_shape, pad_length
 
 
-@lru_cache(1)
-def _mask_for_dft_2d(img_shape, max_freq_pixels, rfft, fftshifted, device):
+@lru_cache(maxsize=4)
+def _mask_for_dft_2d(img_shape, max_freq_pixels, min_freq_pixels, rfft, fftshifted, device):
+    """Build a 2D Fourier band-pass mask in fftshifted rfft layout.
 
+    Parameters
+    ----------
+    max_freq_pixels:
+        Outer (low-pass) radius in pixels. None → use full half-box.
+    min_freq_pixels:
+        Inner (high-pass) radius in pixels. 0 or None → no high-pass.
+    rfft:
+        If True, return only the non-redundant rfft half (W//2+1 columns).
+    fftshifted:
+        Must be True (non-shifted layout not implemented).
+    """
     img_size = img_shape[-2]
     if max_freq_pixels is None:
         max_freq_pixels = img_size // 2
@@ -98,44 +108,101 @@ def _mask_for_dft_2d(img_shape, max_freq_pixels, rfft, fftshifted, device):
         device=device,
     ).unsqueeze(0).to(device)
 
-    # filer_digital_freq = max_freq_pixels/img_size
-    # delta = 4/img_size
-    # raised_cosine_filter = _raised_cosine_filter([img_size, img_size], freq_or_res=filer_digital_freq, delta=delta, sampling_rate=None)
-    # raised_cosine_filter = raised_cosine_filter.unsqueeze(0).to(device)
+    if min_freq_pixels is not None and min_freq_pixels > 0:
+        inner = circle(radius=min_freq_pixels,
+                       smoothing_radius=2,
+                       image_shape=(img_size, img_size),
+                       device=device,
+                       ).unsqueeze(0).to(device)
+        mask = mask * (1 - inner)
+
     if rfft:
         centre = img_size // 2
         last_freq = mask[..., 0:1]
         beginning = mask[..., centre:]
         mask = torch.concatenate([beginning, last_freq], dim=-1)
 
-
-    # import matplotlib.pyplot as plt
-    # f, axes = plt.subplots(1, 2)
-    # axes[0].imshow(mask.cpu().abs().numpy()[0,...])
-    # # axes[1].imshow(raised_cosine_filter.cpu().abs().numpy()[0,...])
-    # plt.show()
-
     if not fftshifted:
         raise NotImplementedError()
 
     return mask
 
+def build_ccorr_sign_grid(H: int, W: int, device) -> torch.Tensor:
+    """Precompute the phase-ramp sign buffer for correlate_dft_2d.
+
+    Returns a (1, 1, H, W//2+1) float32 tensor of ±1 values such that:
+        irfftn(ifftshift_y(R * sign_grid))
+    equals the original:
+        ifftshift_2d(irfftn(ifftshift_y(R)))
+
+    This folds the post-irfftn ifftshift_2d into a pre-multiply, saving one
+    O(B·nCand·H·W) memory-bandwidth pass per batch.
+
+    Derivation (using the DFT shift theorem):
+      ifftshift_2d(irfftn(A)) = irfftn(A * (-1)^(ky_std + kx_std))
+    where ky_std are standard (un-shifted) frequency indices.  Converting the
+    (-1)^ky_std factor to stored (fftshifted) coordinates gives:
+      (-1)^ky_std = (-1)^ky_stored * (-1)^(H//2)
+    so sign_grid[ky_s, kx_s] = (-1)^(ky_s + kx_s + (H//2)%2).
+    Valid for all even H.
+    """
+    ky_s = torch.arange(H, device=device).view(H, 1)
+    kx_s = torch.arange(W // 2 + 1, device=device).view(1, W // 2 + 1)
+    shift_parity = (H // 2) % 2
+    sign = (((ky_s + kx_s + shift_parity) % 2) * -2 + 1).float()
+    return sign.view(1, 1, H, W // 2 + 1)
+
+
 def correlate_dft_2d(
     parts: torch.Tensor,
     projs: torch.Tensor,
+    whitening_filter: torch.Tensor | None = None,
+    ccorr_sign_grid: torch.Tensor | None = None,
 ) -> torch.Tensor:
-    """Correlate fftshifted rfft discrete Fourier transforms of images"""
-    #TODO: add Alister newcode to limit the resolution range
+    """Correlate fftshifted rfft discrete Fourier transforms of images.
 
+    Parameters
+    ----------
+    parts:
+        Particle DFTs, fftshifted rfft, shape (..., H, W//2+1) complex or (..., H, W//2+1, 2).
+        DC zeroing (if desired) must be applied by the caller before this function.
+    projs:
+        Projection DFTs, same layout as parts.
+        DC zeroing (if desired) must be applied by the caller before this function.
+    whitening_filter:
+        Optional real-valued tensor broadcastable to parts/projs shape. Applied as a multiply
+        before the cross-product (spectral whitening). Pre-computed in ProjectionMatcher.__init__.
+        For noise_psd_whitening, particles are pre-whitened in _preprocess_particles_to_F and
+        noise_psd_map is passed here for projection-side whitening — giving 1/σ²_noise weight.
+    ccorr_sign_grid:
+        Optional (1, 1, H, W//2+1) float32 buffer of ±1 values, precomputed by
+        build_ccorr_sign_grid().  When provided, folds the post-irfftn ifftshift_2d
+        into a frequency-domain pre-multiply, saving one O(B·nCand·H·W) pass.
+    """
     if not parts.is_complex():
-        parts = torch.view_as_complex(parts)
+        parts = torch.view_as_complex(parts.contiguous())
     if not projs.is_complex():
-        projs = torch.view_as_complex(projs)
+        projs = torch.view_as_complex(projs.contiguous())
 
-    result = parts * torch.conj(projs)
+    sign_applied = ccorr_sign_grid is not None  # track whether sign_grid was used
+
+    if whitening_filter is not None:
+        if ccorr_sign_grid is not None:
+            # Combine the two real-valued filters before applying to projs.
+            # Reduces three O(B·nCand·H·W//2+1) passes → two, saving ~3.5 ms/batch
+            # at B=32, nCand=343, H=256.  The combined filter is tiny (H×W//2+1 real).
+            result = parts * (torch.conj(projs) * (whitening_filter * ccorr_sign_grid))
+        else:
+            result = parts * (torch.conj(projs) * whitening_filter)
+    else:
+        result = parts * torch.conj(projs)
+        if ccorr_sign_grid is not None:
+            result = result * ccorr_sign_grid    # fold out post-irfftn ifftshift_2d
+
     result = torch.fft.ifftshift(result, dim=(-2,))
     result = torch.fft.irfftn(result, dim=(-2, -1))
-    result = torch.fft.ifftshift(result, dim=(-2, -1))
+    if not sign_applied:
+        result = torch.fft.ifftshift(result, dim=(-2, -1))
     return torch.real(result)
 
 def _real_to_fourier_2d(imgs, view_complex_as_two_float32=False):

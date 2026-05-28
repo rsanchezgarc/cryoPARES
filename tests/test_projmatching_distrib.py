@@ -141,5 +141,55 @@ class TestProjMatching(unittest.TestCase):
                 )
 
 
+    def test_two_stage_search(self):
+        """Two-stage search produces valid output with same shape as single-stage."""
+        # Enable two-stage with a small fine grid (fast on CPU with tiny dummy data)
+        main_config.projmatching.use_two_stage_search = True
+        main_config.projmatching.use_fibo_grid = True
+        main_config.projmatching.rotation_composition = "pre_multiply"
+        main_config.projmatching.fine_grid_distance_degs = 1.5
+        main_config.projmatching.fine_grid_step_degs = 0.5
+        main_config.projmatching.fine_top_k = 3
+
+        output_two_stage = self.output_single_job.replace(".star", "_two_stage.star")
+        try:
+            projmatching_starfile(
+                reference_vol=self.reference_vol_fname,
+                particles_star_fname=self.particles_star_fname,
+                out_fname=output_two_stage,
+                particles_dir=self.particles_dir,
+                n_jobs=2,
+                num_dataworkers=0,
+                batch_size=2,
+                use_cuda=False,
+                correct_ctf=False,
+            )
+
+            star_two = starfile.read(output_two_stage)
+            self.assertEqual(len(star_two["particles"]), 10)
+
+            import numpy as np
+            # Euler angles must be finite
+            for col in ["rlnAngleRot", "rlnAngleTilt", "rlnAnglePsi"]:
+                vals = star_two["particles"][col].values.astype(float)
+                self.assertTrue(np.all(np.isfinite(vals)), f"Non-finite values in {col}")
+
+            # Confidence values must be in [0, 1] if present
+            if "rlnPredPoseConfidence" in star_two["particles"].columns:
+                conf = star_two["particles"]["rlnPredPoseConfidence"].values.astype(float)
+                self.assertTrue(np.all(conf >= 0) and np.all(conf <= 1),
+                                f"Confidence out of [0,1]: min={conf.min():.4f} max={conf.max():.4f}")
+        finally:
+            # Restore defaults to avoid cross-test contamination
+            main_config.projmatching.use_two_stage_search = False
+            main_config.projmatching.use_fibo_grid = False
+            main_config.projmatching.rotation_composition = "euler_add"
+            main_config.projmatching.fine_grid_distance_degs = 1.5
+            main_config.projmatching.fine_grid_step_degs = 0.5
+            main_config.projmatching.fine_top_k = 5
+            if os.path.exists(output_two_stage):
+                os.remove(output_two_stage)
+
+
 if __name__ == '__main__':
     unittest.main()

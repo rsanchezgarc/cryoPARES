@@ -611,8 +611,9 @@ def main():
     os.environ[constants.PROJECT_NAME + "__ENTRY_POINT"] = "train.py"
 
     # Increase file descriptor limit to avoid "too many open files" errors
-    from cryoPARES.utils.systemUtils import increase_file_descriptor_limit
+    from cryoPARES.utils.systemUtils import increase_file_descriptor_limit, setup_torch_env
     increase_file_descriptor_limit()
+    setup_torch_env(main_config.train.float32_matmul_precision)
 
     print("---------------------------------------")
     print(" ".join(sys.argv))

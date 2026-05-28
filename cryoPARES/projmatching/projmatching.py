@@ -428,6 +428,10 @@ def main():
     args, config_args = parser.parse_args()
     config_args = convert_config_args_to_absolute_paths(config_args)
     ConfigOverrideSystem.update_config_from_configstrings(main_config, config_args, verbose=True)
+
+    from cryoPARES.utils.systemUtils import setup_torch_env
+    setup_torch_env(main_config.projmatching.float32_matmul_precision)
+
     projmatching_starfile(**vars(args))
 
 

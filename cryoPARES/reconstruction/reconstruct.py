@@ -260,8 +260,9 @@ def reconstruct_starfile(particles_star_fname: str,
 
 def main():
     # Increase file descriptor limit to avoid "too many open files" errors
-    from cryoPARES.utils.systemUtils import increase_file_descriptor_limit
+    from cryoPARES.utils.systemUtils import increase_file_descriptor_limit, setup_torch_env
     increase_file_descriptor_limit()
+    setup_torch_env(main_config.reconstruct.float32_matmul_precision)
 
     from argParseFromDoc import parse_function_and_call
     parse_function_and_call(reconstruct_starfile)

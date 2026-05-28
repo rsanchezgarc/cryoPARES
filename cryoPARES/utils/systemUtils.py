@@ -5,6 +5,7 @@ This module provides utility functions for system-level operations like
 managing resource limits.
 """
 
+import os
 import resource
 import warnings
 
@@ -65,3 +66,22 @@ def increase_file_descriptor_limit():
         )
 
     return final_limit
+
+
+def setup_torch_env(matmul_precision: str = "high") -> None:
+    """Set compile-cache dir and matmul precision; call early in every main()."""
+    import torch
+    from pathlib import Path
+    from cryoPARES.configs.mainConfig import main_config
+
+    inductor_cache = Path(main_config.cachedir) / "torch_inductor"
+    inductor_cache.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("TORCHINDUCTOR_CACHE_DIR", str(inductor_cache))
+
+    try:
+        import torch._inductor.config as _inductor_cfg
+        _inductor_cfg.fx_graph_cache = True
+    except Exception:
+        pass
+
+    torch.set_float32_matmul_precision(matmul_precision)

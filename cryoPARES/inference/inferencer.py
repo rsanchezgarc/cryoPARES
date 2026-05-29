@@ -705,8 +705,11 @@ class SingleInferencer:
             particles_md_list.append(particles_md)
             optics_md_list.append(optics_md)
             if self.results_dir is not None and save_to_file:
-                if isinstance(particlesSet.starFname, (str, os.PathLike)):
-                    basename = os.path.basename(particlesSet.starFname).removesuffix(".star")
+                # particlesSet.starFname is nulled by createSubset(); use the dataset's
+                # original _star_fname instead so n_jobs=1 and n_jobs>1 produce the same names.
+                star_fname_src = getattr(_dataset, '_star_fname', None)
+                if isinstance(star_fname_src, (str, os.PathLike)):
+                    basename = os.path.basename(star_fname_src).removesuffix(".star")
                 else:
                     basename = "particles%d" % self._last_dataset_processed
 

@@ -215,7 +215,7 @@ def distributed_inference(
                 processes = []
                 for worker_id, part_idxs in enumerate(split_indices):
                     worker_device = None
-                    if torch.cuda.is_available():
+                    if use_cuda and torch.cuda.is_available():
                         n_cuda = torch.cuda.device_count()
                         if n_cuda > 0:
                             worker_device = f"cuda:{worker_id % n_cuda}"
@@ -514,6 +514,12 @@ def _worker(worker_id,
             shared_weights,
             shared_ctfsq,
             device=None):
+    # PyTorch issue #150622: torch.compile/inductor creates a CUDA context in every
+    # process where a GPU is visible, even for CPU-only execution.
+    # Setting CUDA_VISIBLE_DEVICES="" before any CUDA call prevents this.
+    if not inferencer_init_kwargs.get("use_cuda", True):
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
+
     global _INFERENCER
     if device is not None and torch.cuda.is_available():
         dev_index = _device_index_from_str(device)

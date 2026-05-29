@@ -245,7 +245,7 @@ class Reconstructor(nn.Module):
             batch_size=batch_size,
             shuffle=False,
             num_workers=num_dataworkers,
-            pin_memory=num_dataworkers > 0,
+            pin_memory=num_dataworkers > 0 and self.get_device().type == 'cuda',
             multiprocessing_context="fork" if num_dataworkers > 0 else None,
         )
 

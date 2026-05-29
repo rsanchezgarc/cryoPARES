@@ -251,13 +251,14 @@ class TrainerPartition:
                                                                 else os.path.dirname(self.particles_star_fname[fnameIdx])
 
                     output_fname = os.path.join(reconstructions_dir, "%d.mrc" % fnameIdx)
+                    use_cuda_for_recon = self.train_config.use_cuda and main_config.train.cuda_for_reconstruct
                     kwargs = dict(particles_star_fname=fname,
                                   symmetry=self.symmetry,
                                   output_fname=output_fname,
                                   particles_dir=particles_dir,
                                   num_workers=num_dataworkers,
                                   batch_size=main_config.train.batch_size_for_reconstruct,
-                                  use_cuda=main_config.train.cuda_for_reconstruct,
+                                  use_cuda=use_cuda_for_recon,
                                   correct_ctf=True, eps=1e-3, min_denominator_value=None,
                                   float32_matmul_precision=main_config.train.float32_matmul_precision_for_reconstruct)
                     if self.overfit_batches is not None:
@@ -271,10 +272,14 @@ class TrainerPartition:
                         **kwargs
                     )
                     print(cmd)  # TODO: Use loggers
+                    recon_env = None
+                    if not use_cuda_for_recon:
+                        recon_env = {**os.environ, "CUDA_VISIBLE_DEVICES": ""}
                     run_subprocess_with_error_summary(
                         cmd.split(),
                         cwd=os.path.abspath(os.path.join(__file__, "..", "..", "..")),
-                        description=f"Reconstructing volume for {self.partition}"
+                        description=f"Reconstructing volume for {self.partition}",
+                        env=recon_env,
                     )
             else:
                 warnings.warn("No validation particles found, directional percentiles were not computed")

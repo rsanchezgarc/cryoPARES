@@ -801,7 +801,7 @@ class ProjectionMatcher(nn.Module):
         dl = DataLoader(
             particlesDataSet,
             batch_size=batch_size,
-            num_workers=n_cpus, shuffle=False, pin_memory=True,
+            num_workers=n_cpus, shuffle=False, pin_memory=torch.device(device).type == 'cuda',
             multiprocessing_context='spawn' if n_cpus > 0 else None
         )  #get_context('loky')
         non_blocking = True

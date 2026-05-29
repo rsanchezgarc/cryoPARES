@@ -187,7 +187,7 @@ class DataManager(pl.LightningDataModule):
             return DataLoader(dataset, batch_size=self.batch_size, shuffle=False,
                               num_workers=self.num_dataworkers, sampler=sampler,
                               persistent_workers=True if self.num_dataworkers > 0 else False,
-                              pin_memory=True if self.num_dataworkers > 0 else False)
+                              pin_memory=self.num_dataworkers > 0 and torch.cuda.is_available())
 
         if partitionName == "train":
             print(f"Train dataset {len(dataset)}")
@@ -212,7 +212,7 @@ class DataManager(pl.LightningDataModule):
                 batch_sampler=batch_sampler,
                 num_workers=self.num_dataworkers,
                 persistent_workers=True if self.num_dataworkers > 0 else False,
-                pin_memory=True if self.num_dataworkers > 0 else False,
+                pin_memory=self.num_dataworkers > 0 and torch.cuda.is_available(),
             )
         elif partitionName == "val":
             print(f"Validation dataset {len(dataset)}")
@@ -227,7 +227,7 @@ class DataManager(pl.LightningDataModule):
                 num_workers=self.num_dataworkers,
                 persistent_workers=True if self.num_dataworkers > 0 else False,
                 sampler=sampler,
-                pin_memory=True if self.num_dataworkers > 0 else False,
+                pin_memory=self.num_dataworkers > 0 and torch.cuda.is_available(),
             )
         else:
             raise ValueError("Error, wrong partition")

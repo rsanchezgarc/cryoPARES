@@ -101,7 +101,8 @@ class TestDistributedInference(unittest.TestCase):
                          skip_reconstruction=True,
                          subset_idxs=None,
                          n_first_particles=None,
-                         show_debug_stats=False):
+                         show_debug_stats=False,
+                         merge_halves_output=False):
                 self.particles_star_fname = particles_star_fname
                 self.data_halfset = data_halfset
                 self.model_halfset = model_halfset

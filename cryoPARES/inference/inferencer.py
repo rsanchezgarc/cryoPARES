@@ -6,6 +6,7 @@ from functools import cached_property
 
 import numpy as np
 import pandas as pd
+import starfile
 import torch
 import yaml
 from scipy.spatial.transform import Rotation
@@ -59,6 +60,7 @@ class SingleInferencer:
                  subset_idxs: Optional[List[int]] = None,
                  n_first_particles: Optional[int] = None,
                  show_debug_stats: bool = False,
+                 merge_halves_output: bool = False,
                  ):
         """
         Initializes the SingleInferencer for running inference on a set of particles.
@@ -85,7 +87,14 @@ class SingleInferencer:
         :param subset_idxs: A list of indices to process a subset of particles.
         :param n_first_particles: The number of first particles to process. Cannot be used with `subset_idxs`.
         :param show_debug_stats: Whether to print debug statistics, such as rotation errors if ground truth in the starfile.
+        :param merge_halves_output: If True, merge all half-set results into a single output star file.
         """
+        if skip_localrefinement and not skip_reconstruction:
+            raise ValueError(
+                "Local refinement is required before reconstruction. "
+                "Use --skip_reconstruction to skip reconstruction, or remove --skip_localrefinement."
+            )
+
         self.particles_star_fname = particles_star_fname
         self.particles_dir = particles_dir
         assert top_k_poses_nnet >= top_k_poses_localref, "Error, top_k_poses_nnet >= top_k_poses_localref required"
@@ -121,6 +130,7 @@ class SingleInferencer:
         self.directional_zscore_thr = directional_zscore_thr
         self.skip_localrefinement = skip_localrefinement
         self.skip_reconstruction = skip_reconstruction
+        self.merge_halves_output = merge_halves_output
         self.update_progressbar_n_batches = main_config.inference.update_progressbar_n_batches
         self.show_debug_stats = show_debug_stats
 
@@ -440,10 +450,54 @@ class SingleInferencer:
         # Clean up checkpoint reader
         self._checkpoint_reader.close()
 
+        if self.merge_halves_output and self.results_dir is not None:
+            self._merge_half_outputs()
+
         return all_out_list
 
     def clean_reconstructer_buffers(self):
         self._model.reconstructor.zero_buffers()
+
+    def _merge_half_outputs(self):
+        """Merge all per-half star files in results_dir into a single combined star file.
+
+        Assigns rlnRandomSubset (1 or 2) based on the filename suffix (_half1/_half2),
+        ensuring the merged file retains half-set identity regardless of whether the
+        original particles carried that column.
+        """
+        star_files = sorted(glob.glob(os.path.join(self.results_dir, "*.star")))
+        if len(star_files) < 2:
+            return
+        all_particles = []
+        optics_df = None
+        for sf in star_files:
+            data = starfile.read(sf)
+            if isinstance(data, dict):
+                particles = data.get("particles", None)
+                if optics_df is None:
+                    optics_df = data.get("optics", None)
+            else:
+                particles = data
+            if not isinstance(particles, pd.DataFrame):
+                continue
+            fname = os.path.basename(sf)
+            if "_half1" in fname:
+                particles = particles.copy()
+                particles["rlnRandomSubset"] = 1
+            elif "_half2" in fname:
+                particles = particles.copy()
+                particles["rlnRandomSubset"] = 2
+            all_particles.append(particles)
+        if not all_particles:
+            return
+        merged = pd.concat(all_particles, axis=0, ignore_index=True)
+        basename = os.path.basename(self.particles_star_fname).removesuffix(".star")
+        out_fname = os.path.join(self.results_dir, basename + "_merged.star")
+        payload = {"particles": merged}
+        if optics_df is not None:
+            payload["optics"] = optics_df
+        starfile.write(payload, out_fname, overwrite=True)
+        print(f"Merged output saved: {out_fname}")
 
     @staticmethod
     def resolve_halfset_lists(

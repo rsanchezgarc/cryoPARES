@@ -52,7 +52,8 @@ def distributed_inference(
         skip_reconstruction: bool = CONFIG_PARAM(),
         subset_idxs: Optional[List[int]] = None,
         n_first_particles: Optional[int] = None,
-        check_interval_secs: float = 2.0
+        check_interval_secs: float = 2.0,
+        merge_halves_output: bool = False,
 ):
     """
     Distributed inference across particles and devices, mirroring the **halfset selection logic**
@@ -106,6 +107,8 @@ def distributed_inference(
         {n_first_particles}
     check_interval_secs : float
         {check_interval_secs}
+    merge_halves_output : bool, default False
+        If True, merge all per-half output star files into a single combined star file.
 
     Notes
     -----
@@ -114,6 +117,12 @@ def distributed_inference(
     - For **n_jobs > 1**, particles are split by half-set and distributed across workers; model half
       selection follows the resolved policy per half to avoid cross-half coupling.
     """
+
+    if skip_localrefinement and not skip_reconstruction:
+        raise ValueError(
+            "Local refinement is required before reconstruction. "
+            "Use --skip_reconstruction to skip reconstruction, or remove --skip_localrefinement."
+        )
 
     from cryoPARES.inference.inferencer import SingleInferencer
 
@@ -159,6 +168,7 @@ def distributed_inference(
             subset_idxs=subset_idxs,  # interpreted inside per half
             n_first_particles=n_first_particles,
             show_debug_stats=False,
+            merge_halves_output=merge_halves_output,
         )
         out = inferencer.run()
         # Return whatever SingleInferencer returned; files are already written to results_dir
@@ -347,7 +357,34 @@ def distributed_inference(
                           f"                   at 0.5: {res_05:.3f} Å")
         except Exception as e:
             print(f"FSC computation failed: {e}")
-        return aggregated_results
+
+    if merge_halves_output and results_dir is not None:
+        import glob as _glob
+        star_files = sorted(_glob.glob(os.path.join(results_dir, "*.star")))
+        if len(star_files) >= 2:
+            all_particles = []
+            optics_df = None
+            for sf in star_files:
+                data = starfile.read(sf)
+                if isinstance(data, dict):
+                    particles = data.get("particles", None)
+                    if optics_df is None:
+                        optics_df = data.get("optics", None)
+                else:
+                    particles = data
+                if isinstance(particles, pd.DataFrame):
+                    all_particles.append(particles)
+            if all_particles:
+                merged = pd.concat(all_particles, axis=0, ignore_index=True)
+                basename = os.path.basename(particles_star_fname).removesuffix(".star")
+                out_fname = os.path.join(results_dir, basename + "_merged.star")
+                payload = {"particles": merged}
+                if optics_df is not None:
+                    payload["optics"] = optics_df
+                starfile.write(payload, out_fname, overwrite=True)
+                print(f"Merged output saved: {out_fname}")
+
+    return aggregated_results
 
 
 # -----------------------------

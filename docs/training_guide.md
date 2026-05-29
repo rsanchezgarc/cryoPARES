@@ -254,8 +254,19 @@ CryoPARES uses PyTorch Lightning, which automatically logs metrics to TensorBoar
 
 ### Launching TensorBoard
 
+CryoPARES stores TensorBoard logs inside each half-set subdirectory of the checkpoint:
+`train_save_dir/version_0/half1/` and `train_save_dir/version_0/half2/`.
+
+To view both halves together, point `--logdir` at the version directory:
+
 ```bash
-tensorboard --logdir /path/to/train_save_dir/version_0
+tensorboard --logdir /path/to/train_save_dir/version_0/half1
+```
+
+To monitor a specific half (e.g., half2):
+
+```bash
+tensorboard --logdir /path/to/train_save_dir/version_0/half2
 ```
 
 Then open your browser to `http://localhost:6006`
@@ -323,8 +334,8 @@ cryopares_train \
     --train_save_dir experiments/run_001 \
     --n_epochs 20
 
-# In another terminal, launch TensorBoard
-tensorboard --logdir experiments/run_001/version_0
+# In another terminal, launch TensorBoard (logs are in half1/ and half2/ subdirs)
+tensorboard --logdir experiments/run_001/version_0/half1
 
 # Monitor these curves:
 # 1. loss (should decrease smoothly)

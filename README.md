@@ -129,6 +129,8 @@ cryopares_train [ARGUMENTS] [--config [CONFIG_OVERRIDES]] [--show-config]
 
 **Optional Parameters:**
 
+*   `--image_size_px_for_nnet`: Target image size in pixels for neural network input. After rescaling to target sampling rate, images are cropped or padded to this size. We recommend tight box-sizes
+
 *   `--particles_dir`: Root directory for particle image paths. If paths in .star file are relative, this directory is prepended (similar to RELION project directory concept)
 
 *   `--n_epochs`: Number of training epochs. More epochs allow better convergence, although it does not help beyond a certain point (Default: `100`)
@@ -136,8 +138,6 @@ cryopares_train [ARGUMENTS] [--config [CONFIG_OVERRIDES]] [--show-config]
 *   `--batch_size`: Number of particles per batch. Try to make it as large as possible before running out of GPU memory. We advice using batch sizes of at least 32 images (Default: `32`)
 
 *   `--num_dataworkers`: Number of parallel data loading workers per GPU. Each worker is a separate CPU process. Set to 0 to load data in the main thread (useful only for debugging). Try not to oversubscribe by asking more workers than CPUs (Default: `8`)
-
-*   `--image_size_px_for_nnet`: Target image size in pixels for neural network input. After rescaling to target sampling rate, images are cropped or padded to this size. We recommend tight box-sizes (Default: `160`)
 
 *   `--sampling_rate_angs_for_nnet`: Target sampling rate in Angstroms/pixel for neural network input. Particle images are first rescaled to this sampling rate before processing (Default: `1.5`)
 
@@ -182,7 +182,7 @@ checkpoint dir names version_1 will be created.
 
 ### Inference
 
-The `cryoPARES.inference.inference` module is used to predict poses for a new set of particles using a trained model. It can be run in two modes: static and daemon.
+The `cryoPARES.inference.infer` module is used to predict poses for a new set of particles using a trained model. It can be run in two modes: static and daemon.
 
 #### Static Mode
 
@@ -213,7 +213,7 @@ cryopares_infer [ARGUMENTS] [--config [CONFIG_OVERRIDES]] [--show-config]
 
 *   `--particles_dir`: Root directory for particle image paths. If provided, overrides paths in the .star file
 
-*   `--batch_size`: Number of particles per batch for inference (Default: `64`)
+*   `--batch_size`: Number of particles per batch for inference (Default: `32`)
 
 *   `--n_jobs`: Number of worker processes. Defaults to number of GPUs if CUDA enabled, otherwise 1
 
@@ -229,7 +229,7 @@ cryopares_infer [ARGUMENTS] [--config [CONFIG_OVERRIDES]] [--show-config]
 
 *   `--top_k_poses_localref`: Number of best matching poses to keep after local refinement (Default: `1`)
 
-*   `--grid_distance_degs`: Maximum angular distance in degrees for local refinement search. Grid ranges from -grid_distance_degs to +grid_distance_degs around predicted pose (Default: `6.0`)
+*   `--grid_distance_degs`: Maximum angular distance in degrees for local refinement search. Grid ranges from -grid_distance_degs to +grid_distance_degs around predicted pose (Default: `4.0`)
 
 *   `--reference_map`: Path to reference map (.mrc) for FSC computation during validation
 
@@ -246,6 +246,8 @@ cryopares_infer [ARGUMENTS] [--config [CONFIG_OVERRIDES]] [--show-config]
 *   `--n_first_particles`: Process only the first N particles from dataset (debug feature)
 
 *   `--check_interval_secs`: Polling interval in seconds for parent loop in distributed processing (Default: `2.0`)
+
+*   `--merge_halves_output`: No description available (Default: `False`)
 
 <!-- AUTO_GENERATED:inference_parameters:END -->
 
@@ -457,7 +459,7 @@ cryopares_projmatching [ARGUMENTS] [--config [CONFIG_OVERRIDES]] [--show-config]
 
 *   `--mask_radius_angs`: Radius of circular mask in Angstroms applied to particle images
 
-*   `--grid_distance_degs`: Maximum angular distance in degrees for local refinement search. Grid ranges from -grid_distance_degs to +grid_distance_degs around predicted pose (Default: `6.0`)
+*   `--grid_distance_degs`: Maximum angular distance in degrees for local refinement search. Grid ranges from -grid_distance_degs to +grid_distance_degs around predicted pose (Default: `4.0`)
 
 *   `--grid_step_degs`: Angular step size in degrees for grid search during local refinement (Default: `2.0`)
 
@@ -469,7 +471,7 @@ cryopares_projmatching [ARGUMENTS] [--config [CONFIG_OVERRIDES]] [--show-config]
 
 *   `--num_dataworkers`: Number of CPU workers per PyTorch DataLoader for data loading (Default: `1`)
 
-*   `--batch_size`: Number of particles to process simultaneously per job (Default: `1024`)
+*   `--batch_size`: Number of particles to process simultaneously per job (Default: `32`)
 
 *   `--use_cuda`: Enable GPU acceleration. If False, runs on CPU only (Default: `True`)
 
@@ -539,9 +541,9 @@ cryopares_reconstruct [--config [CONFIG_OVERRIDES]] [--show-config]
 
 *   `--correct_ctf`: Apply CTF correction during reconstruction (Default: `True`)
 
-*   `--eps`: Regularization constant for reconstruction (ideally set to 1/SNR). Prevents division by zero and stabilizes reconstruction (Default: `0.001`)
+*   `--eps`: Regularization mode and strength. Sign selects mode: eps >= 0 uses Tikhonov regularization, eps < 0 uses RELION-style radial averaging. Magnitude sets scale: for Tikhonov, eps is the regularization constant (ideally 1/SNR); for radial averaging, abs(eps) is the divisor for radial weights (RELION uses 1000). Recommended: -1000 for radial averaging, 1e-3 for Tikhonov (Default: `-1000.0`)
 
-*   `--min_denominator_value`: Minimum value for denominator to prevent numerical instabilities during reconstruction
+*   `--min_denominator_value`: Minimum denominator threshold for numerical stability (prevents division by zero). Applied as final safety clamp regardless of regularization mode. RELION uses 1e-6 (Default: `1e-06`)
 
 *   `--use_only_n_first_batches`: Reconstruct using only first N batches (for testing or quick validation)
 
@@ -550,6 +552,12 @@ cryopares_reconstruct [--config [CONFIG_OVERRIDES]] [--show-config]
 *   `--weight_with_confidence`: Apply per-particle confidence weighting during backprojection. If True, particles with higher confidence contribute more to reconstruction. It reads the confidence from the metadata label "rlnParticleFigureOfMerit" (Default: `False`)
 
 *   `--halfmap_subset`: Select half-map subset (1 or 2) for half-map reconstruction and validation
+
+*   `--apply_soft_mask`: Apply soft spherical masking after reconstruction to reduce edge artifacts (RELION-style) (Default: `True`)
+
+*   `--mask_radius_pix`: Radius for soft mask in pixels. If negative, defaults to box_size/2  (Default: `-1.0`)
+
+*   `--mask_edge_width`: Width of cosine falloff edge in pixels (Default: `3`)
 
 <!-- AUTO_GENERATED:reconstruct_parameters:END -->
 
@@ -699,7 +707,7 @@ We need to provide such a directory to the inference command.
        --results_dir /path/to/inference_results \
        --reference_map /path/to/initial_model.mrc \ #If not provided, it is automatically generated from the training data
        --batch_size 32 \
-       --grid_distance_degs 12 \  #Local search will be from -6º to +6º
+       --grid_distance_degs 12 \  #Local search will be from -12º to +12º
        --directional_zscore_thr 1.0   # Remove all particles with directional zscore <1.0
 
    ```

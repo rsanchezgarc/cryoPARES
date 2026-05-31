@@ -22,7 +22,7 @@ from cryoPARES.configs.datamanager_config.particlesDataset_config import Particl
 from cryoPARES.configs.inference_config.inference_config import Inference_config
 from cryoPARES.configs.projmatching_config.projmatching_config import Projmatching_config
 from cryoPARES.configs.reconstruct_config.reconstruct_config import Reconstruct_config
-from cryoPARES.configManager.inject_defaults import CONFIG_PARAM
+from autoCLI_config import CONFIG_PARAM
 
 
 @dataclass

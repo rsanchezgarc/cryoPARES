@@ -32,11 +32,11 @@ cryopares_train [OPTIONS]
 | `--symmetry` | str | **Required** | Point group symmetry of the molecule (e.g., C1, D7, I, O, T) |
 | `--particles_star_fname` | List[str] | **Required** | Path(s) to RELION 3.1+ format .star file(s) containing pre-aligned particles. Can accept multiple files |
 | `--train_save_dir` | str | **Required** | Output directory where model checkpoints, logs, and training artifacts will be saved |
+| `--image_size_px_for_nnet` | Optional[int] | None | Target image size in pixels for neural network input. After rescaling to target sampling rate, images are cropped or padded to this size. We recommend tight box-sizes |
 | `--particles_dir` | Optional[List[str]] | None | Root directory for particle image paths. If paths in .star file are relative, this directory is prepended (similar to RELION project directory concept) |
 | `--n_epochs` | int | `100` | Number of training epochs. More epochs allow better convergence, although it does not help beyond a certain point |
 | `--batch_size` | int | `32` | Number of particles per batch. Try to make it as large as possible before running out of GPU memory. We advice using batch sizes of at least 32 images |
 | `--num_dataworkers` | int | `8` | Number of parallel data loading workers per GPU. Each worker is a separate CPU process. Set to 0 to load data in the main thread (useful only for debugging). Try not to oversubscribe by asking more workers than CPUs |
-| `--image_size_px_for_nnet` | int | `160` | Target image size in pixels for neural network input. After rescaling to target sampling rate, images are cropped or padded to this size. We recommend tight box-sizes |
 | `--sampling_rate_angs_for_nnet` | float | `1.5` | Target sampling rate in Angstroms/pixel for neural network input. Particle images are first rescaled to this sampling rate before processing |
 | `--mask_radius_angs` | Optional[float] | None | Radius of circular mask in Angstroms applied to particle images. If not provided, defaults to half the box size |
 | `--split_halves` | bool | `True` | If True (default), trains two separate models on data half-sets for cross-validation. Use --NOT_split_halves to train single model on all data |
@@ -157,9 +157,9 @@ cryopares_infer [OPTIONS]
 | `--checkpoint_dir` | str | **Required** | Path to training directory (or .zip file) containing half-set models with checkpoints and hyperparameters. By default they are called version_0, version_1, etc. |
 | `--results_dir` | str | **Required** | Output directory for inference results including predicted poses and optional reconstructions |
 | `--data_halfset` | 'half1', 'half2', 'allParticles' | `allParticles` | Which particle half-set(s) to process: "half1", "half2", or "allParticles" |
-| `--model_halfset` | 'half1', 'half2', 'allCombinations', 'matchingHalf' | `matchingHalf` | Model half-set selection policy: "half1", "half2", "allCombinations", or "matchingHalf" (uses matching data/model pairs) |
+| `--model_halfset` | 'half1', 'half2', 'allCombinations', 'matchingHalf', 'allParticles' | `matchingHalf` | Model half-set selection policy: "half1", "half2", "allCombinations", or "matchingHalf" (uses matching data/model pairs) |
 | `--particles_dir` | Optional[str] | None | Root directory for particle image paths. If provided, overrides paths in the .star file |
-| `--batch_size` | int | `64` | Number of particles per batch for inference |
+| `--batch_size` | int | `32` | Number of particles per batch for inference |
 | `--n_jobs` | Optional[int] | None | Number of worker processes. Defaults to number of GPUs if CUDA enabled, otherwise 1 |
 | `--num_dataworkers` | int | `8` | Number of parallel data loading workers per GPU. Each worker is a separate CPU process. Set to 0 to load data in the main thread (useful only for debugging). Try not to oversubscribe by asking more workers than CPUs |
 | `--use_cuda` | bool | `True` | Enable GPU acceleration for inference. If False, runs on CPU only |
@@ -167,7 +167,7 @@ cryopares_infer [OPTIONS]
 | `--compile_model` | bool | `False` | Compile model with torch.compile for faster inference (experimental, requires PyTorch 2.0+) |
 | `--top_k_poses_nnet` | int | `1` | Number of top pose predictions to retrieve from neural network before local refinement |
 | `--top_k_poses_localref` | int | `1` | Number of best matching poses to keep after local refinement |
-| `--grid_distance_degs` | float | `6.0` | Maximum angular distance in degrees for local refinement search. Grid ranges from -grid_distance_degs to +grid_distance_degs around predicted pose |
+| `--grid_distance_degs` | float | `4.0` | Maximum angular distance in degrees for local refinement search. Grid ranges from -grid_distance_degs to +grid_distance_degs around predicted pose |
 | `--reference_map` | Optional[str] | None | Path to reference map (.mrc) for FSC computation during validation |
 | `--reference_mask` | Optional[str] | None | Path to reference mask (.mrc) for masked FSC calculation |
 | `--directional_zscore_thr` | Optional[float] | None | Confidence z-score threshold for filtering particles. Particles with scores below this are discarded as low-confidence |
@@ -176,6 +176,7 @@ cryopares_infer [OPTIONS]
 | `--subset_idxs` | Optional[List[int]] | None | List of particle indices to process (for debugging or partial processing) |
 | `--n_first_particles` | Optional[int] | None | Process only the first N particles from dataset (debug feature) |
 | `--check_interval_secs` | float | `2.0` | Polling interval in seconds for parent loop in distributed processing |
+| `--merge_halves_output` | bool | `False` | No description available |
 <!-- AUTO_GENERATED:inference_cli:END -->
 
 ### Configuration Overrides
@@ -265,15 +266,15 @@ cryopares_projmatching [OPTIONS]
 | `--reference_vol` | str | **Required** | Path to reference 3D volume (.mrc file) for generating projection templates |
 | `--particles_star_fname` | str | **Required** | Path to input STAR file with particle metadata |
 | `--out_fname` | str | **Required** | Path for output STAR file with aligned particle poses |
-| `--particles_dir` | Optional[str] | None | Root directory for particle image paths. If provided, overrides paths in the .star file |
+| `--particles_dir` | Optional[str] | **Required** | Root directory for particle image paths. If provided, overrides paths in the .star file |
 | `--mask_radius_angs` | Optional[float] | None | Radius of circular mask in Angstroms applied to particle images |
-| `--grid_distance_degs` | float | `6.0` | Maximum angular distance in degrees for local refinement search. Grid ranges from -grid_distance_degs to +grid_distance_degs around predicted pose |
+| `--grid_distance_degs` | float | `4.0` | Maximum angular distance in degrees for local refinement search. Grid ranges from -grid_distance_degs to +grid_distance_degs around predicted pose |
 | `--grid_step_degs` | float | `2.0` | Angular step size in degrees for grid search during local refinement |
 | `--return_top_k_poses` | int | `1` | Number of top matching poses to save per particle |
 | `--filter_resolution_angst` | Optional[float] | None | Low-pass filter resolution in Angstroms applied to reference volume before matching |
 | `--n_jobs` | int | `1` | Number of parallel worker processes for distributed projection matching |
 | `--num_dataworkers` | int | `1` | Number of CPU workers per PyTorch DataLoader for data loading |
-| `--batch_size` | int | `1024` | Number of particles to process simultaneously per job |
+| `--batch_size` | int | `32` | Number of particles to process simultaneously per job |
 | `--use_cuda` | bool | `True` | Enable GPU acceleration. If False, runs on CPU only |
 | `--verbose` | bool | `False` | Enable verbose logging output |
 | `--float32_matmul_precision` | 'highest', 'high', 'medium' | `high` | PyTorch float32 matrix multiplication precision mode ("highest", "high", or "medium") |
@@ -319,12 +320,15 @@ cryopares_reconstruct [OPTIONS]
 | `--batch_size` | int | `128` | Number of particles to backproject simultaneously per job |
 | `--use_cuda` | bool | `True` | Enable GPU acceleration for reconstruction. If False, runs on CPU only |
 | `--correct_ctf` | bool | `True` | Apply CTF correction during reconstruction |
-| `--eps` | float | `0.001` | Regularization constant for reconstruction (ideally set to 1/SNR). Prevents division by zero and stabilizes reconstruction |
-| `--min_denominator_value` | Optional[float] | None | Minimum value for denominator to prevent numerical instabilities during reconstruction |
+| `--eps` | float | `-1000.0` | Regularization mode and strength. Sign selects mode: eps >= 0 uses Tikhonov regularization, eps < 0 uses RELION-style radial averaging. Magnitude sets scale: for Tikhonov, eps is the regularization constant (ideally 1/SNR); for radial averaging, abs(eps) is the divisor for radial weights (RELION uses 1000). Recommended: -1000 for radial averaging, 1e-3 for Tikhonov |
+| `--min_denominator_value` | float | `1e-06` | Minimum denominator threshold for numerical stability (prevents division by zero). Applied as final safety clamp regardless of regularization mode. RELION uses 1e-6 |
 | `--use_only_n_first_batches` | Optional[int] | None | Reconstruct using only first N batches (for testing or quick validation) |
 | `--float32_matmul_precision` | Optional[str] | `high` | PyTorch float32 matrix multiplication precision mode ("highest", "high", or "medium") |
 | `--weight_with_confidence` | bool | `False` | Apply per-particle confidence weighting during backprojection. If True, particles with higher confidence contribute more to reconstruction. It reads the confidence from the metadata label "rlnParticleFigureOfMerit" |
 | `--halfmap_subset` | Optional['1', '2' | None | Select half-map subset (1 or 2) for half-map reconstruction and validation |
+| `--apply_soft_mask` | bool | `True` | Apply soft spherical masking after reconstruction to reduce edge artifacts (RELION-style) |
+| `--mask_radius_pix` | float | `-1.0` | Radius for soft mask in pixels. If negative, defaults to box_size/2  |
+| `--mask_edge_width` | int | `3` | Width of cosine falloff edge in pixels |
 <!-- AUTO_GENERATED:reconstruct_cli:END -->
 
 ### Example

@@ -63,7 +63,7 @@ class DataManager(pl.LightningDataModule):
                  is_global_zero: bool,
                  # The following arguments have a default config value
                  num_augmented_copies_per_batch: int = CONFIG_PARAM(),
-                 train_validaton_split_seed: int = CONFIG_PARAM(),
+                 train_validation_split_seed: int = CONFIG_PARAM(),
                  train_validation_split: Tuple[float, float] = CONFIG_PARAM(),
                  num_dataworkers: int = CONFIG_PARAM(),
                  augment_train: bool = CONFIG_PARAM(),
@@ -81,7 +81,7 @@ class DataManager(pl.LightningDataModule):
             self.particles_dir = [None] * len(self.star_fnames)
         self.halfset = halfset
         self.num_augmented_copies_per_batch = num_augmented_copies_per_batch
-        self.train_validaton_split_seed = train_validaton_split_seed
+        self.train_validation_split_seed = train_validation_split_seed
         self.train_validation_split = train_validation_split
         self.batch_size = batch_size
         self.num_dataworkers = num_dataworkers
@@ -133,7 +133,7 @@ class DataManager(pl.LightningDataModule):
         dataset = ConcatDataset(datasets)
         if partitionName in ["train", "val"]:
             assert self.train_validation_split is not None
-            generator = torch.Generator().manual_seed(self.train_validaton_split_seed)
+            generator = torch.Generator().manual_seed(self.train_validation_split_seed)
             train_dataset, val_dataset = torch.utils.data.random_split(
                 dataset,
                 self.train_validation_split,

@@ -17,7 +17,7 @@ class Reconstruct_config:
         'correct_ctf': 'Apply CTF correction during reconstruction',
         'float32_matmul_precision': 'PyTorch float32 matrix multiplication precision mode ("highest", "high", or "medium")',
         'disable_compile_insert_central_slices_rfft_3d_multichannel': 'Disable torch.compile optimization for central slice insertion',
-        'compile_insert_central_slices_rfft_3d_multichanne_mode': 'Compilation mode for central slice insertion: "default" or "max-autotune" (does not work with dynamic batches)',
+        'compile_insert_central_slices_rfft_3d_multichannel_mode': 'Compilation mode for central slice insertion: "default" or "max-autotune" (does not work with dynamic batches)',
 
         # CLI-exposed parameters (used in reconstruct_starfile)
         'particles_star_fname': 'Path to input STAR file with particle metadata and poses to reconstruct',
@@ -28,7 +28,6 @@ class Reconstruct_config:
         'num_dataworkers': 'Number of CPU workers per PyTorch DataLoader for data loading',
         'batch_size': 'Number of particles to backproject simultaneously per job',
         'use_cuda': 'Enable GPU acceleration for reconstruction. If False, runs on CPU only',
-        'min_denominator_value': 'Minimum denominator threshold for numerical stability (prevents division by zero). Applied as final safety clamp regardless of regularization mode. RELION uses 1e-6',
         'use_only_n_first_batches': 'Reconstruct using only first N batches (for testing or quick validation)',
         'halfmap_subset': 'Select half-map subset (1 or 2) for half-map reconstruction and validation',
         'apply_soft_mask': 'Apply soft spherical masking after reconstruction to reduce edge artifacts (RELION-style)',
@@ -37,7 +36,7 @@ class Reconstruct_config:
     }
 
     disable_compile_insert_central_slices_rfft_3d_multichannel: bool = False
-    compile_insert_central_slices_rfft_3d_multichanne_mode: Optional[str] = "default" #"max-autotune" does not work with dynamic size batches (zscore)
+    compile_insert_central_slices_rfft_3d_multichannel_mode: Optional[str] = "default" #"max-autotune" does not work with dynamic size batches (zscore)
 
     eps: float = -1000.0  # Negative = radial averaging with scale abs(eps) (RELION default: 1000)
                           # Positive = Tikhonov regularization constant (e.g., 1e-3)

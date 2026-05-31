@@ -70,8 +70,8 @@ Common configuration overrides:
     train.weight_decay=1e-5 \
     train.accumulate_grad_batches=16 \
     models.image2sphere.lmax=8 \
-    datamanager.particlesDataset.sampling_rate_angs_for_nnet=2.0 \
-    datamanager.particlesDataset.image_size_px_for_nnet=128
+    datamanager.particlesdataset.sampling_rate_angs_for_nnet=2.0 \
+    datamanager.particlesdataset.image_size_px_for_nnet=128
 ```
 
 ### View All Config Options
@@ -104,7 +104,7 @@ cryopares_train \
     --config \
         train.learning_rate=5e-3 \
         models.image2sphere.lmax=10 \
-        datamanager.particlesDataset.sampling_rate_angs_for_nnet=1.5
+        datamanager.particlesdataset.sampling_rate_angs_for_nnet=1.5
 ```
 
 **Continue training from checkpoint:**

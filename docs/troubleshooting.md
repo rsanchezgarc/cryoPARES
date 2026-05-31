@@ -108,7 +108,7 @@ ValueError: could not convert string to float
    ```bash
    # Correct:
    --config train.learning_rate=1e-3
-   --config datamanager.particlesDataset.sampling_rate_angs_for_nnet=2.0
+   --config datamanager.particlesdataset.sampling_rate_angs_for_nnet=2.0
 
    # Wrong:
    --config train.learning_rate=1      # Missing decimal - will fail!
@@ -262,11 +262,11 @@ keep the effective batch size (batch_size x accumulate_grad_batches) constant
 
 2. **Reduce image size:**
 ```bash
---config datamanager.particlesDataset.image_size_px_for_nnet=96
+--config datamanager.particlesdataset.image_size_px_for_nnet=96
 ```
 and/or
 ```bash
---config datamanager.particlesDataset.sampling_rate_angs_for_nnet=2.0
+--config datamanager.particlesdataset.sampling_rate_angs_for_nnet=2.0
 ```
 Note that larger sampling rate implies smaller images.
 Don't try to reduce the image size at inference, it won't work, as the checkpoint is prepared for the training size
@@ -314,7 +314,7 @@ MemoryError: Unable to allocate array
 
 1. **Disable in-memory caching:**
 ```bash
---config datamanager.particlesDataset.store_data_in_memory=False
+--config datamanager.particlesdataset.store_data_in_memory=False
 ```
 
 2. **Reduce number of workers:**
@@ -666,7 +666,7 @@ print(torch.cuda.device_count())   # Should be > 0
 
 3. **Reduce image size:**
 ```bash
---config datamanager.particlesDataset.image_size_px_for_nnet=96
+--config datamanager.particlesdataset.image_size_px_for_nnet=96
 ```
 
 4. **Use multiple GPUs:**
@@ -805,7 +805,7 @@ nvidia-smi
 
 3. **Mask too tight:**
 ```bash
---config datamanager.particlesDataset.mask_radius_angs=150  # Increase
+--config datamanager.particlesdataset.mask_radius_angs=150  # Increase
 ```
 
 4. **Insufficient particles:**

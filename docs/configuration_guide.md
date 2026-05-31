@@ -40,7 +40,7 @@ cryopares_train \
         train.learning_rate=1e-3 \
         train.weight_decay=1e-5 \
         models.image2sphere.lmax=8 \
-        datamanager.particlesDataset.sampling_rate_angs_for_nnet=2.0
+        datamanager.particlesdataset.sampling_rate_angs_for_nnet=2.0
 ```
 
 **Important:**
@@ -71,7 +71,7 @@ models:
         resnetName: "resnet18"
 
 datamanager:
-  particlesDataset:
+  particlesdataset:
     sampling_rate_angs_for_nnet: 2.0
     image_size_px_for_nnet: 128
 ```
@@ -138,7 +138,7 @@ MainConfig
 ├── train (Training parameters)
 ├── inference (Inference parameters)
 ├── datamanager (Data loading and preprocessing)
-│   ├── particlesDataset (Dataset parameters)
+│   ├── particlesdataset (Dataset parameters)
 │   └── augmenter (Data augmentation)
 ├── models (Model architecture)
 │   ├── image2sphere (Main neural network)
@@ -223,7 +223,7 @@ For deeply nested parameters like `models.image2sphere.imageencoder.resnet.resne
 1. **Start at**: `cryoPARES/configs/models_config/image2sphere_config/image2sphere_config.py`
 2. **Find nested config**:
    ```python
-   imageencoder: Imageencoder_config = Imageencoder_config()
+   imageencoder: ImageEncoder_config = ImageEncoder_config()
    ```
 3. **Open**: `cryoPARES/configs/models_config/image2sphere_config/imageEncoder_config/imageEncoder_config.py`
 4. **Find ResNet config**:

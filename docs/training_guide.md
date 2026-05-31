@@ -58,24 +58,24 @@ If you cannot increase it, make sure that you group all your images into a small
 Override via `--config` flag with dot notation:
 
 ```bash
---config datamanager.particlesDataset.sampling_rate_angs_for_nnet=2.0 \
-         datamanager.particlesDataset.image_size_px_for_nnet=128
+--config datamanager.particlesdataset.sampling_rate_angs_for_nnet=2.0 \
+         datamanager.particlesdataset.image_size_px_for_nnet=128
 ```
 
 **Key data parameters:**
 
-- **`datamanager.particlesDataset.sampling_rate_angs_for_nnet`** (float)
+- **`datamanager.particlesdataset.sampling_rate_angs_for_nnet`** (float)
   - Target sampling rate in Ångströms/pixel
   - Images are rescaled to this value before training
   - Lower values = higher resolution but more memory/compute
   - Downsampling helps to reduce noise
-- **`datamanager.particlesDataset.image_size_px_for_nnet`** (int)
+- **`datamanager.particlesdataset.image_size_px_for_nnet`** (int)
   - Final image size in pixels after rescaling
   - Images are cropped/padded to this size
   - Must be large enough to contain the particle after rescaling
     - But we recommend using tight boxes
 
-- **`datamanager.particlesDataset.mask_radius_angs`** (float, optional)
+- **`datamanager.particlesdataset.mask_radius_angs`** (float, optional)
   - Radius of circular mask in Ångströms
   - If not set, uses half the box size
   - Helps the network focus on the particle
@@ -441,7 +441,7 @@ Result: Image is downsampled by 2×, then center-cropped to 128×128
 ### Masking
 
 ```bash
---config datamanager.particlesDataset.mask_radius_angs=100
+--config datamanager.particlesdataset.mask_radius_angs=100
 ```
 
 - Applies a soft circular mask to focus on the particle
@@ -543,7 +543,7 @@ cryopares_train \
 
 **Solutions:**
 - Enable model compilation: `--compile_model`
-- Reduce image size: `--config datamanager.particlesDataset.image_size_px_for_nnet=96`
+- Reduce image size: `--config datamanager.particlesdataset.image_size_px_for_nnet=96`
 - Increase batch size: `--batch_size 64`
 - Use multiple GPUs (automatically detected)
 - Reduce model complexity, like `lmax`: `--config models.image2sphere.lmax=10`. Although it will have an impact on model performance (overfitting/underfitting) 
@@ -553,7 +553,7 @@ cryopares_train \
 **Solutions:**
 - Reduce batch size: `--batch_size 16`
   - You can increase gradient accumulation to partially compensate for the reduction: `--config train.accumulate_grad_batches=32`
-- Reduce image size: `--config datamanager.particlesDataset.image_size_px_for_nnet=96`
+- Reduce image size: `--config datamanager.particlesdataset.image_size_px_for_nnet=96`
 
 ### "Too many open files" error
 

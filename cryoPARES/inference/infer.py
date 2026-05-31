@@ -6,6 +6,7 @@ from typing import Optional, Literal, List, Dict, Any
 
 import numpy as np
 import pandas as pd
+import psutil
 import torch
 import starfile
 
@@ -20,6 +21,23 @@ from cryoPARES.utils.reconstructionUtils import get_vol
 from autoCLI_config import ConfigArgumentParser, ConfigOverrideSystem
 from cryoPARES.utils.checkpointReader import CheckpointReader
 from cryoPARES.utils.paths import convert_config_args_to_absolute_paths
+
+
+def _save_command_info(results_dir: str):
+    from cryoPARES.utils.checkpointUtils import get_version_to_use
+    import os.path as osp
+    basename = get_version_to_use(
+        results_dir,
+        basename='command_',
+        path_pattern=r'(command_)(\d+)(\.txt)$',
+        extension="txt"
+    )
+    fname = osp.abspath(osp.join(results_dir, basename))
+    current_process = psutil.Process()
+    _command = " ".join(["'" + x + "'" if x.startswith('{"') else x
+                         for x in current_process.cmdline()])
+    with open(fname, "w") as f:
+        f.write(_command)
 
 
 # -----------------------------
@@ -120,6 +138,7 @@ def distributed_inference(
     torch.set_float32_matmul_precision(main_config.inference.float32_matmul_precision)
 
     os.makedirs(results_dir, exist_ok=True)
+    _save_command_info(results_dir)
 
     # Determine default parallelism
     if use_cuda and torch.cuda.is_available():

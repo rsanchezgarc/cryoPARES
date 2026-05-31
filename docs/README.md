@@ -25,6 +25,7 @@ Welcome to the CryoPARES documentation! This directory contains comprehensive gu
 
 - **[CLI Reference](cli.md)** - Command-line interface documentation and utility scripts
   - `cryopares_train`, `cryopares_infer`, `cryopares_reconstruct`, `cryopares_projmatching`, `cryopares_postprocess`
+  - Checkpoint compactification (`python -m cryoPARES.scripts.compactify_checkpoint`)
   - FSC computation, pose comparison, learning curve visualization, STAR file inspection
 
 - **[Troubleshooting Guide](troubleshooting.md)** - Solutions to common issues
@@ -45,18 +46,6 @@ Welcome to the CryoPARES documentation! This directory contains comprehensive gu
   - Data Management API (ParticlesDataset class)
   - Model API (PlModel class)
   - Utilities and helper functions
-
-- **[CLI Reference](cli.md)** - Command-line interface documentation
-  - `cryopares_train` - Train models
-  - `cryopares_infer` - Run inference
-  - `cryopares_reconstruct` - Reconstruct volumes
-  - `cryopares_projmatching` - Projection matching
-  - `compactify_checkpoint` - Package checkpoints
-
-- **[CLI Reference](cli.md)** - Command-line interface and utility scripts reference
-  - Analysis and visualization tools
-  - Automatic vs manual usage
-  - Integration with main pipeline
 
 ## Quick Links by Task
 
@@ -93,7 +82,7 @@ Welcome to the CryoPARES documentation! This directory contains comprehensive gu
 |----------|---------|-----------------|
 | Training Guide | Learn how to train models effectively | Users training models |
 | Configuration Guide | Understand all configuration parameters | All users |
-| Scripts Guide | Use analysis and visualization tools | Users analyzing results |
+| CLI Reference | Use analysis and visualization tools | Users analyzing results |
 | Troubleshooting Guide | Fix common problems | Users encountering issues |
 | API Reference (auto-generated) | Programmatic usage with type hints | Developers, advanced users |
 | CLI Reference | Command-line tool usage | All users |

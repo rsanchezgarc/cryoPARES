@@ -90,7 +90,7 @@ class Train_config:
 CLI functions use the `@inject_docs_from_config_params` decorator to automatically format their docstrings:
 
 ```python
-from cryoPARES.configManager.inject_defaults import inject_docs_from_config_params, inject_defaults_from_config
+from autoCLI_config import inject_docs_from_config_params, inject_defaults_from_config
 
 @inject_docs_from_config_params
 @inject_defaults_from_config(main_config.train, update_config_with_args=True)
@@ -445,8 +445,6 @@ GENERATORS = {
 
 ## Further Reading
 
-- **`cryoPARES/configManager/PARAM_DOCS_SYSTEM.md`** - Technical details of the PARAM_DOCS system
-- **`cryoPARES/configManager/inject_defaults.py`** - Implementation of decorators
 - **`docs/generate_cli_docs.py`** - Documentation generator source code
 - **`docs/update_docs.py`** - Update script source code
 

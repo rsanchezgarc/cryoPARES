@@ -21,7 +21,7 @@ CryoPARES is a supervised deep learning system for cryo-EM pose estimation. It u
 ### Key Modules
 
 - **Models** (`cryoPARES/models/`):
-  - `image2sphere.py`: Main network that maps 2D images to SO(3) orientation predictions
+  - `image2sphere/`: Main network package that maps 2D images to SO(3) orientation predictions
   - `directionalNormalizer/`: Confidence scoring for predictions
   - `model.py`: PyTorch Lightning wrapper (`PlModel`) with training logic
 
@@ -62,11 +62,11 @@ ulimit -n 65536
 ### Training
 
 ```bash
-python -m cryopares_train \
+cryopares_train \
     --symmetry C1 \
     --particles_star_fname /path/to/aligned.star \
     --particles_dir /path/to/particles \
-    --output_dir /path/to/output \
+    --train_save_dir /path/to/output \
     --n_epochs 10 \
     --config models.image2sphere.lmax=6
 ```
@@ -77,8 +77,8 @@ python -m cryopares_train \
 cryopares_infer \
     --particles_star_fname /path/to/new.star \
     --checkpoint_dir /path/to/training/version_0 \
-    --output_dir /path/to/results \
-    --reference_vol /path/to/ref.mrc \
+    --results_dir /path/to/results \
+    --reference_map /path/to/ref.mrc \
     --config projmatching.grid_distance_degs=15
 ```
 
@@ -88,7 +88,7 @@ cryopares_infer \
 cryopares_projmatching \
     --reference_vol /path/to/ref.mrc \
     --particles_star_fname /path/to/particles.star \
-    --output_star_fname /path/to/aligned.star \
+    --out_fname /path/to/aligned.star \
     --grid_distance_degs 10
 ```
 
@@ -98,7 +98,7 @@ cryopares_projmatching \
 cryopares_reconstruct \
     --particles_star_fname /path/to/particles.star \
     --symmetry C1 \
-    --output_mrc_fname /path/to/output.mrc
+    --output_fname /path/to/output.mrc
 ```
 
 ### Testing
@@ -111,11 +111,22 @@ pytest tests/test_reconstruct_distrib.py
 pytest tests/test_daemon.py
 ```
 
+### Postprocessing
+
+```bash
+# B-factor sharpening (subcommand-based interface)
+cryopares_postprocess bfactor \
+    --half1 /path/to/half1.mrc \
+    --half2 /path/to/half2.mrc \
+    --mask /path/to/mask.mrc \
+    --output_dir /path/to/out/
+```
+
 ### Configuration Inspection
 
 ```bash
 # View all available config parameters
-python -m cryopares_train --show-config
+cryopares_train --show-config
 ```
 
 ## Important Technical Details

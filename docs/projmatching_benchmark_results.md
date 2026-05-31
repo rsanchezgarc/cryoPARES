@@ -350,7 +350,7 @@ $COMPARE \
 CUDA_VISIBLE_DEVICES=0 $BIN_DIR/cryopares_reconstruct \
   --particles_star_fname $OUT/aligned.star \
   --symmetry D2 \
-  --output_mrc_fname $OUT/reconstruction.mrc
+  --output_fname $OUT/reconstruction.mrc
 ```
 
 #### Results — lig_00892 (~57K particles)

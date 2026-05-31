@@ -157,7 +157,7 @@ ulimit -n 65536
 echo "ulimit -n 65536" >> ~/.bashrc
 source ~/.bashrc
 ```
-If you cannot set it to a large enough number, join your particles stacsk into a smaller number of .mrcs files
+If you cannot set it to a large enough number, join your particles stacks into a smaller number of .mrcs files
 
 3. **System-wide fix** (requires root):
 ```bash
@@ -253,7 +253,7 @@ RuntimeError: CUDA out of memory. Tried to allocate X.XX GiB
 --batch_size 16
 ```
 
-You can compensate, up to a certain point, the batch reduction by increasing accumulate_gra_batches to
+You can compensate, up to a certain point, the batch reduction by increasing accumulate_grad_batches to
 keep the effective batch size (batch_size x accumulate_grad_batches) constant
 ```bash
 --config train.accumulate_grad_batches=32

@@ -102,14 +102,14 @@ Override via `--config` flag with dot notation:
 
 - **`train.weight_decay`** (float)
   - L2 regularization coefficient
-  - Incrase it to reduce overfitting
+  - Increase it to reduce overfitting
 
 - **`train.accumulate_grad_batches`** (int)
   - Number of batches to accumulate gradients over
   - Simulates larger batch sizes: effective_batch_size = batch_size × accumulate_grad_batches
   - Useful when GPU memory is limited
 
-- **`train.patient_reduce_lr_plateau_n_epochs`** (int, default: 3)
+- **`train.patient_reduce_lr_plateau_n_epochs`** (int, default: 5)
   - Patience for ReduceLROnPlateau scheduler
   - LR reduced by 0.5 if val_loss doesn't improve for this many epochs
 
@@ -509,7 +509,7 @@ cryopares_train \
     --train_save_dir /path/to/output \
     --map_fname_for_simulated_pretraining /path/to/reference_map.mrc \
     --n_epochs 40 \
-    --config train.n_epochs_simulation=5 #We will train the model for 3 epochs using simulated data
+    --config train.n_epochs_simulation=5 #We will train the model for 5 epochs using simulated data
 ```
 
 This first trains on simulated projections of the reference map, then fine-tunes on real data. 

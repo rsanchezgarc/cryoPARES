@@ -75,7 +75,7 @@ def distributed_inference(
 ):
     """
     Distributed inference across particles and devices, mirroring the **halfset selection logic**
-    used by :class:`cryoPARES.inference.inference.SingleInferencer`.
+    used by :class:`cryoPARES.inference.inferencer.SingleInferencer`.
 
     Parameters
     ----------

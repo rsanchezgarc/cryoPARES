@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "cryoPARES"
 description = "Cryo-EM Pose-Assignment for Related Experiments via Supervision"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = {text = "BSD-3-Clause"} #TODO: Update license
 authors = [
   {name = "Ruben Sanchez-Garcia", email = "rsanchezgarc@faculty.ie.edu"},

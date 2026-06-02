@@ -22,47 +22,109 @@ from cryoPARES.utils.checkpointUtils import get_best_checkpoint
 from cryoPARES.utils.paths import get_most_recent_file, convert_config_args_to_absolute_paths
 
 
+def _preload_checkpoint_defaults():
+    """Pre-load checkpoint config and inject missing CLI defaults before argparse runs.
+
+    When --continue_checkpoint_dir or --finetune_checkpoint_dir is provided:
+    - Loads configs_*.yml directly into main_config (as defaults, not via --config injection,
+      to avoid conflicts when users also pass --n_epochs or similar direct CLI overrides).
+    - Injects --symmetry, --particles_star_fname, --particles_dir into sys.argv from
+      train_metadata.json (for continue only).
+    - Derives --train_save_dir from the checkpoint parent dir (for continue only).
+    Injections go at position 1 so later user-supplied args override them.
+    """
+    checkpoint_dir = None
+    checkpoint_flag = None
+    for flag in ['--continue_checkpoint_dir', '--finetune_checkpoint_dir']:
+        if flag in sys.argv:
+            idx = sys.argv.index(flag)
+            if idx + 1 < len(sys.argv) and not sys.argv[idx + 1].startswith('--'):
+                checkpoint_dir = osp.abspath(osp.expanduser(sys.argv[idx + 1]))
+                checkpoint_flag = flag
+                break
+    if checkpoint_dir is None:
+        return
+
+    # Load MainConfig from checkpoint directly — NOT via --config injection, so that
+    # user-provided direct CLI args (e.g. --n_epochs 5) don't conflict with config file values.
+    config_fname = get_most_recent_file(checkpoint_dir, "configs_*.yml")
+    if config_fname and osp.isfile(config_fname):
+        from autoCLI_config import ConfigOverrideSystem
+        ConfigOverrideSystem.update_config_from_file(main_config, config_fname)
+
+    # Inject non-MainConfig CLI args from train_metadata.json
+    injections = []
+    metadata_fname = osp.join(checkpoint_dir, "train_metadata.json")
+    if osp.isfile(metadata_fname):
+        try:
+            with open(metadata_fname) as f:
+                metadata = json.load(f)
+        except Exception:
+            metadata = {}
+
+        if '--symmetry' not in sys.argv and metadata.get('symmetry'):
+            injections += ['--symmetry', metadata['symmetry']]
+
+        # For continue only: restore original data paths (finetune = new dataset)
+        if checkpoint_flag == '--continue_checkpoint_dir':
+            if '--particles_star_fname' not in sys.argv and metadata.get('particles_star_fname'):
+                injections += ['--particles_star_fname'] + metadata['particles_star_fname']
+            if '--particles_dir' not in sys.argv and metadata.get('particles_dir'):
+                injections += ['--particles_dir'] + metadata['particles_dir']
+
+    # For continue only: derive train_save_dir from checkpoint parent (finetune = new dir)
+    if checkpoint_flag == '--continue_checkpoint_dir' and '--train_save_dir' not in sys.argv:
+        injections += ['--train_save_dir', osp.dirname(checkpoint_dir)]
+
+    # Insert before any user-supplied args so explicit user args (which come later) override
+    sys.argv[1:1] = injections
+
+
 def _check_if_in_config_args(param_path: str) -> bool:
     """
-    Check if a parameter will be provided via --config at parse time.
+    Check if a parameter will be provided via --config or a checkpoint at parse time.
 
-    This inspects sys.argv to see if --config is present and would provide the given
-    parameter (either via key=value or in a YAML file).
+    Inspects sys.argv for --config args (key=value or YAML files) and also for
+    --continue_checkpoint_dir / --finetune_checkpoint_dir whose configs_*.yml has been
+    pre-loaded into main_config by _preload_checkpoint_defaults.
 
     Args:
         param_path: The config path to check (e.g., 'datamanager.particlesdataset.image_size_px_for_nnet')
 
     Returns:
-        True if --config appears to provide this parameter, False otherwise
+        True if the parameter will be available as a default, False otherwise
     """
     import sys
 
-    # If --config is not present, definitely not in config
-    if '--config' not in sys.argv:
-        return False
+    # Check --config args
+    if '--config' in sys.argv:
+        try:
+            config_idx = sys.argv.index('--config')
+            for i in range(config_idx + 1, len(sys.argv)):
+                if sys.argv[i].startswith('--'):
+                    break
+                arg = sys.argv[i]
+                if '=' in arg and param_path in arg:
+                    return True
+                if arg.endswith('.yaml') or arg.endswith('.yml'):
+                    return True  # YAML file might contain it
+        except (ValueError, IndexError):
+            pass
 
-    # Find all --config values
-    try:
-        config_idx = sys.argv.index('--config')
-        # Collect all config arguments until next flag or end
-        config_args = []
-        for i in range(config_idx + 1, len(sys.argv)):
-            if sys.argv[i].startswith('--'):
-                break
-            config_args.append(sys.argv[i])
+    # Also return True when a checkpoint dir is provided and has a config file:
+    # _preload_checkpoint_defaults() loads that config into main_config as defaults.
+    for flag in ['--continue_checkpoint_dir', '--finetune_checkpoint_dir']:
+        if flag in sys.argv:
+            try:
+                idx = sys.argv.index(flag)
+                if idx + 1 < len(sys.argv) and not sys.argv[idx + 1].startswith('--'):
+                    ckpt_dir = osp.abspath(osp.expanduser(sys.argv[idx + 1]))
+                    if get_most_recent_file(ckpt_dir, "configs_*.yml"):
+                        return True
+            except Exception:
+                pass
 
-        # Check if any config arg is a key=value containing our parameter
-        for arg in config_args:
-            if '=' in arg and param_path in arg:
-                return True
-            # If it's a YAML file, we'd need to load it to check - too complex
-            # for this pre-parse check, so we conservatively assume it might be there
-            if arg.endswith('.yaml') or arg.endswith('.yml'):
-                return True  # Assume config file might contain it
-
-        return False
-    except (ValueError, IndexError):
-        return False
+    return False
 
 
 def estimate_particle_stacks_size(star_fnames: List[str], particles_dir: Optional[List[str]]) -> int:
@@ -321,6 +383,7 @@ class Trainer:
         self._save_env_vars()
         self._copy_code_files()
         self._save_config_vals()
+        self._save_train_metadata()
 
     def _save_command_info(self):
         from cryoPARES.utils.checkpointUtils import get_version_to_use
@@ -365,6 +428,18 @@ class Trainer:
         fname = osp.abspath(osp.join(self.experiment_root, basename))
         from autoCLI_config import export_config_to_yaml
         export_config_to_yaml(main_config, fname)
+
+    def _save_train_metadata(self):
+        fname = osp.join(self.experiment_root, "train_metadata.json")
+        if osp.isfile(fname):
+            return
+        metadata = {
+            "symmetry": self.symmetry,
+            "particles_star_fname": self.particles_star_fname,
+            "particles_dir": self.particles_dir,
+        }
+        with open(fname, "w") as f:
+            json.dump(metadata, f, indent=2)
 
     def _copy_code_files(self):
         from cryoPARES.utils.reproducibility import _copyCode
@@ -618,6 +693,9 @@ def main():
     print("---------------------------------------")
     print(" ".join(sys.argv))
     print("---------------------------------------")
+
+    _preload_checkpoint_defaults()
+
     from autoCLI_config import ConfigArgumentParser
 
     parser = ConfigArgumentParser(prog="train_cryoPARES", config_obj=main_config, verbose=True)

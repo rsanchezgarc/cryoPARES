@@ -9,6 +9,7 @@ or directly:
 import math
 import sys
 import os
+import shutil
 import tempfile
 
 import torch
@@ -182,69 +183,175 @@ def test_parabolic_peak_offset_from_winner():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 3.  Integration: ProjectionMatcher init + tiny GPU forward pass
+# 3.  Integration: ProjectionMatcher init + tiny forward pass
 # ═══════════════════════════════════════════════════════════════════════════
+
+# Candidate paths tried in order; tests fall back to synthetic data if none exist.
+_CANDIDATE_REFS = [
+    "/home/rsanchez/cryo/data/EMPIAR-download/EMPIAR-10166/data/reconstruct.mrc",
+    "/home/sanchezg/cryo/data/EMPIAR-download/EMPIAR-10166/data/reconstruct.mrc",
+]
+_CANDIDATE_STARS = [
+    "/home/rsanchez/cryo/data/cryopares/tests/ds2_perturbed_5deg.star",
+    "/home/sanchezg/cryo/data/cryopares/tests/ds2_perturbed_5deg.star",
+]
+
+
+def _make_synthetic_projmatching_data(tmpdir, n_particles=5, size=64, px_size=1.0):
+    """Create a synthetic reference MRC + particle STAR + MRCS stack under tmpdir."""
+    import numpy as np
+    import pandas as pd
+    import mrcfile
+    import starfile as sf
+
+    particles_dir = os.path.join(tmpdir, "particles")
+    os.makedirs(particles_dir, exist_ok=True)
+
+    # Anisotropic Gaussian reference — unique projection per direction, no tie-breaking issues
+    half = size // 2
+    z, y, x = np.mgrid[:size, :size, :size]
+    r2 = (z - half)**2 / 5.0**2 + (y - half)**2 / 12.0**2 + (x - half)**2 / 8.0**2
+    ref_data = np.exp(-r2 / 2.0).astype(np.float32)
+    ref_path = os.path.join(tmpdir, "reference.mrc")
+    with mrcfile.new(ref_path, data=ref_data, overwrite=True) as mrc:
+        mrc.voxel_size = (px_size, px_size, px_size)
+
+    mrcs_fname = os.path.join(particles_dir, "particles.mrcs")
+    rng = np.random.default_rng(42)
+    particles_data = rng.standard_normal((n_particles, size, size)).astype(np.float32)
+    with mrcfile.new(mrcs_fname, data=particles_data, overwrite=True) as mrc:
+        mrc.voxel_size = (px_size, px_size, px_size)
+
+    star_fname = os.path.join(tmpdir, "particles.star")
+    stack_basename = os.path.basename(mrcs_fname)
+    optics_df = pd.DataFrame({
+        "rlnOpticsGroup": [1], "rlnImageSize": [size],
+        "rlnImagePixelSize": [px_size], "rlnCtfDataArePhaseFlipped": [0],
+        "rlnVoltage": [300.0], "rlnSphericalAberration": [2.7], "rlnAmplitudeContrast": [0.1],
+    })
+    particles_df = pd.DataFrame({
+        "rlnImageName":           [f"{i + 1}@{stack_basename}" for i in range(n_particles)],
+        "rlnOpticsGroup":         [1] * n_particles,
+        "rlnCoordinateX":         [half] * n_particles,
+        "rlnCoordinateY":         [half] * n_particles,
+        "rlnAngleRot":            [0.0] * n_particles,
+        "rlnAngleTilt":           [0.0] * n_particles,
+        "rlnAnglePsi":            [0.0] * n_particles,
+        "rlnCtfBfactor":          [0.0] * n_particles,
+        "rlnDefocusU":            [10000.0] * n_particles,
+        "rlnDefocusV":            [10000.0] * n_particles,
+        "rlnDefocusAngle":        [0.0] * n_particles,
+        "rlnOriginXAngst":        [0.0] * n_particles,
+        "rlnOriginYAngst":        [0.0] * n_particles,
+        "rlnVoltage":             [300.0] * n_particles,
+        "rlnSphericalAberration": [2.7] * n_particles,
+        "rlnAmplitudeContrast":   [0.1] * n_particles,
+        "rlnDetectorPixelSize":   [px_size] * n_particles,
+        "rlnMagnification":       [10000.0] * n_particles,
+    })
+    sf.write({"optics": optics_df, "particles": particles_df}, star_fname, overwrite=True)
+    return ref_path, star_fname, particles_dir
+
 
 def test_projmatcher_init_with_flag(gpu_id=1):
     """ProjectionMatcher should precompute neighbor table when use_so3_interpolation=True."""
+    import numpy as np
+    import mrcfile
     from cryoPARES.configs.mainConfig import main_config
+
+    orig_grid_dist = main_config.projmatching.grid_distance_degs
+    orig_grid_step = main_config.projmatching.grid_step_degs
     main_config.projmatching.use_so3_interpolation = True
+    # Pin to the 6°/2° grid the unit tests are calibrated for (7³=343 points)
+    main_config.projmatching.grid_distance_degs = 6.0
+    main_config.projmatching.grid_step_degs = 2.0
+    tmpdir = tempfile.mkdtemp()
 
     try:
         from cryoPARES.projmatching.projMatcher import ProjectionMatcher
-        REF = "/home/rsanchez/cryo/data/EMPIAR-download/EMPIAR-10166/data/reconstruct.mrc"
-        pm = ProjectionMatcher(reference_vol=REF)
 
+        ref_path = next((p for p in _CANDIDATE_REFS if os.path.exists(p)), None)
+        if ref_path is None:
+            # Synthetic fallback: any valid MRC suffices — we only test init behaviour
+            ref_path = os.path.join(tmpdir, "reference.mrc")
+            half = 32
+            z, y, x = np.mgrid[:64, :64, :64]
+            r2 = (z - half)**2 / 5.0**2 + (y - half)**2 / 12.0**2 + (x - half)**2 / 8.0**2
+            data = np.exp(-r2 / 2.0).astype(np.float32)
+            with mrcfile.new(ref_path, data=data, overwrite=True) as mrc:
+                mrc.voxel_size = (1.0, 1.0, 1.0)
+
+        pm = ProjectionMatcher(reference_vol=ref_path)
         assert hasattr(pm, "_so3_interp_nb_idx"), "neighbor table not set on instance"
         assert pm._so3_interp_nb_idx.shape == (343, 6), pm._so3_interp_nb_idx.shape
         assert pm.use_so3_interpolation is True
         print("  [OK] ProjectionMatcher init sets neighbor table correctly")
-        return pm
+
     finally:
         main_config.projmatching.use_so3_interpolation = False
+        main_config.projmatching.grid_distance_degs = orig_grid_dist
+        main_config.projmatching.grid_step_degs = orig_grid_step
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 def test_tiny_gpu_projmatching(gpu_id=1):
-    """End-to-end projmatching with n=5 particles on GPU, use_so3_interpolation=True."""
-    import starfile
+    """End-to-end projmatching with n=5 particles, use_so3_interpolation=True.
+
+    Tries real EMPIAR-10166 data at candidate paths; falls back to synthetic
+    fixtures so the test always runs (on CPU when CUDA is unavailable).
+    """
+    import starfile as sf
     from cryoPARES.configs.mainConfig import main_config
+
+    orig_img_size = main_config.datamanager.particlesdataset.image_size_px_for_nnet
+    orig_sampling = main_config.datamanager.particlesdataset.sampling_rate_angs_for_nnet
     main_config.projmatching.use_so3_interpolation = True
+    tmpdir = tempfile.mkdtemp()
 
     try:
         from cryoPARES.projmatching.projMatcher import ProjectionMatcher
 
-        REF  = "/home/rsanchez/cryo/data/EMPIAR-download/EMPIAR-10166/data/reconstruct.mrc"
-        STAR = "/home/rsanchez/cryo/data/cryopares/tests/ds2_perturbed_5deg.star"
-        DIR  = "/home/rsanchez/cryo/data/EMPIAR-download/EMPIAR-10166/data"
+        real_ref  = next((p for p in _CANDIDATE_REFS  if os.path.exists(p)), None)
+        real_star = next((p for p in _CANDIDATE_STARS if os.path.exists(p)), None)
 
-        # align_star has no n_first_particles param — write a 5-particle star file
-        star_5 = tempfile.mktemp(suffix=".star")
-        star_data = starfile.read(STAR)
-        starfile.write({"optics": star_data["optics"],
-                        "particles": star_data["particles"].iloc[:5]}, star_5)
+        if real_ref and real_star:
+            REF = real_ref
+            DIR = os.path.dirname(real_ref)
+            star_data = sf.read(real_star)
+            STAR = os.path.join(tmpdir, "subset.star")
+            sf.write({"optics": star_data["optics"],
+                      "particles": star_data["particles"].iloc[:5]}, STAR)
+        else:
+            REF, STAR, DIR = _make_synthetic_projmatching_data(tmpdir, n_particles=5)
+            main_config.datamanager.particlesdataset.image_size_px_for_nnet = 64
+            main_config.datamanager.particlesdataset.sampling_rate_angs_for_nnet = 1.0
+
+        if torch.cuda.is_available():
+            device = f"cuda:{min(gpu_id, torch.cuda.device_count() - 1)}"
+        else:
+            device = "cpu"
+        out_star = os.path.join(tmpdir, "out.star")
 
         pm = ProjectionMatcher(reference_vol=REF)
         assert pm.use_so3_interpolation
 
-        out_star = tempfile.mktemp(suffix=".star")
-        try:
-            result = pm.align_star(
-                particles=star_5,
-                starFnameOut=out_star,
-                data_rootdir=DIR,
-                batch_size=1,
-                device=f"cuda:{gpu_id}",
-                n_cpus=0,  # no DataLoader workers — avoids slow spawn reimport of cryoPARES
-            )
-            n_out = len(result.particles_md)
-            assert n_out == 5, f"expected 5 particles out, got {n_out}"
-            print(f"  [OK] GPU forward pass completed, {n_out} particles aligned")
-        finally:
-            for f in (out_star, star_5):
-                if os.path.exists(f):
-                    os.unlink(f)
+        result = pm.align_star(
+            particles=STAR,
+            starFnameOut=out_star,
+            data_rootdir=DIR,
+            batch_size=1,
+            device=device,
+            n_cpus=0,
+        )
+        n_out = len(result.particles_md)
+        assert n_out == 5, f"expected 5 particles out, got {n_out}"
+        print(f"  [OK] forward pass on {device}, {n_out} particles aligned")
+
     finally:
         main_config.projmatching.use_so3_interpolation = False
+        main_config.datamanager.particlesdataset.image_size_px_for_nnet = orig_img_size
+        main_config.datamanager.particlesdataset.sampling_rate_angs_for_nnet = orig_sampling
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════

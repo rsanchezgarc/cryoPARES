@@ -2,29 +2,44 @@
 Fourier-space B-factor sharpening and FSC-weighting for cryo-EM maps.
 """
 import numpy as np
+import torch
 
 
-def radial_freq_grid_3d(shape: tuple, px_A: float) -> np.ndarray:
+def _get_device(device):
+    if device is None:
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return torch.device(device) if not isinstance(device, torch.device) else device
+
+
+def _torch_interp(x: torch.Tensor, xp: torch.Tensor, fp: torch.Tensor) -> torch.Tensor:
+    """1D piecewise-linear interpolation on device (equivalent to np.interp, clamps at edges)."""
+    idx = torch.searchsorted(xp.contiguous(), x.contiguous()).clamp(1, len(xp) - 1)
+    x0, x1 = xp[idx - 1], xp[idx]
+    y0, y1 = fp[idx - 1], fp[idx]
+    t = ((x - x0) / (x1 - x0 + 1e-30)).clamp(0.0, 1.0)
+    return y0 + t * (y1 - y0)
+
+
+def radial_freq_grid_3d(shape: tuple, px_A: float, device=None) -> torch.Tensor:
     """
-    Build a 3D radial spatial-frequency grid for an rFFT layout.
+    Build a 3D radial spatial-frequency grid for an rFFT layout on *device*.
 
     Parameters
     ----------
     shape : (D, H, W)
-    px_A : float — pixel size in Å
+    px_A  : float — pixel size in Å
+    device : torch.device or None — auto-selects GPU if available
 
     Returns
     -------
-    freq_grid : np.ndarray, shape (D, H, W//2+1), values in 1/Å
+    freq_grid : torch.Tensor, shape (D, H, W//2+1), float32, values in 1/Å
     """
+    dev = _get_device(device)
     D, H, W = shape
-    fz = np.fft.fftfreq(D)   / px_A  # (D,)
-    fy = np.fft.fftfreq(H)   / px_A  # (H,)
-    fx = np.fft.rfftfreq(W)  / px_A  # (W//2+1,)
-
-    gz, gy, gx = np.meshgrid(fz, fy, fx, indexing='ij')
-    freq_grid = np.sqrt(gz**2 + gy**2 + gx**2)
-    return freq_grid.astype(np.float32)
+    fz = (torch.fft.fftfreq(D, device=dev)  / px_A).reshape(-1, 1, 1)
+    fy = (torch.fft.fftfreq(H, device=dev)  / px_A).reshape(1, -1, 1)
+    fx = (torch.fft.rfftfreq(W, device=dev) / px_A).reshape(1, 1, -1)
+    return torch.sqrt(fz**2 + fy**2 + fx**2)  # (D, H, W//2+1), float32
 
 
 def fsc_weight_curve(fsc_corrected: np.ndarray) -> np.ndarray:
@@ -47,7 +62,8 @@ def apply_bfactor_and_fsc_weight(vol_np: np.ndarray,
                                   spatial_freq: np.ndarray,
                                   bfactor: float,
                                   px_A: float,
-                                  lowpass_A: float = None) -> np.ndarray:
+                                  lowpass_A: float = None,
+                                  device=None) -> np.ndarray:
     """
     Apply FSC-based weighting and B-factor sharpening to a cryo-EM map.
 
@@ -73,44 +89,47 @@ def apply_bfactor_and_fsc_weight(vol_np: np.ndarray,
     lowpass_A : float, optional — hard Fourier cutoff resolution in Å;
                 all shells beyond 1/lowpass_A are zeroed.  Default: the
                 first-zero-crossing of fsc_corrected (computed internally).
+    device : torch.device or None — GPU if available, else CPU
 
     Returns
     -------
     np.ndarray (D, H, W), dtype float32
     """
-    # Build the per-shell weight curve
-    w_curve = fsc_weight_curve(fsc_corrected)  # shape: (n_shells,)
+    dev = _get_device(device)
+
+    # Build per-shell weight curve (small 1D op, stay numpy)
+    w_curve = fsc_weight_curve(fsc_corrected)
+
+    # Move 1D arrays to device
+    freq_t  = torch.as_tensor(spatial_freq, dtype=torch.float32, device=dev)
+    w_t     = torch.as_tensor(w_curve,      dtype=torch.float32, device=dev)
+    fsc_t   = torch.as_tensor(fsc_corrected, dtype=torch.float32, device=dev)
 
     # Radial spatial-frequency grid in rFFT layout
-    freq_grid = radial_freq_grid_3d(vol_np.shape, px_A)  # (D, H, W//2+1)
+    freq_grid = radial_freq_grid_3d(vol_np.shape, px_A, device=dev)  # (D, H, W//2+1)
 
     # Interpolate W(s) onto the full 3D frequency grid
-    w_3d = np.interp(freq_grid.ravel(), spatial_freq, w_curve).reshape(freq_grid.shape)
+    w_3d = _torch_interp(freq_grid.reshape(-1), freq_t, w_t).reshape(freq_grid.shape)
 
     # B-factor weight: exp(-B * s² / 4)
-    bfac_3d = np.exp(-bfactor * freq_grid**2 / 4.0)
+    bfac_3d = torch.exp(-bfactor * freq_grid ** 2 / 4.0)
 
     # Combined per-voxel weight
-    weight_3d = (w_3d * bfac_3d).astype(np.float32)
+    weight_3d = (w_3d * bfac_3d).to(torch.float32)
 
     # Apply in Fourier space
-    ft = np.fft.rfftn(vol_np.astype(np.float32))
-    ft *= weight_3d
+    vol_t = torch.as_tensor(vol_np, dtype=torch.float32, device=dev)
+    ft = torch.fft.rfftn(vol_t)
+    ft = ft * weight_3d
 
-    # Determine hard cutoff: default is the first shell where fsc_corrected < 0.0001
-    # (matches RELION's applyFscWeighting threshold; shells beyond that are noise
-    # and would be massively amplified by the B-factor boost).
+    # Determine hard cutoff
     if lowpass_A is None:
-        cutoff_freq = float("nan")
-        for i in range(len(spatial_freq)):
-            if fsc_corrected[i] < 0.0001:
-                cutoff_freq = float(spatial_freq[i])
-                break
-        if np.isfinite(cutoff_freq):
+        below = torch.where(fsc_t < 0.0001)[0]
+        if below.numel() > 0:
+            cutoff_freq = float(freq_t[below[0]])
             ft[freq_grid > cutoff_freq] = 0.0
     else:
-        # User-specified hard cutoff
         ft[freq_grid > 1.0 / lowpass_A] = 0.0
 
-    sharpened = np.fft.irfftn(ft, s=vol_np.shape, axes=(0, 1, 2)).astype(np.float32)
-    return sharpened
+    sharpened = torch.fft.irfftn(ft, s=vol_np.shape).to(torch.float32)
+    return sharpened.cpu().numpy()

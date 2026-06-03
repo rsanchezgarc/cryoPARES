@@ -4,6 +4,46 @@ from numpy import fft
 import matplotlib.pyplot as plt
 from scipy.ndimage import zoom as rs_zoom, gaussian_filter, zoom
 from typing import Optional, Literal
+import torch
+
+
+def _get_device(device):
+    if device is None:
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return torch.device(device) if not isinstance(device, torch.device) else device
+
+
+def _torch_shell_sums(ft1: torch.Tensor, ft2: torch.Tensor,
+                       k_dist: torch.Tensor, bin_edges: torch.Tensor,
+                       n_shells: int) -> tuple:
+    """
+    GPU-accelerated shell histogramming replacing three np.histogram calls.
+
+    ft1, ft2  : complex tensors (already FFT-ed), flattened or broadcastable with k_dist
+    k_dist    : float32 tensor, same number of elements as ft1/ft2 flattened
+    bin_edges : float32 1D tensor of bin boundaries (length n_shells+1 for n_shells bins)
+    n_shells  : int
+
+    Returns C_sum, A_sum, B_sum as float32 tensors on the same device.
+    """
+    dev = ft1.device
+    ft1_f = ft1.reshape(-1)
+    ft2_f = ft2.reshape(-1)
+    k_f   = k_dist.reshape(-1)
+
+    # bucketize assigns bin index 1..n_shells; subtract 1 → 0-indexed
+    idx = torch.bucketize(k_f, bin_edges) - 1
+    valid = (idx >= 0) & (idx < n_shells)
+    idx = idx[valid].long()
+
+    C_terms = (ft1_f[valid] * ft2_f[valid].conj()).real
+    A_terms = ft1_f[valid].abs().pow(2)
+    B_terms = ft2_f[valid].abs().pow(2)
+
+    C_sum = torch.zeros(n_shells, dtype=torch.float32, device=dev).scatter_add_(0, idx, C_terms.float())
+    A_sum = torch.zeros(n_shells, dtype=torch.float32, device=dev).scatter_add_(0, idx, A_terms.float())
+    B_sum = torch.zeros(n_shells, dtype=torch.float32, device=dev).scatter_add_(0, idx, B_terms.float())
+    return C_sum, A_sum, B_sum
 
 
 # ----------------------------- Crossing logic ----------------------------- #
@@ -194,7 +234,8 @@ def compute_fsc(
     resolution_from_A: float = 15.0,
     persistence_bins: int = 3,
     rebound_window: int = 6,
-    threshold_eps: float = 1e-3
+    threshold_eps: float = 1e-3,
+    device=None,
 ):
     """
     Calculates the Fourier Shell Correlation (FSC) between two 3D volumes.
@@ -221,28 +262,33 @@ def compute_fsc(
         vol2 = np.multiply(vol2, mask)
         print("Mask applied to volumes!")
 
-    # --- 1. Compute Fourier Transforms and shift origin to center ---
-    ft1 = fft.fftshift(fft.fftn(vol1))
-    ft2 = fft.fftshift(fft.fftn(vol2))
-
-    # --- 2. Generate Fourier space coordinates in integer pixels ---
+    # --- 1–3. Compute FSC shell sums on GPU using rfftn (real inputs → complex64) ---
+    dev = _get_device(device)
     D = vol1.shape[0]
-    coords = np.arange(-D // 2, D // 2)
-    kx, ky, kz = np.meshgrid(coords, coords, coords, indexing='ij')
-    k_dist = np.sqrt(kx ** 2 + ky ** 2 + kz ** 2).flatten()
-
-    # --- 3. Bin values into shells and calculate FSC using histograms ---
     num_shells = D // 2
-    bin_edges = np.arange(0.5, num_shells, 1.0)
-    shell_radii = (bin_edges[:-1] + bin_edges[1:]) / 2
 
-    C_terms = (ft1 * np.conj(ft2)).flatten().real
-    A_terms = (np.abs(ft1) ** 2).flatten().real
-    B_terms = (np.abs(ft2) ** 2).flatten().real
+    v1_t = torch.as_tensor(vol1.astype(np.float32), device=dev)
+    v2_t = torch.as_tensor(vol2.astype(np.float32), device=dev)
 
-    C_sum = np.histogram(k_dist, bins=bin_edges, weights=C_terms)[0]
-    A_sum = np.histogram(k_dist, bins=bin_edges, weights=A_terms)[0]
-    B_sum = np.histogram(k_dist, bins=bin_edges, weights=B_terms)[0]
+    # rfftn: shape (D, H, W//2+1) — half the Fourier space, conjugate-symmetric
+    # FSC is a ratio of shell sums, so the missing conjugate half cancels out.
+    ft1 = torch.fft.rfftn(v1_t)
+    ft2 = torch.fft.rfftn(v2_t)
+
+    # Broadcast 1-D coords instead of meshgrid (saves 2×430 MB for 476³).
+    H, W = vol1.shape[1], vol1.shape[2]
+    kz = (torch.fft.fftfreq(D,  device=dev) * D).reshape(-1, 1, 1)
+    ky = (torch.fft.fftfreq(H,  device=dev) * H).reshape(1, -1, 1)
+    kx = (torch.fft.rfftfreq(W, device=dev) * W).reshape(1, 1, -1)
+    k_dist = torch.sqrt(kz**2 + ky**2 + kx**2)
+
+    bin_edges_t = torch.arange(0.5, num_shells, 1.0, dtype=torch.float32, device=dev)
+    shell_radii  = ((bin_edges_t[:-1] + bin_edges_t[1:]) / 2).cpu().numpy()
+
+    C_sum, A_sum, B_sum = _torch_shell_sums(ft1, ft2, k_dist, bin_edges_t, num_shells - 1)
+    C_sum = C_sum.cpu().numpy()
+    A_sum = A_sum.cpu().numpy()
+    B_sum = B_sum.cpu().numpy()
 
     denominator = np.sqrt(np.maximum(A_sum * B_sum, 1e-9))
     fsc = C_sum / denominator

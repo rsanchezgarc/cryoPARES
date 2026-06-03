@@ -22,7 +22,7 @@ class PostProcessor(ABC):
     def process(self, half1: np.ndarray, half2: np.ndarray,
                 avg_map: np.ndarray, mask: np.ndarray,
                 fsc_curves: dict, px_A: float,
-                output_dir: str, **method_kwargs) -> np.ndarray:
+                output_dir: str, device=None, **method_kwargs) -> np.ndarray:
         """
         Apply the post-processing method.
 
@@ -52,6 +52,7 @@ class PostProcessor(ABC):
                      auto_mask_spherical: bool = False,
                      px_A: Optional[float] = None,
                      save_fsc_plot: Optional[str] = None,
+                     device=None,
                      **method_kwargs):
         """
         Method-independent shared pipeline.
@@ -123,7 +124,7 @@ class PostProcessor(ABC):
         # 4. Gold-standard FSC
         # ------------------------------------------------------------------
         print("Computing gold-standard FSC …")
-        fsc_curves = run_gold_standard_fsc(half1, half2, mask, px_A)
+        fsc_curves = run_gold_standard_fsc(half1, half2, mask, px_A, device=device)
 
         # ------------------------------------------------------------------
         # 5. Resolution estimates
@@ -145,7 +146,7 @@ class PostProcessor(ABC):
         # ------------------------------------------------------------------
         sharpened = self.process(
             half1, half2, avg_map, mask, fsc_curves, px_A,
-            output_dir, **method_kwargs)
+            output_dir, device=device, **method_kwargs)
 
         # ------------------------------------------------------------------
         # 8. Write postprocessed map

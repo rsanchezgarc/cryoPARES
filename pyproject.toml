@@ -29,11 +29,11 @@ dynamic = ["dependencies", "version"]
 "Bug Tracker" = "https://github.com/rsanchezgarc/cryoPARES/issues"
 
 [project.scripts]
-cryopares_train = "cryoPARES.train.train:main"
-cryopares_infer = "cryoPARES.inference.infer:main"
-cryopares_reconstruct = "cryoPARES.reconstruction.reconstruct:main"
-cryopares_projmatching = "cryoPARES.projmatching.projmatching:main"
-cryopares_postprocess = "cryoPARES.postprocessing.postprocess:main"
+cryopares_train = "cryoPARES.cli:train"
+cryopares_infer = "cryoPARES.cli:infer"
+cryopares_reconstruct = "cryoPARES.cli:reconstruct"
+cryopares_projmatching = "cryoPARES.cli:projmatching"
+cryopares_postprocess = "cryoPARES.cli:postprocess"
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}

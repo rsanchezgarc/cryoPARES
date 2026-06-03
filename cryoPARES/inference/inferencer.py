@@ -445,6 +445,19 @@ class SingleInferencer:
                                                                                       mask=reference_mask)
                     print(f"Resolution at FSC=0.143 ('gold-standard'): {res_0143:.3f} Å")
                     print(f"Resolution at FSC=0.5: {res_05:.3f} Å")
+                if self.reference_mask is not None and self.results_dir is not None:
+                    half1_path = os.path.join(self.results_dir, "reconstruction_half1.mrc")
+                    half2_path = os.path.join(self.results_dir, "reconstruction_half2.mrc")
+                    if os.path.isfile(half1_path) and os.path.isfile(half2_path):
+                        from cryoPARES.postprocessing.methods.standard_bfactor import postprocess_bfactor
+                        pp_dir = os.path.join(self.results_dir, "postprocessing")
+                        os.makedirs(pp_dir, exist_ok=True)
+                        print("Running postprocessing (B-factor sharpening)...")
+                        try:
+                            postprocess_bfactor(half1=half1_path, half2=half2_path,
+                                                output_dir=pp_dir, mask=self.reference_mask)
+                        except Exception as e:
+                            print(f"Postprocessing failed: {e}")
             self._model = None
 
         # Clean up checkpoint reader

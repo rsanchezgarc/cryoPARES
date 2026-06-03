@@ -381,6 +381,17 @@ def distributed_inference(
                           f"                   at 0.5: {res_05:.3f} Å")
         except Exception as e:
             print(f"FSC computation failed: {e}")
+        for model_key, rec in fsc_by_model.items():
+            if reference_mask is not None and rec.get("half1") and rec.get("half2"):
+                from cryoPARES.postprocessing.methods.standard_bfactor import postprocess_bfactor
+                pp_dir = os.path.join(results_dir, "postprocessing")
+                os.makedirs(pp_dir, exist_ok=True)
+                print("Running postprocessing (B-factor sharpening)...")
+                try:
+                    postprocess_bfactor(half1=rec["half1"], half2=rec["half2"],
+                                        output_dir=pp_dir, mask=reference_mask)
+                except Exception as e:
+                    print(f"Postprocessing failed: {e}")
 
     if merge_halves_output and results_dir is not None:
         import glob as _glob

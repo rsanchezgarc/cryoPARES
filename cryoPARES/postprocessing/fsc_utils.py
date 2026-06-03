@@ -87,37 +87,35 @@ def randomize_phases_beyond(vol_np: np.ndarray, shell_radius_pix: float,
     dev = _get_device(device)
     D, H, W = vol_np.shape
 
-    vol_t = torch.as_tensor(vol_np.astype(np.float32), device=dev)
+    # float64 + fftshift matches numpy's complex128 precision and voxel ordering,
+    # so the RNG assigns the same phase to each voxel as the original numpy code.
+    vol_t = torch.as_tensor(vol_np.astype(np.float64), device=dev)
+    ft = torch.fft.fftshift(torch.fft.fftn(vol_t))  # complex128, DC at center
 
-    # Full complex FFT; DC at [0,0,0] (no fftshift, saves an 861 MB copy).
-    # k_dist uses fftfreq*N so distances are identical to the fftshifted version.
-    ft = torch.fft.fftn(vol_t)  # complex64, DC at [0,0,0]
-
-    # Broadcast 1-D coordinate vectors instead of meshgrid (saves 2×430 MB).
-    kz = (torch.fft.fftfreq(D, device=dev) * D).reshape(-1, 1, 1)
-    ky = (torch.fft.fftfreq(H, device=dev) * H).reshape(1, -1, 1)
-    kx = (torch.fft.fftfreq(W, device=dev) * W).reshape(1, 1, -1)
-    k_dist = torch.sqrt(kz**2 + ky**2 + kx**2)
+    # Broadcast 1-D centered coords (same ordering as np.arange(-D//2, D//2)).
+    coords_d = torch.arange(-D // 2, D // 2, device=dev, dtype=torch.float64).reshape(-1, 1, 1)
+    coords_h = torch.arange(-H // 2, H // 2, device=dev, dtype=torch.float64).reshape(1, -1, 1)
+    coords_w = torch.arange(-W // 2, W // 2, device=dev, dtype=torch.float64).reshape(1, 1, -1)
+    k_dist = torch.sqrt(coords_d**2 + coords_h**2 + coords_w**2)
 
     rand_mask = k_dist >= shell_radius_pix
-    # Free coord/distance tensors before large allocations
-    del k_dist, kz, ky, kx
+    del k_dist, coords_d, coords_h, coords_w
     if dev.type == "cuda":
         torch.cuda.empty_cache()
 
-    amp = ft[rand_mask].abs()  # float32, shape (N_rand,)
+    amp = ft[rand_mask].abs().to(torch.float64)
 
     # Generate random phases with numpy RNG for reproducibility, then move to device
     n_rand = int(rand_mask.sum().item())
-    phase_np = rng.uniform(0, 2 * math.pi, size=n_rand).astype(np.float32)
-    phase_t = torch.as_tensor(phase_np, device=dev)
+    phase_np = rng.uniform(0, 2 * math.pi, size=n_rand)
+    phase_t = torch.as_tensor(phase_np, dtype=torch.float64, device=dev)
     del phase_np
 
     # torch.polar(abs, angle) = abs * exp(1j*angle): avoids intermediate complex tensor
     ft[rand_mask] = torch.polar(amp, phase_t)
     del amp, phase_t
 
-    result = torch.fft.ifftn(ft).real.to(torch.float32)
+    result = torch.fft.ifftn(torch.fft.ifftshift(ft)).real.to(torch.float32)
     return result.cpu().numpy()
 
 

@@ -244,6 +244,14 @@ def compute_fsc(
         tuple: (fsc, spatial_freq, resolution_A, (res_05, res_0143))
     """
 
+    # Accept torch tensors (e.g. from get_vol) by converting to numpy first.
+    if isinstance(vol1, torch.Tensor):
+        vol1 = vol1.cpu().numpy()
+    if isinstance(vol2, torch.Tensor):
+        vol2 = vol2.cpu().numpy()
+    if mask is not None and isinstance(mask, torch.Tensor):
+        mask = mask.cpu().numpy()
+
     # --- Handle potential shape mismatch ---
     if vol1.shape != vol2.shape:
         if allow_resize:
@@ -267,12 +275,14 @@ def compute_fsc(
     D = vol1.shape[0]
     num_shells = D // 2
 
-    v1_t = torch.as_tensor(vol1.astype(np.float32), device=dev)
-    v2_t = torch.as_tensor(vol2.astype(np.float32), device=dev)
+    # Use float64 to match numpy's double-precision FSC and avoid shell-sum
+    # accumulation error on large volumes (e.g. 476³ with ~450k voxels/shell).
+    v1_t = torch.as_tensor(vol1.astype(np.float64), device=dev)
+    v2_t = torch.as_tensor(vol2.astype(np.float64), device=dev)
 
     # rfftn: shape (D, H, W//2+1) — half the Fourier space, conjugate-symmetric
     # FSC is a ratio of shell sums, so the missing conjugate half cancels out.
-    ft1 = torch.fft.rfftn(v1_t)
+    ft1 = torch.fft.rfftn(v1_t)  # complex128 from float64 input
     ft2 = torch.fft.rfftn(v2_t)
 
     # Broadcast 1-D coords instead of meshgrid (saves 2×430 MB for 476³).

@@ -23,5 +23,6 @@ JUNK_DONE_TEMPLATE: str = "DONE_JUNK.txt"
 BEST_CHECKPOINT_BASENAME: str = "best.ckpt"
 BEST_MODEL_SCRIPT_BASENAME: str = "best_script.pt"
 BEST_DIRECTIONAL_NORMALIZER: str = "best_directional_normalizer.pt"
+DIRECTIONAL_ZSCORE_THRESHOLDS_FNAME: str = "directional_zscore_thresholds.json"
 
 DEFAULT_DTYPE_PROJMATCHING: torch.dtype = torch.float32

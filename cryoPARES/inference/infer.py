@@ -331,7 +331,12 @@ def distributed_inference(
                 aggregated_results[key] = aggregated_particles
                 if aggregated_particles is not None and results_dir is not None:
                     basename = os.path.basename(particles_star_fname).removesuffix(".star")
-                    out_star = os.path.join(results_dir, basename + f"_{d_half}.star")
+                    # Match SingleInferencer._get_outsuffix naming convention
+                    if resolved_model_halfset == "allParticles":
+                        file_suffix = f"_data_{d_half}_model_{resolved_model_halfset}.star"
+                    else:
+                        file_suffix = f"_{d_half}.star"
+                    out_star = os.path.join(results_dir, basename + file_suffix)
                     star_payload = {"particles": aggregated_particles}
                     if aggregated_optics is not None:
                         star_payload["optics"] = aggregated_optics
@@ -510,12 +515,13 @@ def _aggregate_worker_results(results: Dict[int, Any]) -> tuple[pd.DataFrame | N
 
 def _load_particles_indices_with_halfset(
         star_path: str,
-        data_half: Literal["half1", "half2"],
+        data_half: Literal["half1", "half2", "allParticles"],
         subset_idxs: Optional[List[int]] = None
 ) -> np.ndarray:
     """Read STAR and return the *row indices* to process for the requested data half.
 
-    If rlnRandomSubset exists (1/2), filter accordingly; otherwise process all.
+    If rlnRandomSubset exists (1/2) and data_half is "half1"/"half2", filter accordingly.
+    If data_half is "allParticles", all rows are returned regardless of rlnRandomSubset.
     subset_idxs, if provided, is applied *after* filtering by half.
     """
     star = starfile.read(star_path)
@@ -528,7 +534,7 @@ def _load_particles_indices_with_halfset(
         df = star
 
     idx = np.arange(len(df))
-    if "rlnRandomSubset" in df.columns:
+    if data_half != "allParticles" and "rlnRandomSubset" in df.columns:
         mask = (df["rlnRandomSubset"].astype(int) == (1 if data_half == "half1" else 2))
         idx = df.index[mask].to_numpy()
 

@@ -621,7 +621,6 @@ class Trainer:
                                                           config_args=config_args)
                         assert val_stars, (f"Error, no validation predictions found")
                         assert junk_stars, (f"Error, no junk_stars predictions found")
-                        #TODO: compare_prob_hists breaks when multiple gpus are used
                         gmm_result = compare_prob_hists(fname_good=val_stars, fname_bad=junk_stars, show_plots=False,
                                                         plot_fname=osp.join(self.experiment_root, partition,"directional_threshold.png"),
                                                         symmetry=self.symmetry, compute_gmm=True)

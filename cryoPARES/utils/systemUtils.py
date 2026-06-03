@@ -125,10 +125,17 @@ def _auto_configure_nccl() -> None:
 
     if os.path.exists(cache_file):
         if open(cache_file).read().strip() == "disabled":
+            warnings.warn(
+                "GPU direct (NCCL P2P) communication is not supported on this machine — "
+                "multi-GPU training will use a slower inter-GPU transport. "
+                f"Delete {cache_file} and unset NCCL_P2P_DISABLE to re-probe after a "
+                "driver/NCCL upgrade."
+            )
             os.environ['NCCL_P2P_DISABLE'] = '1'
         return
 
-    print("Probing NCCL P2P (runs once, result cached)...", flush=True)
+    print("Probing NCCL GPU direct (P2P) communication (runs once, result cached)...",
+          flush=True)
     disable = _probe_nccl_p2p(timeout_secs=10)
 
     with open(cache_file, "w") as f:
@@ -136,10 +143,15 @@ def _auto_configure_nccl() -> None:
 
     if disable:
         os.environ['NCCL_P2P_DISABLE'] = '1'
-        print(f"NCCL P2P probe timed out — setting NCCL_P2P_DISABLE=1 "
-              f"(cached in {cache_file}; delete to re-probe)")
+        warnings.warn(
+            "GPU direct (NCCL P2P) communication is not supported on this machine — "
+            "the probe timed out. Multi-GPU training will use a slower inter-GPU transport. "
+            f"Result cached in {cache_file}; delete it and unset NCCL_P2P_DISABLE to "
+            "re-probe after a driver/NCCL upgrade."
+        )
     else:
-        print("NCCL P2P probe passed — P2P enabled")
+        print("GPU direct (NCCL P2P) communication probe passed — P2P enabled.",
+              flush=True)
 
 
 def _probe_nccl_p2p(timeout_secs: int = 10) -> bool:

@@ -1,4 +1,5 @@
 import gc
+import logging
 import os
 import sys
 import warnings
@@ -25,6 +26,16 @@ from cryoPARES.reconstruction.reconstructor import reconstruct_starfile
 from cryoPARES.utils.paths import get_most_recent_file
 from cryoPARES.utils.subprocessUtils import run_subprocess_with_error_summary
 from autoCLI_config import ConfigArgumentParser, ConfigOverrideSystem
+
+
+_tip_filter = type("_DropTips", (logging.Filter,), {"filter": lambda self, r: "💡 Tip:" not in r.getMessage()})()
+for _logger_name in (
+    "pytorch_lightning.utilities.rank_zero",
+    "lightning.pytorch.utilities.rank_zero",
+    "lightning.fabric.utilities.rank_zero",
+    "lightning_utilities.core.rank_zero",
+):
+    logging.getLogger(_logger_name).addFilter(_tip_filter)
 
 
 class TrainerPartition:

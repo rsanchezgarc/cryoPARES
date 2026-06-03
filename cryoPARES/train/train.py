@@ -622,9 +622,25 @@ class Trainer:
                         assert val_stars, (f"Error, no validation predictions found")
                         assert junk_stars, (f"Error, no junk_stars predictions found")
                         #TODO: compare_prob_hists breaks when multiple gpus are used
-                        compare_prob_hists(fname_good=val_stars, fname_bad=junk_stars, show_plots=False,
-                                           plot_fname=osp.join(self.experiment_root, partition,"directional_threshold.png"),
-                                           symmetry=self.symmetry, compute_gmm=True)
+                        gmm_result = compare_prob_hists(fname_good=val_stars, fname_bad=junk_stars, show_plots=False,
+                                                        plot_fname=osp.join(self.experiment_root, partition,"directional_threshold.png"),
+                                                        symmetry=self.symmetry, compute_gmm=True)
+                        if gmm_result is not None:
+                            thr, _gmms, method = gmm_result
+                            checkpoint_dir = osp.join(self.experiment_root, partition, "checkpoints")
+                            thresholds_fname = osp.join(checkpoint_dir, constants.DIRECTIONAL_ZSCORE_THRESHOLDS_FNAME)
+                            existing = {}
+                            if osp.exists(thresholds_fname):
+                                with open(thresholds_fname) as f:
+                                    existing = json.load(f)
+                            existing["junk_gmm"] = {
+                                "threshold": float(thr),
+                                "method": method,
+                                "description": "GMM-based threshold from junk vs. validation particle score distributions",
+                            }
+                            with open(thresholds_fname, "w") as f:
+                                json.dump(existing, f, indent=2)
+                            print(f"Saved junk GMM threshold ({thr:.4f}) to {thresholds_fname}")
                         from cryoPARES.train.runTrainOnePartition import get_junk_done_fname
                         junk_done_fname = get_junk_done_fname(self.experiment_root, partition)
                         with open(junk_done_fname, "w") as f:

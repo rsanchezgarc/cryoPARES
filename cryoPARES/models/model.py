@@ -310,6 +310,54 @@ class PlModel(RotationPredictionMixin, pl.LightningModule):
                 normalizer.fit(predRotMats.cpu(), scores.cpu(), gtRotmats.cpu())
                 torch.save(normalizer, precentile_model_savename)
 
+                self._compute_and_save_angular_thresholds(
+                    normalizer, predRotMats.cpu(), scores.cpu(), gtRotmats.cpu(), dirname
+                )
+
+
+    def _compute_and_save_angular_thresholds(self, normalizer, predRotMats, scores, gtRotmats, checkpoint_dir):
+        import json
+        import math
+        import numpy as np
+        from sklearn.linear_model import LogisticRegression
+        from cryoPARES.geometry.metrics_angles import rotation_error_with_sym
+
+        z_scores_np = normalizer(predRotMats, scores).detach().numpy()
+
+        errors_rads = rotation_error_with_sym(predRotMats, gtRotmats, symmetry=self.symmetry)
+        errors_degs = errors_rads.numpy() * (180.0 / math.pi)
+
+        TARGET_PROBS = [0.50, 0.75, 0.90]
+        angular_thresholds = {}
+        for angle_thr in [5, 10]:
+            y = (errors_degs < angle_thr).astype(int)
+            n_pos, n_neg = int(y.sum()), int((1 - y).sum())
+            if n_pos >= 10 and n_neg >= 10:
+                lr = LogisticRegression(solver="lbfgs", max_iter=1000)
+                lr.fit(z_scores_np.reshape(-1, 1), y)
+                a = float(lr.coef_.ravel()[0])
+                b = float(lr.intercept_.ravel()[0])
+                entry = {"n_good": n_pos, "n_total": len(y), "logistic_a": a, "logistic_b": b}
+                for p_target in TARGET_PROBS:
+                    logit_p = float(np.log(p_target / (1.0 - p_target)))
+                    z_thr = (logit_p - b) / a
+                    key = f"p{int(p_target * 100)}"
+                    entry[key] = {
+                        "threshold": float(z_thr),
+                        "method": f"logistic_calibration_p{int(p_target * 100)}",
+                        "description": f"directional z-score where P(error<{angle_thr}deg)={p_target}",
+                    }
+                    print(f"Angular threshold (error<{angle_thr}°, P={p_target}): z={z_thr:.4f}")
+                angular_thresholds[f"angular_{angle_thr}deg"] = entry
+            else:
+                print(f"Skipping logistic threshold for {angle_thr}°: "
+                      f"insufficient positive ({n_pos}) or negative ({n_neg}) samples")
+
+        thresholds_fname = os.path.join(checkpoint_dir, constants.DIRECTIONAL_ZSCORE_THRESHOLDS_FNAME)
+        with open(thresholds_fname, "w") as f:
+            json.dump(angular_thresholds, f, indent=2)
+        print(f"Saved angular error thresholds to {thresholds_fname}")
+
 
 def _update_config_for_test():
     from cryoPARES.configs.mainConfig import main_config

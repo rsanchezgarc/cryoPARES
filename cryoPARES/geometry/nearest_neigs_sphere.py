@@ -51,7 +51,7 @@ def compute_nearest_neighbours(eulerDegs, k, cache_dir, n_jobs):
         warnings.warn(f"The CACHE_DIR {cache_dir} is not available ({e}), skipping cache. "
                       f"Some weights will be recomputed in each execution, wasting compute")
 
-    print(f"Computing nearest neighbours... Done)")
+    print(f"Computing nearest neighbours... Done")
     return out
 
 

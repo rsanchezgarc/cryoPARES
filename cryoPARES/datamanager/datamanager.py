@@ -111,6 +111,12 @@ class DataManager(pl.LightningDataModule):
     def prepare_data(self) -> None:
         return
 
+    def setup(self, stage: str = None) -> None:
+        # Re-sync is_global_zero after DDP spawn: the pickled DataManager carries
+        # is_global_zero=True from rank-0, but rank-1's trainer knows the real rank.
+        if self.trainer is not None:
+            self.is_global_zero = self.trainer.is_global_zero
+
     def create_dataset(self, partitionName):
 
         from cryoPARES.datamanager.relionStarDataset import ParticlesRelionStarDataset

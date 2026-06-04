@@ -109,8 +109,8 @@ class DirectionalPercentileNormalizer(nn.Module):
             pred_rotmats: torch.Tensor,
             scores: torch.Tensor,
             gt_rotmats: Optional[torch.Tensor] = None,
-            good_particles_percentile: float = 95.0, #TODO: Add this to config
-            min_particles_per_cone: int = 10, #TODO: Add this to config
+            good_particles_percentile: float = 95.0,
+            min_particles_per_cone: int = 10,
     ) -> None:
         """
         Estimate normalization parameters for each cone from a reference dataset.

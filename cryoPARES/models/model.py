@@ -306,8 +306,11 @@ class PlModel(RotationPredictionMixin, pl.LightningModule):
                 scores = self.all_gather(scores).reshape(-1, *scores.shape[1:])
 
             if self.trainer.is_global_zero:
+                normalizer_cfg = main_config.models.directionalNormalizer
                 normalizer = DirectionalPercentileNormalizer(symmetry=self.symmetry, hp_order=NORMALIZER_HP_ORDER)
-                normalizer.fit(predRotMats.cpu(), scores.cpu(), gtRotmats.cpu())
+                normalizer.fit(predRotMats.cpu(), scores.cpu(), gtRotmats.cpu(),
+                               good_particles_percentile=normalizer_cfg.good_particles_percentile,
+                               min_particles_per_cone=normalizer_cfg.min_particles_per_cone)
                 torch.save(normalizer, precentile_model_savename)
 
                 self._compute_and_save_angular_thresholds(

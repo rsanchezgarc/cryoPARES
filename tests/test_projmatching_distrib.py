@@ -1,5 +1,8 @@
 # tests/test_projmatching.py
+import pytest
 import unittest
+
+pytestmark = pytest.mark.gpu
 import os
 import tempfile
 import shutil

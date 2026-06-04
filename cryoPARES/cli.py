@@ -1,8 +1,13 @@
+import os
 import warnings
+
+_PYTHONWARNINGS = "ignore::FutureWarning,ignore::DeprecationWarning,ignore::PendingDeprecationWarning,ignore::UserWarning"
 
 
 def _suppress_user_warnings():
-    # Broad suppression (lower priority — added first, checked second)
+    # Set env var so spawned subprocesses (e.g. DDP workers) inherit the filters
+    os.environ.setdefault("PYTHONWARNINGS", _PYTHONWARNINGS)
+    # Broad suppression for the current process (lower priority — added first, checked second)
     warnings.filterwarnings("ignore", category=UserWarning)
     warnings.filterwarnings("ignore", category=FutureWarning)
     warnings.filterwarnings("ignore", category=DeprecationWarning)

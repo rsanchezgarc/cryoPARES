@@ -27,7 +27,7 @@ class ParticlesDataset_config():
         'min_maxProb': 'Minimum maximum probability threshold for filtering particles. Particles with maxProb below this value are excluded',
         'perImg_normalization': 'Per-image normalization method: "none", "noiseStats" (normalize using noise region statistics), or "subtractMean"',
         'ctf_correction': 'CTF correction method: "none", "phase_flip", "concat_phase_flip" (concatenate original and phase-flipped), or "ctf_multiply"',
-        'reduce_symmetry_in_label': 'TODO: Document this parameter',
+        'reduce_symmetry_in_label': 'When using symmetric molecules, map rotation labels to the fundamental domain (canonical symmetry representative) before training. Ensures consistent training targets by collapsing equivalent orientations under the symmetry group',
     }
 
     sampling_rate_angs_for_nnet: float = 1.5

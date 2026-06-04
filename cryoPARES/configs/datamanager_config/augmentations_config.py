@@ -81,7 +81,7 @@ class Augmenter_config:
     # Centralized parameter documentation
     PARAM_DOCS = {
         'min_n_augm_per_img': 'Minimum number of augmentation operations to apply per image',
-        'max_n_augm_per_img': 'Maximum number of augmentation operations to apply per image (TODO: Consider reducing to 4)',
+        'max_n_augm_per_img': 'Maximum number of augmentation operations to apply per image',
         'prob_augment_each_image': 'Probability of applying augmentation to each image (0.0 to 1.0)',
     }
 

@@ -1,7 +1,6 @@
 import os
 import warnings
 import numba
-import joblib
 import numpy as np
 import torch
 from sklearn.neighbors import NearestNeighbors
@@ -27,9 +26,9 @@ def quaternion_distance(q1, q2):
 
 def compute_nearest_neighbours(eulerDegs, k, cache_dir, n_jobs):
     eulerDegs = torch.transpose(eulerDegs, 0,1)
-    fname = os.path.join(cache_dir, f"knn_{eulerDegs.shape[0]}.joblib")
+    fname = os.path.join(cache_dir, f"knn_{eulerDegs.shape[0]}.pt")
     if os.path.exists(fname):
-        return joblib.load(fname)
+        return torch.load(fname, weights_only=True)
 
     print(f"Computing nearest neighbours. For n > 294912, it will take a long time (Current n={eulerDegs.shape[0]})")
 
@@ -45,7 +44,7 @@ def compute_nearest_neighbours(eulerDegs, k, cache_dir, n_jobs):
     out = dict(dists=dists, nearest_neigbours=nearest_neigbours)
 
     try:
-        joblib.dump(out, fname) #TODO: use torch.save(out, fname, weights_only=True)
+        torch.save(out, fname)
     except (FileNotFoundError, IOError, PermissionError) as e:
         print(e)
         warnings.warn(f"The CACHE_DIR {cache_dir} is not available ({e}), skipping cache. "

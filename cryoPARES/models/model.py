@@ -259,7 +259,7 @@ class PlModel(RotationPredictionMixin, pl.LightningModule):
 
     def on_train_end(self) -> None:
         from cryoPARES.models.directionalNormalizer.directionalNormalizer import DirectionalPercentileNormalizer
-        NORMALIZER_HP_ORDER = 2  # TODO: Move to config
+        NORMALIZER_HP_ORDER = main_config.models.directionalNormalizer.hp_order
 
         print("Preparing directional percentiles")
         device = self.trainer.strategy.root_device

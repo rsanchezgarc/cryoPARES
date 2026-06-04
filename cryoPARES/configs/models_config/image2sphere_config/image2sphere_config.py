@@ -13,7 +13,7 @@ class Image2Sphere_config:
     # Centralized parameter documentation
     PARAM_DOCS = {
         'lmax': 'Maximum spherical harmonic degree for SO(3) representation. Higher values allow finer angular resolution but increase memory and computation',
-        'label_smoothing': 'Label smoothing factor for loss function to prevent overconfidence (TODO: Move this to a future loss config)',
+        'label_smoothing': 'Label smoothing factor for loss function to prevent overconfidence',
         'enforce_symmetry': 'Apply point group symmetry constraints during pose prediction',
         'use_simCLR': 'Enable SimCLR contrastive learning loss for improved representation learning',
         'simCLR_temperature': 'Temperature parameter for SimCLR contrastive loss (controls distribution sharpness)',

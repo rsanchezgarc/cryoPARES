@@ -600,7 +600,6 @@ class Trainer:
                 else:
                     print(f"Partition {partition} already trained")
 
-                #TODO: This needs to be checked independently of if train partion done
                 if self.junk_particles_star_fname:
                     if not check_if_junk_inference_done(self.experiment_root, partition):
                         junk_stars = self._infer_particles(self.junk_particles_star_fname, self.junk_particles_dir,

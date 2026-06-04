@@ -21,6 +21,7 @@ class BfactorPostProcessor(PostProcessor):
                 avg_map: np.ndarray, mask: np.ndarray,
                 fsc_curves: dict, px_A: float,
                 output_dir: str,
+                device=None,
                 adhoc_bfac: Optional[float] = None,
                 guinier_lo_A: float = 10.0,
                 lowpass_A: Optional[float] = None,
@@ -30,7 +31,7 @@ class BfactorPostProcessor(PostProcessor):
         """
         # B-factor estimation + sharpening cutoff
         bfactor, slope, intercept, x_guin, y_guin, valid_mask, cutoff_A = \
-            estimate_bfactor(fsc_curves, avg_map, px_A, guinier_lo_A, adhoc_bfac)
+            estimate_bfactor(fsc_curves, avg_map, px_A, guinier_lo_A, adhoc_bfac, device=device)
         print(f"B-factor: {bfactor:.1f} Å²")
 
         # Determine lowpass: user override → else first-zero-crossing from Guinier
@@ -50,7 +51,8 @@ class BfactorPostProcessor(PostProcessor):
             fsc_curves["fsc_corrected"],
             fsc_curves["spatial_freq"],
             bfactor, px_A,
-            lowpass_A=lp)
+            lowpass_A=lp,
+            device=device)
 
         # Save Guinier data
         if adhoc_bfac is None and len(x_guin) > 0:
@@ -116,6 +118,7 @@ def postprocess_bfactor(
     lowpass_A: Optional[float] = None,
     save_fsc_plot: Optional[str] = None,
     save_guinier_plot: Optional[str] = None,
+    device=None,
 ):
     """
     Standard B-factor post-processing of two cryo-EM half-maps.
@@ -152,4 +155,5 @@ def postprocess_bfactor(
         guinier_lo_A=guinier_lo_A,
         lowpass_A=lowpass_A,
         save_guinier_plot=save_guinier_plot,
+        device=device,
     )

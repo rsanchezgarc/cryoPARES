@@ -375,7 +375,8 @@ def distributed_inference(
                     if reference_mask is not None:
                         mask_arr = get_vol(reference_mask, pixel_size=None)[0]
                     fsc, spatial_freq, resolution_A, (res_05, res_0143) = compute_fsc(
-                        vol1, vol2, rec["sampling_rate"], mask=mask_arr
+                        vol1, vol2, rec["sampling_rate"], mask=mask_arr,
+                        device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
                     )
                     print(f"[FSC] Resolution at 0.143: {res_0143:.3f} Å\n"
                           f"                   at 0.5: {res_05:.3f} Å")
@@ -389,7 +390,8 @@ def distributed_inference(
                 print("Running postprocessing (B-factor sharpening)...")
                 try:
                     postprocess_bfactor(half1=rec["half1"], half2=rec["half2"],
-                                        output_dir=pp_dir, mask=reference_mask)
+                                        output_dir=pp_dir, mask=reference_mask,
+                                        device=torch.device("cuda" if torch.cuda.is_available() else "cpu"))
                 except Exception as e:
                     print(f"Postprocessing failed: {e}")
 
@@ -600,6 +602,8 @@ def _worker(worker_id,
             torch.cuda.set_device(dev_index)
 
     ConfigOverrideSystem.update_config_from_dataclass(main_config, main_config_updated, verbose=False)
+    from cryoPARES.utils.systemUtils import setup_torch_env
+    setup_torch_env(main_config.inference.float32_matmul_precision)
     from cryoPARES.inference.inferencer import SingleInferencer
 
     if _INFERENCER is None:

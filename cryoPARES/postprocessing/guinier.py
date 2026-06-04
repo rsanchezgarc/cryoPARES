@@ -87,7 +87,8 @@ def weighted_linear_fit(x: np.ndarray, y: np.ndarray,
 
 def estimate_bfactor(fsc_curves: dict, avg_map: np.ndarray, px_A: float,
                      guinier_lo_A: float = 10.0,
-                     adhoc_bfac: Optional[float] = None):
+                     adhoc_bfac: Optional[float] = None,
+                     device=None):
     """
     Estimate the B-factor from a FOM-weighted Guinier plot of the average map.
 
@@ -142,7 +143,7 @@ def estimate_bfactor(fsc_curves: dict, avg_map: np.ndarray, px_A: float,
         empty = np.array([], dtype=np.float32)
         return float(adhoc_bfac), 0.0, 0.0, empty, empty, empty, cutoff_A
 
-    amplitudes, spatial_freq = compute_shell_amplitudes(avg_map, px_A)
+    amplitudes, spatial_freq = compute_shell_amplitudes(avg_map, px_A, device=device)
 
     # FOM weight per shell: W(s) = sqrt(2·FSC/(1+FSC)), clipped to [0,1].
     # Interpolated from the corrected FSC curve onto our shell grid.

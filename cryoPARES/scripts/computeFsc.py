@@ -226,10 +226,10 @@ def match_grid_to_reference(vol2: np.ndarray,
 # ------------------------------ FSC function ------------------------------ #
 
 def compute_fsc(
-    vol1: np.ndarray,
-    vol2: np.ndarray,
+    vol1,
+    vol2,
     voxel_size: float,
-    mask: np.ndarray = None,
+    mask=None,
     allow_resize: bool = False,
     resolution_from_A: float = 15.0,
     persistence_bins: int = 3,
@@ -244,41 +244,46 @@ def compute_fsc(
         tuple: (fsc, spatial_freq, resolution_A, (res_05, res_0143))
     """
 
-    # Accept torch tensors (e.g. from get_vol) by converting to numpy first.
-    if isinstance(vol1, torch.Tensor):
-        vol1 = vol1.cpu().numpy()
-    if isinstance(vol2, torch.Tensor):
-        vol2 = vol2.cpu().numpy()
-    if mask is not None and isinstance(mask, torch.Tensor):
-        mask = mask.cpu().numpy()
+    dev = _get_device(device)
+
+    def _to_f64(x):
+        """Accept numpy array or torch tensor; return float64 tensor on dev."""
+        if isinstance(x, torch.Tensor):
+            return x.to(dtype=torch.float64, device=dev)
+        return torch.as_tensor(x, dtype=torch.float64, device=dev)
 
     # --- Handle potential shape mismatch ---
     if vol1.shape != vol2.shape:
         if allow_resize:
             print(f"Map shapes differ: {vol1.shape} vs {vol2.shape}.")
             print(f"Resizing map 2 to match map 1 using cubic spline interpolation...")
-            zoom_factors = np.array(vol1.shape) / np.array(vol2.shape)
-            vol2 = zoom(vol2, zoom_factors, order=3, prefilter=True)
+            # scipy.zoom requires numpy; convert locally for this path only.
+            vol1_np = vol1.cpu().numpy() if isinstance(vol1, torch.Tensor) else np.asarray(vol1)
+            vol2_np = vol2.cpu().numpy() if isinstance(vol2, torch.Tensor) else np.asarray(vol2)
+            zoom_factors = np.array(vol1_np.shape) / np.array(vol2_np.shape)
+            vol2 = zoom(vol2_np, zoom_factors, order=3, prefilter=True)
+            vol1 = vol1_np
             print(f"Resizing complete. New map 2 shape: {vol2.shape}")
         else:
-            raise ValueError( "Input maps must have the same shape. Use the --resize_maps flag to enable automatic resizing.")
+            raise ValueError("Input maps must have the same shape. Use the --resize_maps flag to enable automatic resizing.")
         assert vol1.shape == vol2.shape, "Map resizing failed. Shapes still do not match."
 
-    if mask is not None:
-        assert vol1.shape == mask.shape, "Mask must have the same shape as the maps."
-        vol1 = np.multiply(vol1, mask)
-        vol2 = np.multiply(vol2, mask)
-        print("Mask applied to volumes!")
-
-    # --- 1–3. Compute FSC shell sums on GPU using rfftn (real inputs → complex64) ---
-    dev = _get_device(device)
+    # --- 1–3. Compute FSC shell sums on GPU using rfftn ---
     D = vol1.shape[0]
     num_shells = D // 2
 
     # Use float64 to match numpy's double-precision FSC and avoid shell-sum
     # accumulation error on large volumes (e.g. 476³ with ~450k voxels/shell).
-    v1_t = torch.as_tensor(vol1.astype(np.float64), device=dev)
-    v2_t = torch.as_tensor(vol2.astype(np.float64), device=dev)
+    v1_t = _to_f64(vol1)
+    v2_t = _to_f64(vol2)
+
+    if mask is not None:
+        assert vol1.shape == mask.shape, "Mask must have the same shape as the maps."
+        m_t = _to_f64(mask)
+        v1_t = v1_t * m_t
+        v2_t = v2_t * m_t
+        del m_t
+        print("Mask applied to volumes!")
 
     # rfftn: shape (D, H, W//2+1) — half the Fourier space, conjugate-symmetric
     # FSC is a ratio of shell sums, so the missing conjugate half cancels out.

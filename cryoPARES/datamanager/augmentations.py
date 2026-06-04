@@ -224,7 +224,6 @@ def rotTransImage(image, degrees, translationFract, scaling=1., padding_mode='re
     else:
         theta = torch.bmm(transMat, rotMat)[:, :2, :]
 
-    # raise NotImplementedError("TODO: check if this is how to do it, rotTrans rather than transRot")
     if scaling != 1:
         theta[:, 0, 0] *= scaling
         theta[:, 1, 1] *= scaling

@@ -43,7 +43,6 @@ def nearest_rotmat_idx(src, targets):
     dot_trace, idxs = torch.max(trace, dim=1)
     return dot_trace, idxs
 
-#TODO: Implement the case that has symmetry for rotation_error_rads. You can call cryoPARES.geometry.symmetry.getSymmetryGroup(symmetry, as_matrix=True, device=device)
 def rotation_error_rads(rotA, rotB):
     """
     Compute rotation error in radians between two rotation matrices.

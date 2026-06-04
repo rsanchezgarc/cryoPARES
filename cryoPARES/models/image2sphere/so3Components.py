@@ -207,7 +207,6 @@ class SO3Conv(nn.Module):
     @cache.cache()
     def build_components(f_in: int, f_out: int, lmax: int, max_rads: float, n_angles: int):
         kernel_grid = so3_near_identity_grid_cartesianprod(max_rads, n_angles, degrees=False)
-        # kernel_grid = so3_near_identity_grid_ori(n_alpha=8, n_beta=3) #TODO: This was the original implementation
         f_wigner = flat_wigner(lmax, *kernel_grid)
         so3_ir = so3_irreps(lmax)
         w = nn.Parameter(torch.randn(f_in, f_out, kernel_grid[0].shape[0], generator=GET_DEBUG_SEED()))

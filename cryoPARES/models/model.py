@@ -333,21 +333,36 @@ class PlModel(RotationPredictionMixin, pl.LightningModule):
             y = (errors_degs < angle_thr).astype(int)
             n_pos, n_neg = int(y.sum()), int((1 - y).sum())
             if n_pos >= 10 and n_neg >= 10:
+                from sklearn.metrics import roc_auc_score
                 lr = LogisticRegression(solver="lbfgs", max_iter=1000)
                 lr.fit(z_scores_np.reshape(-1, 1), y)
                 a = float(lr.coef_.ravel()[0])
                 b = float(lr.intercept_.ravel()[0])
-                entry = {"n_good": n_pos, "n_total": len(y), "logistic_a": a, "logistic_b": b}
-                for p_target in TARGET_PROBS:
-                    logit_p = float(np.log(p_target / (1.0 - p_target)))
-                    z_thr = (logit_p - b) / a
-                    key = f"p{int(p_target * 100)}"
-                    entry[key] = {
-                        "threshold": float(z_thr),
-                        "method": f"logistic_calibration_p{int(p_target * 100)}",
-                        "description": f"directional z-score where P(error<{angle_thr}deg)={p_target}",
-                    }
-                    print(f"Angular threshold (error<{angle_thr}°, P={p_target}): z={z_thr:.4f}")
+                method = "logistic_calibration"
+                if a < 1e-4:
+                    # Full fit degenerate: refit with b=0 (scale only)
+                    lr_scaled = LogisticRegression(solver="lbfgs", max_iter=1000, fit_intercept=False)
+                    lr_scaled.fit(z_scores_np.reshape(-1, 1), y)
+                    a = float(lr_scaled.coef_.ravel()[0])
+                    b = 0.0
+                    method = "logistic_calibration_scale_only"
+                auc = float(roc_auc_score(y, z_scores_np))
+                entry = {"n_good": n_pos, "n_total": len(y), "logistic_a": a, "logistic_b": b, "auc": auc}
+                if auc < 0.6:
+                    print(f"WARNING: poor z-score discrimination for {angle_thr}° (AUC={auc:.3f}); thresholds may be unreliable")
+                if a < 1e-4:
+                    print(f"Skipping logistic threshold for {angle_thr}°: z-score not discriminative (a={a:.4f}, AUC={auc:.3f})")
+                else:
+                    for p_target in TARGET_PROBS:
+                        logit_p = float(np.log(p_target / (1.0 - p_target)))
+                        z_thr = (logit_p - b) / a
+                        key = f"p{int(p_target * 100)}"
+                        entry[key] = {
+                            "threshold": float(z_thr),
+                            "method": f"{method}_p{int(p_target * 100)}",
+                            "description": f"directional z-score where P(error<{angle_thr}deg)={p_target}",
+                        }
+                        print(f"Angular threshold (error<{angle_thr}°, P={p_target}): z={z_thr:.4f}  [AUC={auc:.3f}]")
                 angular_thresholds[f"angular_{angle_thr}deg"] = entry
             else:
                 print(f"Skipping logistic threshold for {angle_thr}°: "

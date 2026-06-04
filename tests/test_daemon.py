@@ -1,3 +1,6 @@
+import pytest
+
+pytestmark = pytest.mark.gpu
 
 import os
 import subprocess

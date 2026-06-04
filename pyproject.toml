@@ -42,3 +42,8 @@ version = {attr = "cryoPARES.__version__"}
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["cryoPARES*"]
+
+[tool.pytest.ini_options]
+markers = [
+    "gpu: marks tests as requiring a CUDA GPU (skipped on CPU-only CI)",
+]

@@ -133,8 +133,8 @@ class PostProcessor(ABC):
         res_05   = fsc_curves["res_A_05"]
         res_0143_str = f"{res_0143:.2f} Å" if np.isfinite(res_0143) else "N/A"
         res_05_str   = f"{res_05:.2f} Å"   if np.isfinite(res_05)   else "N/A"
-        print(f"Resolution (FSC=0.143): {res_0143_str}")
-        print(f"Resolution (FSC=0.5):   {res_05_str}")
+        print(f"Resolution at FSC=0.143 (phase-randomisation corrected): {res_0143_str}")
+        print(f"Resolution at FSC=0.5   (phase-randomisation corrected): {res_05_str}")
 
         # ------------------------------------------------------------------
         # 6. Average map

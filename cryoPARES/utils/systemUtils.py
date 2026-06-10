@@ -70,12 +70,26 @@ def increase_file_descriptor_limit():
 
 def setup_torch_env(matmul_precision: str = "high") -> None:
     """Set compile-cache dir and matmul precision; call early in every main()."""
+    import tempfile
     import torch
     from pathlib import Path
     from cryoPARES.configs.mainConfig import main_config
 
-    inductor_cache = Path(main_config.cachedir) / "torch_inductor"
-    inductor_cache.mkdir(parents=True, exist_ok=True)
+    preferred = Path(main_config.cachedir) / "torch_inductor"
+    try:
+        preferred.mkdir(parents=True, exist_ok=True)
+        test = preferred / ".write_test"
+        test.touch()
+        test.unlink()
+        inductor_cache = preferred
+    except OSError as e:
+        tmp = tempfile.mkdtemp(prefix="cryoPARES_inductor_")
+        warnings.warn(
+            f"Cannot write to inductor cache {preferred} ({e}). "
+            f"Using temporary directory {tmp} instead."
+        )
+        inductor_cache = Path(tmp)
+
     os.environ.setdefault("TORCHINDUCTOR_CACHE_DIR", str(inductor_cache))
 
     try:

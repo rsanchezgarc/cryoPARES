@@ -118,7 +118,7 @@ def postprocess_bfactor(
     lowpass_A: Optional[float] = None,
     save_fsc_plot: Optional[str] = None,
     save_guinier_plot: Optional[str] = None,
-    device=None,
+    device: Optional[str] = None,
 ):
     """
     Standard B-factor post-processing of two cryo-EM half-maps.
@@ -138,6 +138,7 @@ def postprocess_bfactor(
     :param lowpass_A: Apply a final low-pass filter at this resolution in Å (default: FSC=0.143 resolution)
     :param save_fsc_plot: Path to save FSC curve plot; default output_dir/fsc_plot.png
     :param save_guinier_plot: Path to save Guinier plot; default output_dir/guinier_plot.png
+    :param device: PyTorch device string (e.g. 'cuda', 'cpu'); default auto-detected
     """
     BfactorPostProcessor().run_pipeline(
         half1_path=half1,

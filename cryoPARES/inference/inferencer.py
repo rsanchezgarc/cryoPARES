@@ -24,6 +24,7 @@ from cryoPARES.constants import BEST_DIRECTIONAL_NORMALIZER, BEST_CHECKPOINT_BAS
 from cryoPARES.geometry.convert_angles import matrix_to_euler_angles, euler_angles_to_matrix
 from cryoPARES.geometry.metrics_angles import rotation_error_with_sym
 from cryoPARES.inference.nnetWorkers.inferenceModel import InferenceModel
+from cryoPARES.inference.consensus import run_consensus_phase, allcombinations_star_suffix
 from cryoPARES.models.model import PlModel
 from cryoPARES.datamanager.datamanager import DataManager
 from cryoPARES.projmatching.projMatcher import ProjectionMatcher
@@ -55,6 +56,7 @@ class SingleInferencer:
                  reference_map: Optional[str] = None,
                  reference_mask: Optional[str] = None, #Only used for FSC estimation
                  directional_zscore_thr: Optional[float] = CONFIG_PARAM(),
+                 consensus_rotation_error_thr_degs: Optional[float] = CONFIG_PARAM(),
                  skip_localrefinement: bool = CONFIG_PARAM(),
                  skip_reconstruction: bool = CONFIG_PARAM(),
                  subset_idxs: Optional[List[int]] = None,
@@ -82,6 +84,7 @@ class SingleInferencer:
         :param reference_map: Path to the reference map for local refinement. If not provided, it will be loaded from the checkpoint.
         :param reference_mask: Path to the mask of the reference map. Used only for FSC calculation.
         :param directional_zscore_thr: The threshold for the directional Z-score to filter particles.
+        :param consensus_rotation_error_thr_degs: Experimental (allCombinations only). If set, drop particles whose half1- and half2-model pose predictions disagree by more than this many degrees (symmetry-aware), keeping the cross-half pose for survivors. None disables consensus pruning.
         :param skip_localrefinement: Whether to skip local refinement of the particle poses.
         :param skip_reconstruction: Whether to skip 3D reconstruction from the inferred poses.
         :param subset_idxs: A list of indices to process a subset of particles.
@@ -133,6 +136,22 @@ class SingleInferencer:
         self.merge_halves_output = merge_halves_output
         self.update_progressbar_n_batches = main_config.inference.update_progressbar_n_batches
         self.show_debug_stats = show_debug_stats
+
+        # Half-model consensus pruning (experimental, allCombinations only).
+        # Original requested model_halfset, captured before run() overwrites self.model_halfset.
+        self._orig_model_halfset = model_halfset
+        self.consensus_rotation_error_thr_degs = consensus_rotation_error_thr_degs
+        self.consensus_enabled = consensus_rotation_error_thr_degs is not None
+        if self.consensus_enabled:
+            if model_halfset != "allCombinations":
+                raise ValueError(
+                    "consensus_rotation_error_thr_degs requires model_halfset='allCombinations' "
+                    f"(got '{model_halfset}'); both half-models must predict every particle."
+                )
+            # Reconstruction is deferred to the consensus phase (from the pruned, cross-half set),
+            # so the per-combination prediction passes skip reconstruction.
+            self._consensus_reconstruct = not self.skip_reconstruction
+            self.skip_reconstruction = True
 
         if results_dir is not None:
             os.makedirs(results_dir, exist_ok=True)
@@ -463,7 +482,20 @@ class SingleInferencer:
         # Clean up checkpoint reader
         self._checkpoint_reader.close()
 
-        if self.merge_halves_output and self.results_dir is not None:
+        if self.consensus_enabled and self.results_dir is not None:
+            print("Running half-model consensus pruning...")
+            recon_njobs = self.device_count if (self.use_cuda and self.device == "cuda") else 1
+            run_consensus_phase(
+                results_dir=self.results_dir,
+                symmetry=self.symmetry,
+                thr_degs=self.consensus_rotation_error_thr_degs,
+                particles_dir=self.particles_dir,
+                reconstruct=self._consensus_reconstruct,
+                n_jobs=recon_njobs,
+                use_cuda=self.use_cuda,
+                reference_mask=self.reference_mask,
+            )
+        elif self.merge_halves_output and self.results_dir is not None:
             self._merge_half_outputs()
 
         return all_out_list
@@ -565,6 +597,10 @@ class SingleInferencer:
         """
         if self.model_halfset == "allParticles":
             return f"_data_{self.data_halfset}_model_{self.model_halfset}.{extension}"
+        elif self._orig_model_halfset == "allCombinations":
+            # Disambiguate so the 4 (data, model) passes write distinct files (no collision),
+            # enabling the file-based consensus phase.
+            return allcombinations_star_suffix(self.data_halfset, self.model_halfset, extension)
         else:
             return f"_{self.data_halfset}.{extension}"
 

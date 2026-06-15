@@ -100,6 +100,7 @@ class TestDistributedInference(unittest.TestCase):
                          reference_map=None,
                          reference_mask=None,
                          directional_zscore_thr=None,
+                         consensus_rotation_error_thr_degs=None,
                          skip_localrefinement=True,
                          skip_reconstruction=True,
                          subset_idxs=None,

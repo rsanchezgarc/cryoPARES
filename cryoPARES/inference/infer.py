@@ -21,6 +21,7 @@ from cryoPARES.utils.reconstructionUtils import get_vol
 from autoCLI_config import ConfigArgumentParser, ConfigOverrideSystem
 from cryoPARES.utils.checkpointReader import CheckpointReader
 from cryoPARES.utils.paths import convert_config_args_to_absolute_paths
+from cryoPARES.inference.consensus import run_consensus_phase, allcombinations_star_suffix
 
 
 def _save_command_info(results_dir: str):
@@ -66,6 +67,7 @@ def distributed_inference(
         reference_map: Optional[str] = None,
         reference_mask: Optional[str] = None,
         directional_zscore_thr: Optional[float] = CONFIG_PARAM(),
+        consensus_rotation_error_thr_degs: Optional[float] = CONFIG_PARAM(),
         skip_localrefinement: bool = CONFIG_PARAM(),
         skip_reconstruction: bool = CONFIG_PARAM(),
         subset_idxs: Optional[List[int]] = None,
@@ -115,6 +117,8 @@ def distributed_inference(
         {reference_mask}
     directional_zscore_thr : float, optional
         {directional_zscore_thr}
+    consensus_rotation_error_thr_degs : float, optional
+        {consensus_rotation_error_thr_degs}
     skip_localrefinement : bool
         {skip_localrefinement}
     skip_reconstruction : bool
@@ -140,6 +144,13 @@ def distributed_inference(
         raise ValueError(
             "Local refinement is required before reconstruction. "
             "Use --skip_reconstruction to skip reconstruction, or remove --skip_localrefinement."
+        )
+
+    consensus_enabled = consensus_rotation_error_thr_degs is not None
+    if consensus_enabled and model_halfset != "allCombinations":
+        raise ValueError(
+            "consensus_rotation_error_thr_degs requires model_halfset='allCombinations' "
+            f"(got '{model_halfset}'); both half-models must predict every particle."
         )
 
     from cryoPARES.inference.inferencer import SingleInferencer
@@ -182,6 +193,7 @@ def distributed_inference(
             reference_map=reference_map,
             reference_mask=reference_mask,
             directional_zscore_thr=directional_zscore_thr,
+            consensus_rotation_error_thr_degs=consensus_rotation_error_thr_degs,
             skip_localrefinement=skip_localrefinement,
             skip_reconstruction=skip_reconstruction,
             subset_idxs=subset_idxs,  # interpreted inside per half
@@ -197,6 +209,11 @@ def distributed_inference(
     # MULTI-PROCESS PATH
     # -------------------------
     print(f"Multiprocess mode: spawning {n_jobs} worker(s).")
+    # With consensus pruning, reconstruction is deferred to the consensus phase (built from the
+    # pruned, cross-half set), so the per-combination passes skip reconstruction.
+    consensus_reconstruct = consensus_enabled and not skip_reconstruction
+    if consensus_enabled:
+        skip_reconstruction = True
     ctx = multiprocessing.get_context('spawn')
     aggregated_results: Dict[str, Optional[pd.DataFrame]] = {}
 
@@ -334,6 +351,9 @@ def distributed_inference(
                     # Match SingleInferencer._get_outsuffix naming convention
                     if resolved_model_halfset == "allParticles":
                         file_suffix = f"_data_{d_half}_model_{resolved_model_halfset}.star"
+                    elif model_halfset == "allCombinations":
+                        # Disambiguate the 4 (data, model) passes so they don't collide.
+                        file_suffix = allcombinations_star_suffix(d_half, resolved_model_halfset)
                     else:
                         file_suffix = f"_{d_half}.star"
                     out_star = os.path.join(results_dir, basename + file_suffix)
@@ -394,6 +414,21 @@ def distributed_inference(
                                         device=torch.device("cuda" if torch.cuda.is_available() else "cpu"))
                 except Exception as e:
                     print(f"Postprocessing failed: {e}")
+
+    if consensus_enabled and results_dir is not None:
+        print("Running half-model consensus pruning...")
+        symmetry = SingleInferencer._get_symmetry(checkpoint_reader, "half1")
+        run_consensus_phase(
+            results_dir=results_dir,
+            symmetry=symmetry,
+            thr_degs=consensus_rotation_error_thr_degs,
+            particles_dir=particles_dir,
+            reconstruct=consensus_reconstruct,
+            n_jobs=n_jobs,
+            use_cuda=use_cuda,
+            reference_mask=reference_mask,
+        )
+        return aggregated_results
 
     if merge_halves_output and results_dir is not None:
         import glob as _glob

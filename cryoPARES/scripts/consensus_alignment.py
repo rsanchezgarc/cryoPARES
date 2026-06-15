@@ -23,7 +23,7 @@ import starfile
 import torch
 from scipy.spatial.transform import Rotation
 
-from cryoPARES.constants import RELION_EULER_CONVENTION, RELION_ANGLES_NAMES
+from cryoPARES.constants import RELION_EULER_CONVENTION, RELION_ANGLES_NAMES, CONSENSUS_ANGULAR_ERROR_NAME
 from cryoPARES.geometry.metrics_angles import rotation_error_with_sym, mean_rot_matrix
 from cryoPARES.geometry.convert_angles import euler_angles_to_matrix, matrix_to_euler_angles
 
@@ -65,8 +65,16 @@ def _normalize_micrograph_paths(df: pd.DataFrame, root_dir: Optional[str]) -> pd
     return df
 
 
-def _read_star_file(fpath: str, root_dir: Optional[str]) -> StarTables:
-    """Read RELION star file and return particles (& optics if present)."""
+def _read_star_file(fpath: str, root_dir: Optional[str],
+                    match_keys: Optional[List[str]] = None) -> StarTables:
+    """Read RELION star file and return particles (& optics if present).
+
+    :param match_keys: Columns used to match particles across files. Defaults to
+        coordinate-based ``PRIMARY_KEYS``; pass e.g. ``["rlnImageName"]`` to match by a
+        single exact key (used when matching row-identical predictions).
+    """
+    if match_keys is None:
+        match_keys = PRIMARY_KEYS
     if not os.path.isfile(fpath):
         raise FileNotFoundError(f"Star file not found: {fpath}")
 
@@ -87,11 +95,12 @@ def _read_star_file(fpath: str, root_dir: Optional[str]) -> StarTables:
     else:
         particles = data
 
-    # Normalize micrograph paths
-    particles = _normalize_micrograph_paths(particles, root_dir)
+    # Normalize micrograph paths (only relevant for coordinate-based matching)
+    if "rlnMicrographName" in match_keys:
+        particles = _normalize_micrograph_paths(particles, root_dir)
 
     # Verify required columns in particles
-    for key in PRIMARY_KEYS:
+    for key in match_keys:
         if key not in particles.columns:
             raise KeyError(f"Missing required column '{key}' in {fpath}")
 
@@ -121,13 +130,18 @@ def _read_star_file(fpath: str, root_dir: Optional[str]) -> StarTables:
 
 def _match_particles_across_files(
     stars: List[StarTables],
-    coordinate_tolerance: float = COORDINATE_TOLERANCE_PX
+    coordinate_tolerance: float = COORDINATE_TOLERANCE_PX,
+    match_keys: Optional[List[str]] = None,
 ) -> Tuple[List[pd.DataFrame], pd.DataFrame, pd.Index]:
     """
-    Match particles across multiple star files using PRIMARY_KEYS.
+    Match particles across multiple star files.
 
     Returns only particles present in ALL input files (intersection).
-    Uses fuzzy matching for coordinates within tolerance.
+
+    :param match_keys: Columns used to build the match key. Defaults to coordinate-based
+        ``PRIMARY_KEYS`` (fuzzy matching of ``rlnCoordinateX/Y`` within
+        ``coordinate_tolerance``). Pass e.g. ``["rlnImageName"]`` for exact matching on a
+        single key (no coordinate rounding), used for row-identical predictions.
 
     Returns:
         matched_dfs: List of dataframes with matched particles (same order as input)
@@ -137,19 +151,33 @@ def _match_particles_across_files(
     if len(stars) < 2:
         raise ValueError("Need at least 2 star files for consensus alignment")
 
+    coordinate_matching = match_keys is None
+    if match_keys is None:
+        match_keys = PRIMARY_KEYS
+
     dfs = [s.particles.copy() for s in stars]
 
-    # Round coordinates for fuzzy matching
+    # Build the match key for each file
+    temp_cols = ['_match_key']
     for i, df in enumerate(dfs):
         df = df.copy()
-        df['_rlnCoordinateX_rounded'] = np.round(df['rlnCoordinateX'] / coordinate_tolerance) * coordinate_tolerance
-        df['_rlnCoordinateY_rounded'] = np.round(df['rlnCoordinateY'] / coordinate_tolerance) * coordinate_tolerance
-        df['_match_key'] = (
-            df['rlnMicrographName'].astype(str) + '||' +
-            df['_rlnCoordinateX_rounded'].astype(str) + '||' +
-            df['_rlnCoordinateY_rounded'].astype(str)
-        )
+        if coordinate_matching:
+            # Round coordinates for fuzzy matching
+            df['_rlnCoordinateX_rounded'] = np.round(df['rlnCoordinateX'] / coordinate_tolerance) * coordinate_tolerance
+            df['_rlnCoordinateY_rounded'] = np.round(df['rlnCoordinateY'] / coordinate_tolerance) * coordinate_tolerance
+            df['_match_key'] = (
+                df['rlnMicrographName'].astype(str) + '||' +
+                df['_rlnCoordinateX_rounded'].astype(str) + '||' +
+                df['_rlnCoordinateY_rounded'].astype(str)
+            )
+        else:
+            # Exact matching on the provided keys
+            df['_match_key'] = df[match_keys[0]].astype(str)
+            for key in match_keys[1:]:
+                df['_match_key'] = df['_match_key'] + '||' + df[key].astype(str)
         dfs[i] = df
+    if coordinate_matching:
+        temp_cols = ['_rlnCoordinateX_rounded', '_rlnCoordinateY_rounded', '_match_key']
 
     # Find intersection of all match keys
     common_keys = set(dfs[0]['_match_key'])
@@ -169,7 +197,7 @@ def _match_particles_across_files(
         df_matched = df_matched.sort_values('_match_key').reset_index(drop=True)
 
         # Remove temporary columns
-        df_matched = df_matched.drop(columns=['_rlnCoordinateX_rounded', '_rlnCoordinateY_rounded', '_match_key'])
+        df_matched = df_matched.drop(columns=temp_cols)
         matched_dfs.append(df_matched)
 
     # Create mapping to restore original order of first file
@@ -410,7 +438,8 @@ def consensus_alignment(
     coordinate_tolerance: float = COORDINATE_TOLERANCE_PX,
     root_dir: Optional[str] = None,
     merge_columns: Optional[List[str]] = None,
-    weights_per_file: Optional[List[float]] = None
+    weights_per_file: Optional[List[float]] = None,
+    match_keys: Optional[List[str]] = None,
 ):
     """
     Compute consensus alignment from multiple RELION star files.
@@ -419,7 +448,7 @@ def consensus_alignment(
     :param output_star: Output star file path for consensus alignment
     :param symmetry: Point group symmetry (C1, C2, D2, T, O, I, etc.)
     :param consensus_mode: Consensus operation mode:
-        - "drop": Keep only particles with max pairwise error < threshold
+        - "drop": Keep only particles with max pairwise error < threshold (retains first file's poses)
         - "average": Compute geodesic average of all poses
         - "combined": Average poses, then drop particles with high residual error
     :param angular_threshold_degs: Angular error threshold in degrees (default: 5.0)
@@ -429,6 +458,9 @@ def consensus_alignment(
         (by default, only first file's metadata is retained)
     :param weights_per_file: Optional weights for each input file when computing averages
         (must sum to 1.0, defaults to uniform weights)
+    :param match_keys: Columns used to match particles across files. Defaults to coordinate-based
+        matching (rlnMicrographName + rlnCoordinateX/Y). Pass ["rlnImageName"] to match by exact
+        image name (e.g. for row-identical predictions from different models).
     """
     # ==================================================================================
     # STEP 1: Validation
@@ -463,10 +495,11 @@ def consensus_alignment(
     # STEP 2: Read and match particles
     # ==================================================================================
     print("Reading input star files...")
-    stars = [_read_star_file(fpath, root_dir) for fpath in input_stars]
+    stars = [_read_star_file(fpath, root_dir, match_keys=match_keys) for fpath in input_stars]
 
     print("\nMatching particles across files...")
-    matched_dfs, match_info, sorted_to_original_map = _match_particles_across_files(stars, coordinate_tolerance)
+    matched_dfs, match_info, sorted_to_original_map = _match_particles_across_files(
+        stars, coordinate_tolerance, match_keys=match_keys)
 
     print("\nMatching statistics:")
     print(match_info.to_string(index=False))
@@ -529,6 +562,7 @@ def consensus_alignment(
         mask = max_errors < angular_threshold_degs
         retained_indices = np.where(mask)[0]
         consensus_df = consensus_df[mask].reset_index(drop=True)
+        consensus_df[CONSENSUS_ANGULAR_ERROR_NAME] = max_errors[retained_indices]
 
         # No pose averaging, use first file's poses
         retained_fraction = len(retained_indices) / n_original
@@ -552,6 +586,7 @@ def consensus_alignment(
         # Update angles in consensus dataframe
         for i, col in enumerate(RELION_ANGLES_NAMES):
             consensus_df[col] = avg_angles_deg[:, i]
+        consensus_df[CONSENSUS_ANGULAR_ERROR_NAME] = max_errors
 
         print(f"  Updated poses for all {len(consensus_df)} particles")
 
@@ -580,6 +615,7 @@ def consensus_alignment(
         retained_indices = np.where(mask)[0]
 
         consensus_df = consensus_df[mask].reset_index(drop=True)
+        consensus_df[CONSENSUS_ANGULAR_ERROR_NAME] = max_residual[retained_indices]
 
         # Update poses for retained particles
         avg_angles_rad = matrix_to_euler_angles(avg_rot[retained_indices], RELION_EULER_CONVENTION)

@@ -20,6 +20,7 @@ class Inference_config:
         'skip_reconstruction': 'Skip 3D reconstruction step and output only predicted poses',
         'update_progressbar_n_batches': 'Update progress bar every N batches',
         'directional_zscore_thr': 'Confidence z-score threshold for filtering particles. Particles with scores below this are discarded as low-confidence',
+        'consensus_rotation_error_thr_degs': 'Experimental (allCombinations only): drop particles whose half1- and half2-model pose predictions disagree by more than this many degrees (symmetry-aware). None disables consensus pruning',
         'before_refiner_buffer_size': 'If directional_zscore_thr is enabled, wait until before_refiner_buffer_size have been accumulated before executing the projection matching and reconstruction. If None, before_refiner_buffer_size=batch_size//4',
         'float32_matmul_precision': 'PyTorch float32 matrix multiplication precision mode ("highest", "high", or "medium")',
 
@@ -53,6 +54,7 @@ class Inference_config:
     skip_reconstruction: bool = False
     update_progressbar_n_batches: int = 20
     directional_zscore_thr: Optional[float] = None
+    consensus_rotation_error_thr_degs: Optional[float] = None
 
     before_refiner_buffer_size: Optional[int] = None
 

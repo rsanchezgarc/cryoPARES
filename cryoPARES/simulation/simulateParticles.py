@@ -21,6 +21,7 @@ from cryoPARES.configs.mainConfig import main_config
 # (both single-run and multi-GPU sharded run)
 from cryoPARES.simulation.generateRandomStar import generate_random_particles_star
 from cryoPARES.simulation.simulateParticlesHelper import (
+    APODIZATION_MODES,
     ParticlesStarSet,
     run_simulation,
     run_simulation_sharded,
@@ -73,10 +74,11 @@ def _write_output_star(
     assert len(image_names_all) == len(parts_df), f"Mismatch: images ({len(image_names_all)}) vs STAR rows ({len(parts_df)})"
     parts_df["rlnImageName"] = image_names_all
 
-    # Write output star file
-    star_dict = {"particles": parts_df}
+    # Write output star file (data_optics must precede data_particles)
+    star_dict = {}
     if optics_df is not None:
         star_dict["optics"] = optics_df
+    star_dict["particles"] = parts_df
     starfile.write(star_dict, out_star, overwrite=True)
 
     return out_star
@@ -103,7 +105,9 @@ def simulate_particles_cli(
         sub_bp_lo_A: float = 8.0,
         sub_bp_hi_A: float = 20.0,
         sub_power_q: float = 0.85,
-        px_A: float = 1.0,
+        px_A: Optional[float] = None,
+        apodization: str = "circular",
+        mask_edge_width: int = 3,
         device: Optional[str] = None,
         random_seed: Optional[int] = None,
         disable_tqdm: bool = False,
@@ -136,7 +140,9 @@ def simulate_particles_cli(
         sub_bp_lo_A: Subtraction bandpass low-resolution cutoff (Å)
         sub_bp_hi_A: Subtraction bandpass high-resolution cutoff (Å)
         sub_power_q: Subtraction power quantile threshold (0-1)
-        px_A: Pixel size in Ångströms
+        px_A: Pixel size in Ångströms. If not given, it is read from rlnImagePixelSize in the STAR optics table
+        apodization: Real-space window applied to each simulated particle: 'circular' (RELION-style soft circular mask, recommended), 'none', or 'hann' (legacy full-box Hann window, attenuates the particle itself)
+        mask_edge_width: Width in pixels of the raised-cosine falloff for apodization='circular'
         device: Override device for single-run (e.g., 'cuda:0' or 'cpu'). Ignored for multi-GPU
         random_seed: Random seed for reproducibility
         disable_tqdm: Disable progress bar
@@ -156,6 +162,10 @@ def simulate_particles_cli(
         raise ValueError("num_dataworkers must be >= 0")
     if n_first_particles is not None and n_first_particles <= 0:
         raise ValueError("n_first_particles must be > 0")
+    if apodization not in APODIZATION_MODES:
+        raise ValueError(f"apodization must be one of {APODIZATION_MODES}, got {apodization!r}")
+    if mask_edge_width < 0:
+        raise ValueError("mask_edge_width must be >= 0")
     if not os.path.exists(volume):
         raise FileNotFoundError(f"Volume not found: {volume}")
     if not os.path.exists(in_star):
@@ -243,6 +253,43 @@ def simulate_particles_cli(
             volume = resampled_path
             print(f"Adjusted volume written to: {resampled_path}")
 
+    else:
+        # --- Normal mode: take the pixel size from the STAR unless explicitly overridden ---
+        # px_A drives both the CTF frequency grid and the Angstrom->pixel shift conversion,
+        # so a wrong value silently produces wrong particles.
+        pset = ParticlesStarSet(in_star)
+        star_px_A = None
+        star_box_size = None
+        if getattr(pset, "optics_md", None) is not None:
+            if "rlnImagePixelSize" in pset.optics_md.columns:
+                star_px_A = float(pset.optics_md["rlnImagePixelSize"].iloc[0])
+            if "rlnImageSize" in pset.optics_md.columns:
+                star_box_size = int(pset.optics_md["rlnImageSize"].iloc[0])
+
+        if px_A is None:
+            if star_px_A is None:
+                raise ValueError(
+                    f"No rlnImagePixelSize in the optics table of {in_star}; pass --px_A explicitly."
+                )
+            px_A = star_px_A
+            print(f"Using pixel size from STAR: {px_A:.4f} A/px")
+        elif star_px_A is not None and abs(px_A - star_px_A) > 0.01:
+            warnings.warn(
+                f"--px_A ({px_A:.4f} A/px) differs from the STAR rlnImagePixelSize "
+                f"({star_px_A:.4f} A/px). Using the explicit --px_A value; the CTF and the "
+                "Angstrom->pixel shift conversion will follow it."
+            )
+
+        with mrcfile.open(volume, header_only=True, permissive=True) as mrc:
+            vol_box_size = int(mrc.header.nx)
+        if star_box_size is not None and vol_box_size != star_box_size:
+            warnings.warn(
+                f"Volume box size ({vol_box_size}) differs from the STAR rlnImageSize "
+                f"({star_box_size}). Simulated particles will be {vol_box_size} px and the "
+                "optics table copied into the output STAR will be inconsistent. Rescale the "
+                "volume, or use --n_particles mode which rescales it for you."
+            )
+
     # Resolve GPU configuration
     num_gpus = n_gpus_for_simulation
     if num_gpus == -1:
@@ -258,10 +305,14 @@ def simulate_particles_cli(
         auto_device = "cuda:0"
         gpu_ids = []
     else:
-        # Multi-GPU
+        # Multi-GPU (may collapse to a single GPU if fewer are actually available)
         use_gpus = min(num_gpus, available_gpus)
-        auto_device = ""
-        gpu_ids = list(range(use_gpus))
+        if use_gpus <= 1:
+            auto_device = "cuda:0"
+            gpu_ids = []
+        else:
+            auto_device = ""
+            gpu_ids = list(range(use_gpus))
 
     device = device if device is not None else auto_device
 
@@ -288,6 +339,8 @@ def simulate_particles_cli(
             sub_bp_hi_A=sub_bp_hi_A,
             sub_power_q=sub_power_q,
             px_A=px_A,
+            apodization=apodization,
+            mask_edge_width=mask_edge_width,
             gpus=gpu_ids,
             normalize_volume=False,
             disable_tqdm=disable_tqdm,
@@ -315,6 +368,8 @@ def simulate_particles_cli(
             sub_bp_hi_A=sub_bp_hi_A,
             sub_power_q=sub_power_q,
             px_A=px_A,
+            apodization=apodization,
+            mask_edge_width=mask_edge_width,
             device=device,
             normalize_volume=False,
             disable_tqdm=disable_tqdm,

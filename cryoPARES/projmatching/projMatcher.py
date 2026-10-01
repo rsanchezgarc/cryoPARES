@@ -380,9 +380,13 @@ class ProjectionMatcher(nn.Module):
         # Prepare mask
         radius_px = self.image_shape[-2] // 2
         if self.mask_radius_angs is not None:
-            assert 1 < self.mask_radius_angs <= radius_px, \
-                "Error, the mask redius is larger than the box size"
-            radius_px = self.mask_radius_angs
+            # mask_radius_angs is in Angstroms — convert to pixels, as
+            # ParticlesDataset._getParticleMask does, before comparing against the box radius.
+            mask_radius_px = self.mask_radius_angs / self.vol_voxel_size
+            assert 1 < mask_radius_px <= radius_px, (
+                f"Error, the mask radius ({self.mask_radius_angs} A = {mask_radius_px:.1f} px) "
+                f"is larger than the box radius ({radius_px} px)")
+            radius_px = mask_radius_px
         rmask = circle(radius_px, image_shape=self.image_shape, smoothing_radius=radius_px * .05)
         self.register_buffer("rmask", rmask)
         if self.max_resolution_A is not None:

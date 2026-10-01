@@ -5,6 +5,7 @@ Key idea: at low SNR, fit scalar 'a' in a frequency band where
 particle ≈ a*(CTF*projection) + noise, then subtract a*(CTF*projection).
 """
 
+import functools
 import math
 import os
 import threading
@@ -44,6 +45,40 @@ def _hann_2d(h: int, w: int, device: torch.device) -> torch.Tensor:
     wx = _hann_1d(w, device=device)
     wy = _hann_1d(h, device=device)
     return wy[:, None] * wx[None, :]
+
+def _soft_circular_mask_2d(h: int, w: int, device: torch.device,
+                           radius_pix: float = -1.0, edge_width: int = 3) -> torch.Tensor:
+    """
+    RELION-style soft circular mask: 1 inside `radius_pix`, raised-cosine falloff over
+    `edge_width` pixels, 0 beyond. Mirrors Reconstructor.get_soft_mask in 2D.
+
+    radius_pix < 0 means auto: min(h, w) / 2 - edge_width, i.e. the falloff ends exactly
+    at the inscribed circle so only the corners are zeroed.
+    """
+    if radius_pix < 0:
+        radius_pix = min(h, w) / 2.0 - edge_width
+    yy, xx = torch.meshgrid(torch.arange(h, device=device, dtype=torch.float32),
+                            torch.arange(w, device=device, dtype=torch.float32), indexing='ij')
+    r = torch.sqrt((yy - h / 2.0) ** 2 + (xx - w / 2.0) ** 2)
+    mask = torch.ones_like(r)
+    transition = (r > radius_pix) & (r < radius_pix + edge_width)
+    mask[transition] = 0.5 + 0.5 * torch.cos(math.pi * (r[transition] - radius_pix) / edge_width)
+    mask[r >= radius_pix + edge_width] = 0.0
+    return mask
+
+APODIZATION_MODES = ("circular", "hann", "none")
+
+@functools.lru_cache(maxsize=4)
+def _apodization_window(mode: str, h: int, w: int, device: torch.device,
+                        edge_width: int) -> Optional[torch.Tensor]:
+    """Build (and cache) the real-space window applied to every simulated particle."""
+    if mode == "none":
+        return None
+    if mode == "hann":
+        return _hann_2d(h, w, device=device)
+    if mode == "circular":
+        return _soft_circular_mask_2d(h, w, device=device, radius_pix=-1.0, edge_width=edge_width)
+    raise ValueError(f"Unknown apodization {mode!r}; expected one of {APODIZATION_MODES}")
 
 def rfft2c(x: torch.Tensor) -> torch.Tensor:
     return fft.rfft2(x, norm="ortho")
@@ -139,7 +174,7 @@ class ParticlesDataset(Dataset):
         cs = float(optics_data["rlnSphericalAberration"].iloc[0])
         w = float(optics_data["rlnAmplitudeContrast"].iloc[0])
         phase = float(r.get("rlnPhaseShift", 0.0))
-        bfac = float(r.get("rlnBfactor", 0.0))
+        bfac = float(r.get("rlnCtfBfactor", 0.0))
 
         # Pre-compute CTF if needed (defers computation to dataset, avoiding loop in simulation)
         # Note: CTF computed on CPU to avoid CUDA fork issues with DataLoader workers
@@ -604,10 +639,23 @@ class CryoEMSimulator:
             sub_bp_hi_A: float = 20.0,
             sub_power_q: float = 0.85,
             px_A: float = 1.0,
+            apodization: str = "circular",
+            mask_edge_width: int = 3,
             disable_tqdm: bool = False,
             n_first_particles: Optional[int] = None) -> List[str]:
 
         assert simulation_mode in ("central_slice", "noise_additive")
+        if apodization not in APODIZATION_MODES:
+            raise ValueError(f"apodization must be one of {APODIZATION_MODES}, got {apodization!r}")
+        if simulation_mode == "noise_additive":
+            # The subtraction path needs the *experimental* particle images, which this
+            # simulator never loads (subtract_projection_T0 is called with particle=None),
+            # and it needs a non-fftshifted CTF that the dataset does not compute.
+            raise NotImplementedError(
+                "simulation_mode='noise_additive' is not implemented: it requires loading the "
+                "experimental particles to subtract from, and a CTF computed with fftshift=False. "
+                "Use simulation_mode='central_slice'."
+            )
         os.makedirs(out_dir, exist_ok=True)
 
         dataset = ParticlesDataset(
@@ -637,6 +685,8 @@ class CryoEMSimulator:
             px_A=px_A
         )
         writer.start()
+
+        win = _apodization_window(apodization, H_part, W_part, self.device, mask_edge_width)
 
         total_particles = len(dataset)
         pbar = tqdm(total=total_particles, desc="Simulating particles", unit="particle", disable=disable_tqdm)
@@ -692,7 +742,7 @@ class CryoEMSimulator:
 
                 # Apply shifts (vectorized using batch-capable fourier_shift_image_2d)
                 # Negate shifts for RELION convention: shifts are corrections
-                shifts_vec = torch.stack([-shifts_gt_px[:, 1], -shifts_gt_px[:, 0]], dim=1)  # (B, 2): [-dy, -dx]
+                shifts_vec = -shifts_gt_px  # (B, 2): [-dy, -dx], matching fourier_shift_image_2d's (h, w) order
                 out_imgs = fourier_shift_image_2d(out_imgs, shifts_vec)
 
             else:
@@ -714,7 +764,7 @@ class CryoEMSimulator:
 
                     proj_gt = fourier_shift_image_2d(
                         projs_gt[i],
-                        torch.tensor([-shifts_gt_px[i, 1], -shifts_gt_px[i, 0]], device=self.device)
+                        -shifts_gt_px[i]  # (dy, dx) == (h, w) order
                     )
 
                     noise_only, _ = subtract_projection_T0(
@@ -726,16 +776,19 @@ class CryoEMSimulator:
                     total_shift = shifts_gt_px[i] + shift_jit_px[i]
                     proj_jit = fourier_shift_image_2d(
                         projs_jit[i],
-                        torch.tensor([-total_shift[1], -total_shift[0]], device=self.device)
+                        -total_shift  # (dy, dx) == (h, w) order
                     )
 
                     out_imgs.append(noise_only + proj_jit)
 
                 out_imgs = torch.stack(out_imgs, dim=0)
 
-            # Vectorized windowing (apply to entire batch)
-            win = _hann_2d(H_part, W_part, device=self.device)
-            out_imgs = out_imgs * win[None, :, :]  # Broadcast over batch dimension
+            # Vectorized apodization (apply to entire batch).
+            # NOTE: this is deliberately a soft *circular* mask, not a full-box Hann window.
+            # A Hann window attenuates the particle itself, breaking the linear relation
+            # image = CTF * projection that projection matching and reconstruction assume.
+            if win is not None:
+                out_imgs = out_imgs * win[None, :, :]  # Broadcast over batch dimension
 
             # Vectorized noise addition with robust edge case handling
             if snr is not None and snr > 0:
@@ -770,6 +823,12 @@ class CryoEMSimulator:
             del euls_gt, angle_jit, shift_jit_px, shifts_gt_px
 
             if self.device.type == 'cuda':
+                # TODO: this full-device sync on every batch serialises the producer against
+                # the double-buffered async writer, defeating most of the point of BufferPool.
+                # It is currently needed because the caching allocator may hand `out_imgs`'
+                # memory to the next batch while BufferPool's async D2H copy is still pending.
+                # Fix by recording an event after the copy and having the producer wait on it
+                # (or by keeping the batch alive until the copy event completes) instead.
                 torch.cuda.synchronize(device=self.device)
             pbar.update(B)
 
@@ -808,6 +867,8 @@ def run_simulation(
         sub_bp_hi_A: float = 20.0,
         sub_power_q: float = 0.85,
         px_A: float = 1.0,
+        apodization: str = "circular",
+        mask_edge_width: int = 3,
         device: str = "cpu",
         normalize_volume: bool = False,
         disable_tqdm: bool = False,
@@ -834,6 +895,8 @@ def run_simulation(
         sub_bp_hi_A=sub_bp_hi_A,
         sub_power_q=sub_power_q,
         px_A=px_A,
+        apodization=apodization,
+        mask_edge_width=mask_edge_width,
         disable_tqdm=disable_tqdm,
         n_first_particles=n_first_particles,
     )
@@ -864,6 +927,8 @@ def _run_simulation_worker(
         sub_bp_hi_A: float,
         sub_power_q: float,
         px_A: float,
+        apodization: str,
+        mask_edge_width: int,
         normalize_volume: bool,
         disable_tqdm: bool,
 ) -> None:
@@ -880,6 +945,10 @@ def _run_simulation_worker(
             simulation_mode=simulation_mode,
             apply_ctf=apply_ctf,
             snr=snr,
+            # TODO: num_dataworkers is not forwarded to the sharded workers, so the
+            # per-particle CTF precompute in ParticlesDataset.__getitem__ runs
+            # single-threaded in every shard. Thread num_workers through
+            # run_simulation_sharded -> _run_simulation_worker and pass it here.
             num_workers=0,
             angle_jitter_deg=angle_jitter_deg,
             angle_jitter_frac=angle_jitter_frac,
@@ -891,6 +960,8 @@ def _run_simulation_worker(
             sub_bp_hi_A=sub_bp_hi_A,
             sub_power_q=sub_power_q,
             px_A=px_A,
+            apodization=apodization,
+            mask_edge_width=mask_edge_width,
             device=device,
             normalize_volume=normalize_volume,
             disable_tqdm=disable_tqdm,
@@ -922,6 +993,8 @@ def run_simulation_sharded(
         sub_power_q: float,
         px_A: float,
         gpus: List[int],
+        apodization: str = "circular",
+        mask_edge_width: int = 3,
         normalize_volume: bool = False,
         disable_tqdm: bool = False,
         n_first_particles: Optional[int] = None,
@@ -953,15 +1026,21 @@ def run_simulation_sharded(
 
         shard_star = os.path.join(output_dir, f".shard_{gpu_id}.star")
         particles_df = particles_to_shard.iloc[start_idx:end_idx].copy()
-        star_dict = {"particles": particles_df}
-        if hasattr(pset_full, "optics_md") and pset_full.optics_md is not None:
+        # data_optics must precede data_particles (starfile preserves dict order)
+        star_dict = {}
+        if getattr(pset_full, "optics_md", None) is not None:
             star_dict["optics"] = pset_full.optics_md
+        star_dict["particles"] = particles_df
         starfile.write(star_dict, shard_star, overwrite=True)
 
         shard_stars.append(shard_star)
         shard_basenames.append(f"{basename}_gpu{gpu_id}")
         start_idx = end_idx
 
+    # TODO: random_seed is not forwarded to the shard workers. The 'spawn' context does not
+    # inherit the parent's numpy/torch RNG state, so --random_seed makes single-GPU runs
+    # reproducible but multi-GPU runs are not. Accept a random_seed here and seed each worker
+    # deterministically from it (e.g. seed + gpu_id) at the top of _run_simulation_worker.
     # Spawn one process per GPU using 'spawn' context (required for CUDA)
     ctx = _mp.get_context("spawn")
     result_queue = ctx.Queue()
@@ -992,6 +1071,8 @@ def run_simulation_sharded(
             sub_bp_hi_A=sub_bp_hi_A,
             sub_power_q=sub_power_q,
             px_A=px_A,
+            apodization=apodization,
+            mask_edge_width=mask_edge_width,
             normalize_volume=normalize_volume,
             disable_tqdm=disable_tqdm,
         )

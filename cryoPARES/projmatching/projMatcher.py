@@ -19,7 +19,7 @@ from autoCLI_config import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.constants import (RELION_EULER_CONVENTION, BATCH_POSE_NAME, RELION_PRED_POSE_CONFIDENCE_NAME,
                                  BATCH_ORI_IMAGE_NAME, BATCH_ORI_CTF_NAME, RELION_ANGLES_NAMES, RELION_SHIFTS_NAMES,
                                  BATCH_IDS_NAME)
-from cryoPARES.utils.torch_fourier_slice_compat import extract_central_slices_rfft_3d
+from cryoPARES.utils.fourier_operators import FourierProjector
 from cryoPARES.utils.paths import MAP_AS_ARRAY_OR_FNAME_TYPE, FNAME_TYPE
 
 from cryoPARES.configs.mainConfig import main_config
@@ -138,16 +138,13 @@ class ProjectionMatcher(nn.Module):
             except Exception:
                 pass
 
+        self.projector = FourierProjector(
+            self.vol_shape, self.fftfreq_max,
+            representation='channels' if USE_TWO_FLOAT32_FOR_COMPLEX else 'complex',
+            compiled=USE_TWO_FLOAT32_FOR_COMPLEX and not main_config.projmatching.disable_compile_projectVol,
+            device=self.reference_vol.device, dtype=self.reference_vol.real.dtype,
+        )
         if USE_TWO_FLOAT32_FOR_COMPLEX:
-            if main_config.projmatching.disable_compile_projectVol:
-                from cryoPARES.projmatching.projmatchingUtils.extract_central_slices_as_real import \
-                                extract_central_slices_rfft_3d_multichannel
-                self.extract_central_slices_rfft_3d_multichannel = extract_central_slices_rfft_3d_multichannel
-            else:
-                from cryoPARES.projmatching.projmatchingUtils.extract_central_slices_as_real import \
-                                compiled_extract_central_slices_rfft_3d_multichannel
-                print("Compiling extract_central_slices_rfft_3d_multichannel")
-                self.extract_central_slices_rfft_3d_multichannel = compiled_extract_central_slices_rfft_3d_multichannel
             self.projectF = self._projectF_USE_TWO_FLOAT32_FOR_COMPLEX
 
         else:
@@ -415,19 +412,10 @@ class ProjectionMatcher(nn.Module):
 
     def _projectF(self, rotMats: torch.Tensor) -> torch.Tensor:
 
-        return extract_central_slices_rfft_3d(
-            self.reference_vol,
-            rotation_matrices=rotMats,
-            image_shape=self.vol_shape,
-            fftfreq_max=self.fftfreq_max,
-            zyx_matrices=False, )
+        return self.projector(self.reference_vol, rotMats)
 
     def _projectF_USE_TWO_FLOAT32_FOR_COMPLEX(self, rotMats: torch.Tensor) -> torch.Tensor:
-        projs = self.extract_central_slices_rfft_3d_multichannel(self.reference_vol,
-                                                                 self.vol_shape,
-                                                                 rotation_matrices=rotMats,
-                                                                 fftfreq_max=self.fftfreq_max,
-                                                                 zyx_matrices=False)
+        projs = self.projector(self.reference_vol, rotMats)
         projs = projs.permute([0, 2, 3, 1]).contiguous()
         return projs
 

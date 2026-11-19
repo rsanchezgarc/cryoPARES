@@ -73,6 +73,7 @@ class FourierBackprojector(nn.Module):
     def __init__(self, volume_shape, fftfreq_max=None, *, compiled=False, device=None, dtype=None):
         super().__init__()
         self.geometry = FourierGeometry(volume_shape, fftfreq_max, device=device, dtype=dtype)
+        self.compiled = compiled
         from cryoPARES.reconstruction.insert_central_slices_rfft_3d import (
             _worker_insert_central_slices_rfft_3d_multichannel,
             _compiled_worker_insert_central_slices_rfft_3d_multichannel,
@@ -90,6 +91,12 @@ class FourierBackprojector(nn.Module):
             raise TypeError("slices require real-valued real/imaginary channels")
         _check_inputs(slices, rotation_matrices, geometry)
         rotations = rotation_matrices.to(dtype=geometry.plane.dtype)
+        if self.compiled:
+            # Literal corner offsets and shape-derived constants are folded by
+            # Inductor. Passing their values as device buffers prevents those
+            # simplifications. Eager calls reuse the owned tensors below.
+            return self._kernel(slices, geometry.volume_shape, rotations, geometry.valid_coords,
+                                geometry.valid_indices, zyx_matrices)
         if not zyx_matrices:
             rotations = rotations.flip((-2, -1))
         return self._kernel(slices, geometry.volume_shape, rotations, geometry.valid_coords,
@@ -126,11 +133,13 @@ class FourierShift2D(nn.Module):
         self.register_buffer('radians', -2 * torch.pi * frequencies, persistent=False)
 
     def _apply(self, fn, recurse=True):
+        previous_dtype = self.radians.dtype
         probe = fn(self.radians.new_empty(0))
         if probe.dtype not in (torch.float32, torch.float64):
             raise TypeError("Fourier shifts require float32 or float64 frequency factors")
         super()._apply(fn, recurse=recurse)
-        self._build(self.radians.device, self.radians.dtype)
+        if self.radians.dtype != previous_dtype:
+            self._build(self.radians.device, self.radians.dtype)
         return self
 
     @property

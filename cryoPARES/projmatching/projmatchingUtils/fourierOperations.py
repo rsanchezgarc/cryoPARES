@@ -1,4 +1,3 @@
-from functools import lru_cache
 from typing import Optional, Sequence, Union, Tuple
 
 import torch
@@ -84,7 +83,6 @@ def compute_dft_3d(
     return dft, vol_shape, pad_length
 
 
-@lru_cache(maxsize=4)
 def _mask_for_dft_2d(img_shape, max_freq_pixels, min_freq_pixels, rfft, fftshifted, device):
     """Build a 2D Fourier band-pass mask in fftshifted rfft layout.
 

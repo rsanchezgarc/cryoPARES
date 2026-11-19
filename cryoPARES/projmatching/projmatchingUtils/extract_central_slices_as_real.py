@@ -146,7 +146,9 @@ def sample_image_3d(
     else:
         upper, _, half_extent, singleton = sampling_constants
         normalized = (coordinates / half_extent) - 1
-        normalized = torch.where(singleton, 0., normalized).flip(-1)
+        if singleton is not None:
+            normalized = torch.where(singleton, 0., normalized)
+        normalized = normalized.flip(-1)
     samples = F.grid_sample(
         input=image,
         grid=normalized,
@@ -154,6 +156,7 @@ def sample_image_3d(
         padding_mode='border',
         align_corners=True,
     )
+    del normalized
 
 
     samples = einops.rearrange(samples, 'b c 1 1 1 -> b c')

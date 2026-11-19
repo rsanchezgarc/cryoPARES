@@ -48,8 +48,8 @@ class FourierGeometry(nn.Module):
 
     Construction fixes the shape, layout and inclusive frequency cutoff. Reuse
     the object for every batch; create another object for different geometry.
-    Derived buffers are omitted from state dictionaries and rebuilt on explicit
-    dtype/device moves, so ``geometry.double()`` has native double precision.
+    Derived buffers are omitted from state dictionaries and move with the module.
+    Dtype changes rebuild them, so ``geometry.double()`` has native precision.
     No input-dependent values or autograd graphs are retained.
     """
 
@@ -95,7 +95,8 @@ class FourierGeometry(nn.Module):
 
     @property
     def sampling_constants(self):
-        return self.upper, self.sampling_extent, self.sampling_half_extent, self.singleton_axes
+        singleton = self.singleton_axes if 1 in self.dft_shape else None
+        return self.upper, self.sampling_extent, self.sampling_half_extent, singleton
 
     @property
     def insertion_constants(self):
@@ -133,11 +134,13 @@ class FourierGeometry(nn.Module):
             self.register_buffer(name, value, persistent=False)
 
     def _apply(self, fn, recurse=True):
+        previous_dtype = self.plane.dtype
         probe = fn(self.plane.new_empty(0))
         if probe.dtype not in (torch.float32, torch.float64):
             raise TypeError("Fourier geometry requires float32 or float64")
         super()._apply(fn, recurse=recurse)
-        self._build(probe.device, probe.dtype)
+        if probe.dtype != previous_dtype:
+            self._build(probe.device, probe.dtype)
         return self
 
     def to_dft_coordinates(self, frequencies):

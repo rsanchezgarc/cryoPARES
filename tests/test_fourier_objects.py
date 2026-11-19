@@ -97,6 +97,22 @@ def test_geometry_shape_and_cutoff_are_readonly():
         geometry.fftfreq_max = 0.5
 
 
+@pytest.mark.parametrize('factory', [lambda: FourierGeometry((3, 5, 7)), lambda: FourierShift2D((5, 7))])
+def test_noop_device_move_reuses_buffers_and_apply_keeps_transformed_storage(factory):
+    operator = factory()
+    pointers = [t.data_ptr() for t in operator.buffers()]
+    operator.cpu()
+    assert pointers == [t.data_ptr() for t in operator.buffers()]
+    transformed = []
+    def clone(tensor):
+        result = tensor.clone()
+        transformed.append(result)
+        return result
+    operator._apply(clone)
+    transformed_ids = {id(t) for t in transformed}
+    assert all(id(t) in transformed_ids for t in operator.buffers())
+
+
 def rotations(batch=2, device='cpu', dtype=torch.float32):
     from scipy.spatial.transform import Rotation
     return torch.tensor(Rotation.random(batch, random_state=13).as_matrix(), device=device, dtype=dtype)

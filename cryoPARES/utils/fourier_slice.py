@@ -91,7 +91,9 @@ def _extract_precomputed(volume_rfft, matrices, plane_shape, valid_coords, valid
     upper, extent, _, singleton = sampling_constants
     inside = ((coordinates >= 0) & (coordinates <= upper)).all(dim=-1)
     normalized = 2 * coordinates / extent - 1
-    normalized = torch.where(singleton, 0., normalized).flip(-1)
+    if singleton is not None:
+        normalized = torch.where(singleton, 0., normalized)
+    normalized = normalized.flip(-1)
     # One volume and one sampling grid: rotation batches become output points,
     # avoiding an input volume batch with one entry per interpolation point.
     channels = torch.stack((volume_rfft.real, volume_rfft.imag)) if volume_rfft.is_complex() else volume_rfft[None]
@@ -99,6 +101,7 @@ def _extract_precomputed(volume_rfft, matrices, plane_shape, valid_coords, valid
         channels[None], normalized.reshape(1, 1, 1, -1, 3),
         mode="bilinear", padding_mode="border", align_corners=True,
     ).reshape(channels.shape[0], *rotated.shape[:-1])
+    del normalized, channels
     if volume_rfft.is_complex():
         values = torch.complex(samples[0], torch.where(conjugate, -samples[1], samples[1]))
     else:

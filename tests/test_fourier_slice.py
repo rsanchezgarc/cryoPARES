@@ -16,6 +16,21 @@ from cryoPARES.utils.torch_fourier_slice_compat import extract_central_slices_rf
 DEVICES = ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)]
 
 
+@pytest.fixture
+def fresh_compilation_cache():
+    """Keep shape/device specialization tests independent of later pipelines.
+
+    The compiled production kernels are shared module globals. Exercising CUDA
+    variants here can otherwise exhaust Dynamo's per-function recompile limit
+    when subsequent tests specialize the same kernels for CPU reconstruction.
+    """
+    torch._dynamo.reset()
+    try:
+        yield
+    finally:
+        torch._dynamo.reset()
+
+
 def _rotations(batch=(), dtype=torch.float32, device="cpu"):
     count = int(np.prod(batch)) if batch else 1
     values = Rotation.random(count, random_state=17).as_matrix().reshape(*batch, 3, 3)
@@ -286,7 +301,7 @@ def test_cuda_extraction_agrees_with_cpu():
 
 @pytest.mark.gpu
 @pytest.mark.parametrize("shape", [(6, 6, 6), (5, 7, 9)])
-def test_production_compiled_cuda_projection_agrees_with_eager(shape):
+def test_production_compiled_cuda_projection_agrees_with_eager(shape, fresh_compilation_cache):
     from cryoPARES.projmatching.projmatchingUtils.extract_central_slices_as_real import (
         compiled_extract_central_slices_rfft_3d_multichannel,
         extract_central_slices_rfft_3d_multichannel,
@@ -302,7 +317,7 @@ def test_production_compiled_cuda_projection_agrees_with_eager(shape):
 
 @pytest.mark.gpu
 @pytest.mark.parametrize("shape", [(6, 6, 6), (5, 7, 9)])
-def test_production_compiled_cuda_backprojection_agrees_with_eager(shape):
+def test_production_compiled_cuda_backprojection_agrees_with_eager(shape, fresh_compilation_cache):
     from cryoPARES.reconstruction.insert_central_slices_rfft_3d import (
         compiled_insert_central_slices_rfft_3d_multichannel,
         insert_central_slices_rfft_3d_multichannel,

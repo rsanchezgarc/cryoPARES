@@ -20,6 +20,7 @@ class FourierProjector(nn.Module):
     ``'channels'`` accepts a real volume with leading [real, imaginary] channels.
     Move/cast the operator explicitly to match its volume inputs. Rotations are
     XYZ by default; pass ``zyx_matrices=True`` for array-order rotations.
+    ``dtype`` is the real component dtype: use float32 for complex64 volumes.
     """
 
     def __init__(self, volume_shape, fftfreq_max=None, *, representation='complex',
@@ -29,6 +30,7 @@ class FourierProjector(nn.Module):
             raise ValueError("representation must be 'complex' or 'channels'")
         self.geometry = FourierGeometry(volume_shape, fftfreq_max, device=device, dtype=dtype)
         self.representation = representation
+        self.compiled = compiled
         if representation == 'channels':
             from cryoPARES.projmatching.projmatchingUtils.extract_central_slices_as_real import (
                 _extract_central_slices_rfft_3d_multichannel_precomputed,
@@ -54,6 +56,12 @@ class FourierProjector(nn.Module):
         if self.representation == 'channels':
             if volume.is_complex():
                 raise TypeError("channels representation requires real-valued channels")
+            if self.compiled and 1 not in geometry.dft_shape:
+                # Let Inductor fold shape-derived sampling constants, as for
+                # insertion. Degenerate axes keep the explicit safe normalizer.
+                return self._kernel(volume, geometry.volume_shape, rotations,
+                    geometry.plane_shape, geometry.valid_coords,
+                    (geometry.row_indices, geometry.column_indices), True)
             return self._kernel(volume, geometry.volume_shape, rotations,
                 geometry.plane_shape, geometry.valid_coords,
                 (geometry.row_indices, geometry.column_indices), True,

@@ -285,18 +285,18 @@ def test_operator_children_move_with_pipeline_owners():
 
 @pytest.mark.gpu
 @pytest.mark.parametrize('kind', ['project', 'backproject'])
-def test_compiled_objects_match_eager_on_cuda(kind):
+@pytest.mark.parametrize('shape', [(5, 7, 9), (1, 5, 7)])
+def test_compiled_objects_match_eager_on_cuda(kind, shape):
     torch._dynamo.reset()
     try:
-        shape = (5, 7, 9)
         matrices = rotations(2, device='cuda')
         if kind == 'project':
-            values = torch.randn(2, 5, 7, 5, device='cuda')
+            values = torch.randn(2, *shape[:2], shape[-1] // 2 + 1, device='cuda')
             eager = FourierProjector(shape, 0.35, representation='channels', device='cuda')
             compiled = FourierProjector(shape, 0.35, representation='channels', device='cuda', compiled=True)
             torch.testing.assert_close(compiled(values, matrices), eager(values, matrices), atol=2e-5, rtol=5e-5)
         else:
-            values = torch.randn(2, 3, 7, 5, device='cuda')
+            values = torch.randn(2, 3, shape[1], shape[-1] // 2 + 1, device='cuda')
             eager = FourierBackprojector(shape, 0.35, device='cuda')
             compiled = FourierBackprojector(shape, 0.35, device='cuda', compiled=True)
             for actual, expected in zip(compiled(values, matrices), eager(values, matrices)):

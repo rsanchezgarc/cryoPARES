@@ -16,6 +16,8 @@ def fftfreq_grid(
     spacing: float | tuple[float, ...] = 1,
     norm: bool = False,
     device: torch.device | None = None,
+    *,
+    dtype: torch.dtype | None = None,
 ) -> torch.Tensor:
     """Return a 2D/3D grid of frequencies in cycles per spatial unit.
 
@@ -25,7 +27,7 @@ def fftfreq_grid(
     ``spacing`` applies to every axis; a sequence specifies each axis separately.
     ``norm=True`` returns the Euclidean frequency magnitude instead of components.
 
-    Output uses PyTorch's default floating dtype and the requested/default device.
+    Output uses the requested dtype (or PyTorch's default floating dtype) and device.
     Each call owns its storage, so callers may modify the result safely.
     """
     ndim = len(image_shape)
@@ -39,7 +41,7 @@ def fftfreq_grid(
     for axis, (size, step) in enumerate(zip(image_shape, steps)):
         half_axis = rfft and axis == ndim - 1
         frequencies = (torch.fft.rfftfreq if half_axis else torch.fft.fftfreq)(
-            size, d=step, device=device
+            size, d=step, device=device, dtype=dtype
         )
         if fftshift and not half_axis:
             frequencies = torch.fft.fftshift(frequencies)
@@ -54,6 +56,8 @@ def central_slice_fftfreq_grid(
     rfft: bool,
     fftshift: bool = False,
     device: torch.device | None = None,
+    *,
+    dtype: torch.dtype | None = None,
 ) -> torch.Tensor:
     """Return the central XY Fourier plane as ``(height, frequency_width, 3)``.
 
@@ -65,7 +69,7 @@ def central_slice_fftfreq_grid(
     """
     if len(volume_shape) != 3:
         raise ValueError("volume_shape must contain depth, height and width")
-    plane = fftfreq_grid(tuple(volume_shape[-2:]), rfft=rfft, fftshift=fftshift, device=device)
+    plane = fftfreq_grid(tuple(volume_shape[-2:]), rfft=rfft, fftshift=fftshift, device=device, dtype=dtype)
     return torch.cat((torch.zeros_like(plane[..., :1]), plane), dim=-1)
 
 

@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=77.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,8 @@ name = "cryoPARES"
 description = "Cryo-EM Pose-Assignment for Related Experiments via Supervision"
 readme = "README.md"
 requires-python = ">=3.11"
-license = {text = "BSD-3-Clause"}
+license = "GPL-3.0-only"
+license-files = ["LICENSE", "THIRD-PARTY-LICENSES"]
 authors = [
   {name = "Ruben Sanchez-Garcia", email = "rsanchezgarc@faculty.ie.edu"},
 ]
@@ -16,7 +17,6 @@ keywords = ["deep learning", "cryo-em", "pose estimation", "so3-equivariance"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: BSD License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Topic :: Scientific/Engineering :: Bio-Informatics",

@@ -57,3 +57,15 @@ def test_conversion_gradients_and_no_mutation():
 def test_rejects_mismatched_dimension_count(frequencies, shape):
     with pytest.raises(ValueError, match="dimension"):
         fftfreq_to_dft_coordinates(frequencies, shape, True)
+
+
+def test_odd_rfft_roundoff_does_not_put_final_sample_outside_array():
+    frequencies = torch.tensor([[0., 0., torch.fft.rfftfreq(7)[-1]]])
+    coordinates = fftfreq_to_dft_coordinates(frequencies, (3, 5, 7), True)
+    assert coordinates[0, 2] == 3
+
+
+def test_true_outside_coordinates_are_not_clamped():
+    frequencies = torch.tensor([[-1., 1., 1.]])
+    torch.testing.assert_close(fftfreq_to_dft_coordinates(frequencies, (3, 5, 7), True),
+                               torch.tensor([[-2., 7., 7.]]))

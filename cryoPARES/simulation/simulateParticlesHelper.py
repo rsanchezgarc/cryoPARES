@@ -606,18 +606,19 @@ class CryoEMSimulator:
         # Use library function to compute volume FFT
         vol_rfft, vol_shape, _ = compute_dft_3d(vol, pad_length=0)
         self.vol_rfft = vol_rfft.to(torch.complex64)
-        self.base_image_shape = (int(vol_shape[-1]), int(vol_shape[-1]))
+        self.volume_shape = tuple(vol_shape)
+        self.base_image_shape = tuple(vol_shape[-2:])
 
     def _project_central_slice(self, R: torch.Tensor) -> torch.Tensor:
         # Use library functions with correct parameters
         projs_rfft = extract_central_slices_rfft_3d(
             self.vol_rfft,
             rotation_matrices=R,
-            image_shape=self.base_image_shape,
+            image_shape=self.volume_shape,
             fftfreq_max=None,
             zyx_matrices=False
         )
-        return _fourier_proj_to_real_2d(projs_rfft, pad_length=None)
+        return _fourier_proj_to_real_2d(projs_rfft, pad_length=None, image_shape=self.base_image_shape)
 
     def run(self,
             in_star: str,

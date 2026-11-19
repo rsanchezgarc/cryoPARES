@@ -49,6 +49,26 @@ def fftfreq_grid(
     return grid.square().sum(dim=-1).sqrt() if norm else grid
 
 
+def central_slice_fftfreq_grid(
+    volume_shape: tuple[int, int, int],
+    rfft: bool,
+    fftshift: bool = False,
+    device: torch.device | None = None,
+) -> torch.Tensor:
+    """Return the central XY Fourier plane as ``(height, frequency_width, 3)``.
+
+    Components use array order ``(kz, ky, kx)`` with ``kz=0`` throughout. The
+    real-space volume's height and width determine the plane's sampling; depth
+    does not affect it. Frequencies are in cycles/pixel. For an rFFT the final
+    axis contains nonnegative frequencies and is never shifted. Other axes,
+    dtype, device and storage ownership follow ``fftfreq_grid``.
+    """
+    if len(volume_shape) != 3:
+        raise ValueError("volume_shape must contain depth, height and width")
+    plane = fftfreq_grid(tuple(volume_shape[-2:]), rfft=rfft, fftshift=fftshift, device=device)
+    return torch.cat((torch.zeros_like(plane[..., :1]), plane), dim=-1)
+
+
 def array_to_grid_sample(
     array_coordinates: torch.Tensor, array_shape: Sequence[int]
 ) -> torch.Tensor:

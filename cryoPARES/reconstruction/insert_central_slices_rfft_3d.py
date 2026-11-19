@@ -24,7 +24,7 @@ from cryoPARES.projmatching.projmatchingUtils.extract_central_slices_as_real imp
     _fftfreq_to_dft_coordinates,
     _rfft_shape_tuple,
 )
-from cryoPARES.utils.torch_fourier_slice_compat import _central_slice_fftfreq_grid
+from cryoPARES.utils.fourier_grid import central_slice_fftfreq_grid as _central_slice_fftfreq_grid
 
 
 # ---------------------------

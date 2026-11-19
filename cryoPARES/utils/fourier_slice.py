@@ -3,7 +3,7 @@
 import torch
 import torch.nn.functional as F
 
-from cryoPARES.utils.fourier_geometry import fftfreq_to_dft_coordinates
+from cryoPARES.utils.fourier_geometry import fftfreq_to_dft_coordinates, _coordinates_from_constants
 from cryoPARES.utils.fourier_grid import central_slice_fftfreq_grid
 
 
@@ -79,3 +79,30 @@ def extract_central_slices_rfft_3d(
     else:
         values = samples[0]
     return torch.where(inside, values, torch.zeros_like(values))
+
+
+def _extract_precomputed(volume_rfft, matrices, plane_shape, valid_coords, valid_indices,
+                         coordinate_constants, sampling_constants):
+    """Tensor-only kernel. Geometry and XYZ-to-ZYX conversion belong to the caller."""
+    rotated = (matrices @ valid_coords[..., 0].T).transpose(-1, -2)
+    conjugate = rotated[..., 2] < 0
+    folded = torch.where(conjugate[..., None], -rotated, rotated)
+    coordinates = _coordinates_from_constants(folded, *coordinate_constants)
+    upper, extent, _, singleton = sampling_constants
+    inside = ((coordinates >= 0) & (coordinates <= upper)).all(dim=-1)
+    normalized = 2 * coordinates / extent - 1
+    normalized = torch.where(singleton, 0., normalized).flip(-1)
+    # One volume and one sampling grid: rotation batches become output points,
+    # avoiding an input volume batch with one entry per interpolation point.
+    channels = torch.stack((volume_rfft.real, volume_rfft.imag)) if volume_rfft.is_complex() else volume_rfft[None]
+    samples = F.grid_sample(
+        channels[None], normalized.reshape(1, 1, 1, -1, 3),
+        mode="bilinear", padding_mode="border", align_corners=True,
+    ).reshape(channels.shape[0], *rotated.shape[:-1])
+    if volume_rfft.is_complex():
+        values = torch.complex(samples[0], torch.where(conjugate, -samples[1], samples[1]))
+    else:
+        values = samples[0]
+    values = torch.where(inside, values, torch.zeros_like(values))
+    output = values.new_zeros((*matrices.shape[:-2], plane_shape[0] * plane_shape[1]))
+    return output.index_copy(-1, valid_indices, values).reshape(*matrices.shape[:-2], *plane_shape)

@@ -93,6 +93,14 @@ class FourierGeometry(nn.Module):
     def coordinate_constants(self):
         return self.sizes, self.centers, self.upper, self.tolerance
 
+    @property
+    def sampling_constants(self):
+        return self.upper, self.sampling_extent, self.sampling_half_extent, self.singleton_axes
+
+    @property
+    def insertion_constants(self):
+        return self.corner_offsets, self.sampling_sizes
+
     def _build(self, device, dtype):
         if dtype not in (torch.float32, torch.float64):
             raise TypeError("Fourier geometry requires float32 or float64")
@@ -115,6 +123,11 @@ class FourierGeometry(nn.Module):
             'upper': plane.new_tensor(self.dft_shape) - 1,
             'tolerance': 2 * torch.finfo(dtype).eps * sizes,
             'sampling_sizes': plane.new_tensor(self.dft_shape),
+            'sampling_extent': (plane.new_tensor(self.dft_shape) - 1).clamp_min(1),
+            'sampling_half_extent': (plane.new_tensor(self.dft_shape) - 1).clamp_min(1) * 0.5,
+            'singleton_axes': plane.new_tensor(self.dft_shape) == 1,
+            'corner_offsets': plane.new_tensor([[0, 0, 0], [0, 0, 1], [0, 1, 0], [0, 1, 1],
+                                                [1, 0, 0], [1, 0, 1], [1, 1, 0], [1, 1, 1]]),
         }
         for name, value in buffers.items():
             self.register_buffer(name, value, persistent=False)

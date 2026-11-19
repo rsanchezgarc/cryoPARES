@@ -104,7 +104,6 @@ tifffile==2026.5.15
 torch==2.8.0
 torch-ctf==0.5.0
 torch-fourier-shell-correlation==0.5.0
-torch-fourier-shift==0.5.0
 torch-fourier-slice==0.5.0
 torch-grid-utils==0.5.0
 torch-image-interpolation==0.5.0

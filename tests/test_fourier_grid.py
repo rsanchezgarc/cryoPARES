@@ -289,7 +289,7 @@ def test_compatibility_modules_export_local_implementations():
 
 def test_new_helpers_import_and_run_without_teamtomo_packages():
     # Fresh interpreter prevents already-imported packages from hiding a runtime
-    # dependency. The circular-mask wrapper intentionally still needs upstream.
+    # dependency, including imports through the compatibility modules.
     script = """
 import sys
 from importlib.abc import MetaPathFinder
@@ -304,9 +304,10 @@ class BlockTeamTomo(MetaPathFinder):
             raise AssertionError('Unexpected upstream import: ' + fullname)
 
 sys.meta_path.insert(0, BlockTeamTomo())
-from cryoPARES.utils.fourier_grid import fftfreq_grid
+from cryoPARES.utils.torch_grid_utils_compat import circle, fftfreq_grid
 from cryoPARES.utils.torch_image_interpolation_compat import array_to_grid_sample
 assert fftfreq_grid((5, 8), rfft=True, fftshift=True).shape == (5, 5, 2)
+assert circle(1, (5, 7), smoothing_radius=2).shape == (5, 7)
 result = array_to_grid_sample(torch.tensor([[0., 0.], [4., 7.]]), (5, 8))
 torch.testing.assert_close(result, torch.tensor([[-1., -1.], [1., 1.]]))
 """

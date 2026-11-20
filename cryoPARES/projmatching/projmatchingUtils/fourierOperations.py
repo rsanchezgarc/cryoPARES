@@ -1,4 +1,3 @@
-from functools import lru_cache
 from typing import Optional, Sequence, Union, Tuple
 
 import torch
@@ -84,7 +83,6 @@ def compute_dft_3d(
     return dft, vol_shape, pad_length
 
 
-@lru_cache(maxsize=4)
 def _mask_for_dft_2d(img_shape, max_freq_pixels, min_freq_pixels, rfft, fftshifted, device):
     """Build a 2D Fourier band-pass mask in fftshifted rfft layout.
 
@@ -214,11 +212,11 @@ def _real_to_fourier_2d(imgs, view_complex_as_two_float32=False):
         imgs = torch.view_as_real(imgs)
     return imgs
 
-def _fourier_proj_to_real_2d(projections, pad_length):
+def _fourier_proj_to_real_2d(projections, pad_length, image_shape=None):
     if not projections.is_complex():
         projections = torch.view_as_complex(projections.contiguous())
     projections = torch.fft.ifftshift(projections, dim=(-2,))  # ifftshift of rfft
-    projections = torch.fft.irfftn(projections, dim=(-2, -1))
+    projections = torch.fft.irfftn(projections, s=image_shape, dim=(-2, -1))
     projections = torch.fft.ifftshift(projections, dim=(-2, -1))  # recenter real space
 
     if pad_length is not None:

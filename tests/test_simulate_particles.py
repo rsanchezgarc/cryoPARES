@@ -16,9 +16,23 @@ import unittest
 import mrcfile
 import numpy as np
 import pandas as pd
+import pytest
 import starfile
 
 from cryoPARES.simulation.simulateParticlesHelper import run_simulation
+
+
+@pytest.mark.parametrize("box", [7, 8, 15])
+def test_simulator_projection_preserves_odd_and_even_dimensions(tmp_path, box):
+    import torch
+    from cryoPARES.simulation.simulateParticlesHelper import CryoEMSimulator
+
+    volume_path = str(tmp_path / "volume.mrc")
+    _make_volume(volume_path, box=box)
+    simulator = CryoEMSimulator(volume_path)
+    projection = simulator._project_central_slice(torch.eye(3)[None])
+    assert projection.shape == (1, box, box)
+    assert torch.isfinite(projection).all()
 
 
 def _make_volume(path: str, box: int = 32, px_A: float = 1.0) -> None:

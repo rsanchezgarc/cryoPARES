@@ -1,6 +1,5 @@
 import os
 import sys
-from functools import lru_cache
 from typing import List, Optional, Tuple, Union, Literal
 import numpy as np
 import torch
@@ -15,7 +14,7 @@ from cryoPARES.constants import (
 )
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
-from cryoPARES.utils.torch_fourier_shift_compat import fourier_shift_dft_2d
+from cryoPARES.utils.fourier_operators import FourierBackprojector, FourierShift2D
 
 from autoCLI_config import inject_defaults_from_config, CONFIG_PARAM
 from cryoPARES.configs.mainConfig import main_config
@@ -68,14 +67,9 @@ class Reconstructor(nn.Module):
 
         self._initialized = False
 
-        from cryoPARES.reconstruction.insert_central_slices_rfft_3d import \
-            insert_central_slices_rfft_3d_multichannel, compiled_insert_central_slices_rfft_3d_multichannel
-
-        if not main_config.reconstruct.disable_compile_insert_central_slices_rfft_3d_multichannel:
-            print("Compiling insert_central_slices_rfft_3d_multichannel")
-            self.insert_central_slices_rfft_3d_multichannel = compiled_insert_central_slices_rfft_3d_multichannel
-        else:
-            self.insert_central_slices_rfft_3d_multichannel = insert_central_slices_rfft_3d_multichannel
+        self._compile_backprojection = not main_config.reconstruct.disable_compile_insert_central_slices_rfft_3d_multichannel
+        self.backprojector = None
+        self.fourier_shift = None
 
         # TODO(RING-CALIBRATION):
         # Add ring-wise EMA scaling to stabilize on-the-fly recon by keeping the
@@ -130,6 +124,12 @@ class Reconstructor(nn.Module):
                 device=self.get_device(),
             )
             self.ctfsq = torch.zeros_like(self.weights, dtype=torch.float32, device=self.get_device())
+            self.backprojector = FourierBackprojector(
+                (box_size,) * 3, 0.5, compiled=self._compile_backprojection, device=self.get_device(),
+                dtype=self.numerator.dtype,
+            )
+            self.fourier_shift = FourierShift2D(self.particle_shape, rfft=True, fftshifted=True,
+                                               device=self.get_device(), dtype=self.numerator.dtype)
 
         self._initialized = True
 
@@ -328,13 +328,7 @@ class Reconstructor(nn.Module):
                 confidence = confidence.contiguous()
 
         # Apply translational shifts in Fourier domain
-        imgs = fourier_shift_dft_2d(
-            dft=imgs,
-            image_shape=self.particle_shape,
-            shifts=hwShiftAngs / self.sampling_rate,
-            rfft=True,
-            fftshifted=True,
-        )
+        imgs = self.fourier_shift(imgs, hwShiftAngs / self.sampling_rate)
 
         if self.correct_ctf:
             ctf = ctf.to(imgs.device)
@@ -354,13 +348,7 @@ class Reconstructor(nn.Module):
             else:
                 stacked = torch.stack([imgs.real, imgs.imag, ctf**2], dim=1)
 
-            dft_ctf, weights = self.insert_central_slices_rfft_3d_multichannel(
-                image_rfft=stacked,
-                volume_shape=(self.box_size,) * 3,
-                rotation_matrices=rotMats,
-                fftfreq_max=0.5,  # Nyquist sphere cutoff (matches RELION's r_max check)
-                zyx_matrices=zyx_matrices,
-            )
+            dft_ctf, weights = self.backprojector(stacked, rotMats, zyx_matrices=zyx_matrices)
 
             if confidence is not None:
                 # Channels: [0]=real, [1]=imag, [2]=ctf^2, [3]=ones_weighted
@@ -385,13 +373,7 @@ class Reconstructor(nn.Module):
             else:
                 stacked = torch.stack([imgs.real, imgs.imag], dim=1)
 
-            dft_ri, weights = self.insert_central_slices_rfft_3d_multichannel(
-                image_rfft=stacked,
-                volume_shape=(self.box_size,) * 3,
-                rotation_matrices=rotMats,
-                fftfreq_max=0.5,  # Nyquist sphere cutoff (matches RELION's r_max check)
-                zyx_matrices=zyx_matrices,
-            )
+            dft_ri, weights = self.backprojector(stacked, rotMats, zyx_matrices=zyx_matrices)
 
             if confidence is not None:
                 # Channels: [0]=real, [1]=imag, [2]=ones_weighted
@@ -405,7 +387,6 @@ class Reconstructor(nn.Module):
                 self.weights += weights
 
     @staticmethod
-    @lru_cache(maxsize=1)
     def get_sincsq(shape, device, eps=1e-3):
         """
         Separable de-apodization for trilinear gridding:
@@ -428,7 +409,6 @@ class Reconstructor(nn.Module):
         return S.clamp_min(eps)
 
     @staticmethod
-    @lru_cache(maxsize=1)
     def get_soft_mask(shape, device, radius_pix=-1.0, edge_width=3):
         """
         Create a soft spherical mask with cosine falloff, matching RELION behavior.

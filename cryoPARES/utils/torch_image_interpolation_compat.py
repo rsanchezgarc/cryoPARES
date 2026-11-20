@@ -1,13 +1,11 @@
 """
-Compatibility wrappers for torch-image-interpolation API changes.
+Stable import for the locally implemented sampling-coordinate conversion.
 
-All imports from torch_image_interpolation are centralised here.
-
-Current signatures (v0.0.9):
+Preserved signature:
   array_to_grid_sample(array_coordinates, array_shape)
 """
 
-from torch_image_interpolation.grid_sample_utils import array_to_grid_sample  # noqa: F401 – re-exported
+from cryoPARES.utils.fourier_grid import array_to_grid_sample  # noqa: F401 – re-exported
 
 __all__ = [
     "array_to_grid_sample",

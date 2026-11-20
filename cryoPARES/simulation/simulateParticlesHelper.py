@@ -27,8 +27,7 @@ from cryoPARES.geometry.convert_angles import euler_angles_to_matrix
 from cryoPARES.projmatching.projmatchingUtils.fourierOperations import (
     compute_dft_3d, _fourier_proj_to_real_2d,
 )
-from cryoPARES.utils.torch_fourier_slice_compat import extract_central_slices_rfft_3d
-from cryoPARES.utils.torch_fourier_shift_compat import fourier_shift_image_2d
+from cryoPARES.utils.fourier_operators import FourierProjector, FourierShift2D
 from cryoPARES.datamanager.ctf.rfft_ctf import corrupt_with_ctf, compute_ctf_rfft
 from cryoPARES.constants import RELION_EULER_CONVENTION
 from starstack.particlesStar import ParticlesStarSet
@@ -606,18 +605,15 @@ class CryoEMSimulator:
         # Use library function to compute volume FFT
         vol_rfft, vol_shape, _ = compute_dft_3d(vol, pad_length=0)
         self.vol_rfft = vol_rfft.to(torch.complex64)
-        self.base_image_shape = (int(vol_shape[-1]), int(vol_shape[-1]))
+        self.volume_shape = tuple(vol_shape)
+        self.base_image_shape = tuple(vol_shape[-2:])
+        self.projector = FourierProjector(self.volume_shape, device=self.device, dtype=self.vol_rfft.real.dtype)
+        self.fourier_shift = FourierShift2D(self.base_image_shape, device=self.device, dtype=self.vol_rfft.real.dtype)
 
     def _project_central_slice(self, R: torch.Tensor) -> torch.Tensor:
         # Use library functions with correct parameters
-        projs_rfft = extract_central_slices_rfft_3d(
-            self.vol_rfft,
-            rotation_matrices=R,
-            image_shape=self.base_image_shape,
-            fftfreq_max=None,
-            zyx_matrices=False
-        )
-        return _fourier_proj_to_real_2d(projs_rfft, pad_length=None)
+        projs_rfft = self.projector(self.vol_rfft, R)
+        return _fourier_proj_to_real_2d(projs_rfft, pad_length=None, image_shape=self.base_image_shape)
 
     def run(self,
             in_star: str,
@@ -743,7 +739,7 @@ class CryoEMSimulator:
                 # Apply shifts (vectorized using batch-capable fourier_shift_image_2d)
                 # Negate shifts for RELION convention: shifts are corrections
                 shifts_vec = -shifts_gt_px  # (B, 2): [-dy, -dx], matching fourier_shift_image_2d's (h, w) order
-                out_imgs = fourier_shift_image_2d(out_imgs, shifts_vec)
+                out_imgs = self.fourier_shift.shift_image(out_imgs, shifts_vec)
 
             else:
                 # noise_additive mode - partially vectorized (subtraction_T0 requires per-particle loop)
@@ -762,7 +758,7 @@ class CryoEMSimulator:
                             "Use central_slice mode instead, or implement dual CTF computation in dataset."
                         )
 
-                    proj_gt = fourier_shift_image_2d(
+                    proj_gt = self.fourier_shift.shift_image(
                         projs_gt[i],
                         -shifts_gt_px[i]  # (dy, dx) == (h, w) order
                     )
@@ -774,7 +770,7 @@ class CryoEMSimulator:
                     )
 
                     total_shift = shifts_gt_px[i] + shift_jit_px[i]
-                    proj_jit = fourier_shift_image_2d(
+                    proj_jit = self.fourier_shift.shift_image(
                         projs_jit[i],
                         -total_shift  # (dy, dx) == (h, w) order
                     )

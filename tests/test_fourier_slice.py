@@ -301,17 +301,51 @@ def test_cuda_extraction_agrees_with_cpu():
 
 @pytest.mark.gpu
 @pytest.mark.parametrize("shape", [(6, 6, 6), (5, 7, 9)])
-def test_production_compiled_cuda_projection_agrees_with_eager(shape, fresh_compilation_cache):
+def test_production_compiled_cuda_projection_agrees_with_eager(shape, fresh_compilation_cache, monkeypatch):
+    from cryoPARES.configs.mainConfig import main_config
     from cryoPARES.projmatching.projmatchingUtils.extract_central_slices_as_real import (
         compiled_extract_central_slices_rfft_3d_multichannel,
         extract_central_slices_rfft_3d_multichannel,
     )
 
+    monkeypatch.setattr(main_config.projmatching, 'disable_compile_projectVol', False)
     volume = torch.randn(2, *shape[:2], shape[-1] // 2 + 1, device="cuda")
     for batch in [1, 3]:
         rotations = _rotations((batch,), device="cuda")
         expected = extract_central_slices_rfft_3d_multichannel(volume, shape, rotations, fftfreq_max=0.35)
         actual = compiled_extract_central_slices_rfft_3d_multichannel(volume, shape, rotations, fftfreq_max=0.35)
+        torch.testing.assert_close(actual, expected, atol=2e-5, rtol=5e-5)
+
+
+@pytest.mark.parametrize('shape', [(6, 6, 6), (5, 7, 9)])
+@pytest.mark.parametrize('dtype', [torch.float32, torch.float64])
+@pytest.mark.parametrize('cutoff', [None, 0.35])
+@pytest.mark.parametrize('zyx', [False, True])
+def test_projection_wrapper_respects_runtime_compile_config(shape, dtype, cutoff, zyx, monkeypatch):
+    import importlib
+    module = importlib.import_module(
+        'cryoPARES.projmatching.projmatchingUtils.extract_central_slices_as_real')
+    from cryoPARES.configs.mainConfig import main_config
+
+    calls = []
+
+    def compiled_kernel(*args, **kwargs):
+        calls.append(True)
+        return module._extract_central_slices_rfft_3d_multichannel_precomputed(*args, **kwargs)
+
+    # Exercise real operator dispatch without invoking the compiler in CPU tests.
+    monkeypatch.setattr(module, '_compiled_extract_central_slices_rfft_3d_multichannel', compiled_kernel)
+    volume = torch.randn(2, *shape[:2], shape[-1] // 2 + 1, dtype=dtype)
+    rotations = _rotations((2,), dtype=dtype)
+    expected_complex = extract(torch.complex(volume[0], volume[1]), rotations,
+                               image_shape=shape, fftfreq_max=cutoff, zyx_matrices=zyx)
+    expected = torch.stack((expected_complex.real, expected_complex.imag), dim=-3)
+    for disabled in [True, False, True, False]:
+        monkeypatch.setattr(main_config.projmatching, 'disable_compile_projectVol', disabled)
+        previous_calls = len(calls)
+        actual = module.compiled_extract_central_slices_rfft_3d_multichannel(
+            volume, shape, rotations, fftfreq_max=cutoff, zyx_matrices=zyx)
+        assert len(calls) == previous_calls + int(not disabled)
         torch.testing.assert_close(actual, expected, atol=2e-5, rtol=5e-5)
 
 

@@ -55,9 +55,14 @@ def compiled_extract_central_slices_rfft_3d_multichannel(
     fftfreq_max: float | None = None,
     zyx_matrices: bool = False,
 ) -> torch.Tensor:  # (..., c, h, w)
-    """Extract central slice from an fftshifted rfft."""
+    """Extract slices using the configured projection backend.
+
+    The historical name is retained for compatibility. Compilation follows
+    ``projmatching.disable_compile_projectVol`` at call time.
+    """
     from cryoPARES.utils.fourier_operators import FourierProjector
-    projector = FourierProjector(image_shape, fftfreq_max, representation='channels', compiled=True,
+    projector = FourierProjector(image_shape, fftfreq_max, representation='channels',
+                                 compiled=not main_config.projmatching.disable_compile_projectVol,
                                  device=volume_rfft.device, dtype=volume_rfft.dtype)
     return projector(volume_rfft, rotation_matrices, zyx_matrices=zyx_matrices)
 
@@ -204,14 +209,3 @@ def _dft_center(
     if rfft is True:
         fft_center[-1] = 0
     return fft_center.long()
-
-
-if __name__ == "__main__":
-    image_shape = (128,128,128)
-    shape = _rfft_shape_tuple(image_shape)
-    volume_rfft = torch.rand((2,) + shape)
-    rotation_matrices = torch.eye(3).unsqueeze(0)
-    extract_central_slices_rfft_3d_multichannel(volume_rfft, image_shape=image_shape,
-                                                rotation_matrices=rotation_matrices, fftfreq_max=None,
-                                                zyx_matrices=False)
-    print("DONE!!")

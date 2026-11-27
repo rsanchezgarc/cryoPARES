@@ -332,6 +332,11 @@ class ProjectionMatcher(nn.Module):
 
     # ----------------------- Fourier-specific core -----------------------
 
+    @staticmethod
+    def _require_even_box(shape):
+        if any(size % 2 for size in shape):
+            raise ValueError(f"Projection matching requires even box sizes; received {tuple(shape)}")
+
     def _store_reference_vol(
             self, reference_vol: MAP_AS_ARRAY_OR_FNAME_TYPE, pixel_size: float | None = None
     ):
@@ -340,6 +345,8 @@ class ProjectionMatcher(nn.Module):
         set up correlation choice.
         """
 
+        if not isinstance(reference_vol, FNAME_TYPE):
+            self._require_even_box(reference_vol.shape)
         if self.max_resolution_A is not None:
             reference_vol , pixel_size = low_pass_filter_fname(reference_vol, resolution=self.max_resolution_A,
                                                                out_fname=None)[:2]
@@ -348,6 +355,7 @@ class ProjectionMatcher(nn.Module):
 
         self.ori_vol_shape = reference_vol.shape
         self.ori_image_shape = self.ori_vol_shape[-2:]
+        self._require_even_box(self.ori_vol_shape)
         self.vol_voxel_size = pixel_size
         reference_vol = torch.as_tensor(
             reference_vol.numpy(),
@@ -371,7 +379,6 @@ class ProjectionMatcher(nn.Module):
         self.image_shape = vol_shape[-2:]
         assert len(self.vol_shape) == 3
         assert len(set(self.vol_shape)) == 1, "Only cubic volumes are allowed"
-        assert self.image_shape[-2] % 2 == 0, "Only even boxsizes are allowed"
         self.half_particle_size = 0.5 * self.image_shape[-2]
 
         # Prepare mask

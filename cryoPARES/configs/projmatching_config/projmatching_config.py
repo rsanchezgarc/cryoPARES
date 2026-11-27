@@ -19,7 +19,7 @@ class Projmatching_config:
         'disable_compile_projectVol': 'Disable torch.compile optimization for volume projection',
         'disable_inductor_shape_padding': 'Disable the inductor shape-padding (pad_mm) pass that OOMs on large rotation grids with torch>=2.6',
         'compile_projectVol_mode': 'Compilation mode for volume projection: "default" or "max-autotune" (does not work with dynamic batches)',
-        'disable_compile_correlate_dft_2d': 'Disable torch.compile for 2D correlation (currently required as inductor does not support complex numbers)',
+        'disable_compile_correlate_dft_2d': 'Disable torch.compile for fused cross-spectrum operations around the 2D inverse FFT',
         'compile_correlate_dft_2d_mode': 'Compilation mode for 2D correlation if enabled',
         'disable_compile_analyze_cc': 'Disable torch.compile optimization for cross-correlation analysis',
         'compile_analyze_cc_mode': 'Compilation mode for CC analysis: "default" or "max-autotune" (does not work with dynamic batches)',
@@ -74,7 +74,7 @@ class Projmatching_config:
     compile_projectVol_mode: Optional[str] = "default" #"max-autotune" does not work with dynamic size batches (zscore)
     disable_inductor_shape_padding: bool = True  # disables inductor pad_mm/shape-padding pass that OOMs during compilation with torch>=2.6 (safe to disable, no accuracy impact)
 
-    disable_compile_correlate_dft_2d: bool = True #at the moment, inductor does not support complex numbers
+    disable_compile_correlate_dft_2d: bool = True  # opt-in fusion; the inverse FFT remains a cuFFT call
     compile_correlate_dft_2d_mode: Optional[str] = "default"
 
     disable_compile_analyze_cc: bool = False

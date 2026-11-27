@@ -32,7 +32,7 @@ from cryoPARES.projmatching.projmatchingUtils.myProgressBar import myTqdm as tqd
 
 from cryoPARES.projmatching.projmatchingUtils.filterToResolution import low_pass_filter_fname
 from cryoPARES.projmatching.projmatchingUtils.fourierOperations import (
-    correlate_dft_2d, build_ccorr_sign_grid, compute_dft_3d, _real_to_fourier_2d,
+    correlate_dft_2d, _correlate_dft_2d_real, build_ccorr_sign_grid, compute_dft_3d, _real_to_fourier_2d,
     _mask_for_dft_2d,
 )
 
@@ -161,7 +161,7 @@ class ProjectionMatcher(nn.Module):
             self.correlate_dft_2d = correlate_dft_2d
         else:
             print("Compiling correlate_dft_2d")
-            self.correlate_dft_2d = torch.compile(correlate_dft_2d, fullgraph=True,
+            self.correlate_dft_2d = torch.compile(_correlate_dft_2d_real, fullgraph=True,
                                                   mode=main_config.projmatching.compile_correlate_dft_2d_mode
                                                   )
     # ----------------------- Basic props/helpers -----------------------

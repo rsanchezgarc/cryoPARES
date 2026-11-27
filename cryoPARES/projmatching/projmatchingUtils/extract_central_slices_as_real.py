@@ -84,7 +84,7 @@ def _extract_central_slices_rfft_3d_multichannel_precomputed(
     rotation_matrices = rotation_matrices.to(volume_rfft.dtype)
     channels = volume_rfft.shape[0]
     stack_shape = tuple(rotation_matrices.shape[:-2])
-    output_shape = (*stack_shape, channels, *rfft_shape)
+    output_shape = (*stack_shape, *rfft_shape, channels)
 
     if not zyx_matrices:
         rotation_matrices = torch.flip(rotation_matrices, dims=(-2, -1))
@@ -107,17 +107,17 @@ def _extract_central_slices_rfft_3d_multichannel_precomputed(
     imag_part = samples[..., 1]
     imag_conjugated = torch.where(conjugate_mask, -imag_part, imag_part)
     samples = torch.stack([real_part, imag_conjugated], dim=-1)
-    samples = einops.rearrange(samples, "... hw c -> ... c hw")
-
-
     # zeros, not empty: positions outside the fftfreq_max band are never written below, and
     # band_mask does NOT cover all of them — uninitialised memory would leak into the correlation.
     projection_image_dfts = torch.zeros(
         output_shape, device=volume_rfft.device, dtype=volume_rfft.dtype
     )
-    projection_image_dfts[..., freq_mask_indices[0], freq_mask_indices[1]] = samples
+    projection_image_dfts[..., freq_mask_indices[0], freq_mask_indices[1], :] = samples
 
-    return projection_image_dfts
+    # Keep real/imaginary values adjacent in storage. Returning a channel-first
+    # view preserves the public shape, while projection matching can move the
+    # channel axis back and view the data as complex without copying every slice.
+    return projection_image_dfts.movedim(-1, -3)
 
 _compiled_extract_central_slices_rfft_3d_multichannel = torch.compile(
     _extract_central_slices_rfft_3d_multichannel_precomputed, dynamic=True,

@@ -137,6 +137,27 @@ def test_projector_matches_independent_functional_path(shape, cutoff, representa
                                rtol=3e-5 if dtype == torch.float32 else 1e-12)
 
 
+@pytest.mark.parametrize('shape', [(4, 6, 8), (3, 5, 7)])
+@pytest.mark.parametrize('batch_shape', [(), (2,), (2, 3)])
+@pytest.mark.parametrize('dtype', [torch.float32, torch.float64])
+@pytest.mark.parametrize('cutoff', [None, -1., 0.35])
+def test_channel_projector_can_be_viewed_as_complex_without_copy(shape, batch_shape, dtype, cutoff):
+    operator = FourierProjector(shape, cutoff, representation='channels', dtype=dtype)
+    volume = torch.randn(2, *shape[:2], shape[-1] // 2 + 1, dtype=dtype)
+    count = 1
+    for size in batch_shape:
+        count *= size
+    matrices = rotations(count, dtype=dtype).reshape(*batch_shape, 3, 3)
+    projected = operator(volume, matrices)
+    interleaved = projected.movedim(-3, -1).contiguous()
+    assert interleaved.data_ptr() == projected.data_ptr()
+    complex_view = torch.view_as_complex(interleaved)
+    assert complex_view.data_ptr() == projected.data_ptr()
+    expected = extract_central_slices_rfft_3d(torch.complex(volume[0], volume[1]), matrices,
+                                            image_shape=shape, fftfreq_max=cutoff)
+    torch.testing.assert_close(complex_view, expected)
+
+
 @pytest.mark.parametrize('device', DEVICES)
 @pytest.mark.parametrize('dtype', [torch.float32, torch.float64])
 @pytest.mark.parametrize('channels', [2, 3, 4])
@@ -294,7 +315,11 @@ def test_compiled_objects_match_eager_on_cuda(kind, shape):
             values = torch.randn(2, *shape[:2], shape[-1] // 2 + 1, device='cuda')
             eager = FourierProjector(shape, 0.35, representation='channels', device='cuda')
             compiled = FourierProjector(shape, 0.35, representation='channels', device='cuda', compiled=True)
-            torch.testing.assert_close(compiled(values, matrices), eager(values, matrices), atol=2e-5, rtol=5e-5)
+            actual = compiled(values, matrices)
+            torch.testing.assert_close(actual, eager(values, matrices), atol=2e-5, rtol=5e-5)
+            interleaved = actual.movedim(-3, -1).contiguous()
+            assert interleaved.data_ptr() == actual.data_ptr()
+            assert torch.view_as_complex(interleaved).data_ptr() == actual.data_ptr()
         else:
             values = torch.randn(2, 3, shape[1], shape[-1] // 2 + 1, device='cuda')
             eager = FourierBackprojector(shape, 0.35, device='cuda')
